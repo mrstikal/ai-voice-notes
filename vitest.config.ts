@@ -10,6 +10,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    fileParallelism: false,
     include: ["tests/**/*.test.{ts,tsx}"],
     clearMocks: true,
   },

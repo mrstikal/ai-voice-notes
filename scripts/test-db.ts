@@ -13,15 +13,19 @@ async function main(): Promise<void> {
   console.log("Testovací databáze je migrovaná.");
 
   const vitestBinary = join(process.cwd(), "node_modules", ".bin", "vitest");
-  const child = spawn(vitestBinary, ["run", "tests/db"], {
-    env: {
-      ...process.env,
-      NODE_ENV: "test",
-      DATABASE_URL: targets.devUrl,
-      TEST_DATABASE_URL: targets.testUrl,
+  const child = spawn(
+    vitestBinary,
+    ["run", "tests/db", "--no-file-parallelism"],
+    {
+      env: {
+        ...process.env,
+        NODE_ENV: "test",
+        DATABASE_URL: targets.devUrl,
+        TEST_DATABASE_URL: targets.testUrl,
+      },
+      stdio: "inherit",
     },
-    stdio: "inherit",
-  });
+  );
 
   child.on("error", (error) => {
     console.error(`Nepodařilo se spustit testy databáze: ${error.message}`);

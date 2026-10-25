@@ -3,11 +3,12 @@
 Local, single-user Czech voice-notes proof of concept. The UI, voice commands,
 and user-facing errors are Czech; code and documentation are English.
 
-This repository currently implements **P01-P03**: the workspace, database
-container, and Czech shell; the Markdown codec and exact text limits; and the
-Drizzle schema, migrations, and isolated database tests. Typed-note CRUD,
-exports, dictation, and AI features arrive in later phases. No AI key or paid
-provider request is needed to run the implemented phases.
+This repository currently implements **P01-P05**: the workspace, database
+container, and Czech shell; the Markdown codec and exact text limits; the
+Drizzle schema, migrations, and isolated database tests; the local HTTP guard;
+and the versioned notes CRUD API. Typed-note UI, exports, dictation, and AI
+features arrive in later phases. No AI key or paid provider request is needed to
+run the implemented phases.
 
 ## Prerequisites
 
@@ -107,8 +108,9 @@ pnpm db:migrate:test   # apply committed migrations to TEST_DATABASE_URL
 pnpm test:db           # migrate the isolated test DB, then run tests/db
 ```
 
-`pnpm test` runs unit tests and skips the isolated database suite unless the
-test harness supplies both URLs. `pnpm db:migrate` applies committed migrations
+`pnpm test` runs unit and API tests; when both database URLs are present, the
+isolated database suite also runs. Test files run serially so the two DB suites
+cannot truncate each other. `pnpm db:migrate` applies committed migrations
 to the development database; run it only after explicit authorization and, if
 the development database contains data, after taking a backup. Migrations do not
 seed data, and test commands never migrate the development database.
@@ -122,7 +124,7 @@ seed data, and test commands never migrate the development database.
 | `pnpm start` | Start the production build on the validated loopback origin |
 | `pnpm lint` | ESLint with Next.js core-web-vitals and TypeScript rules |
 | `pnpm typecheck` | Strict TypeScript check without emitting files |
-| `pnpm test` | Vitest unit tests; isolated DB tests are skipped without the test harness |
+| `pnpm test` | Vitest unit/API tests; the DB suite also runs when both URLs are present |
 | `pnpm test:db` | Migrate the isolated `_test` database and run `tests/db` |
 | `pnpm db:migrate:test` | Apply committed migrations to the guarded test database |
 | `pnpm db:migrate` | Apply committed migrations to the development database (explicit authorization required) |
@@ -145,6 +147,24 @@ Markdown markers, list bullets/numbers, task checkbox state, and nesting
 indentation are omitted; the parsed AST retains them for the editor and exports.
 `NOTE_MAX_CHARACTERS` may lower the configured content limit but cannot exceed
 20,000.
+
+## Notes API
+
+The versioned CRUD API uses the P04 Host/Origin and bounded-body guard:
+
+| Route | Behavior |
+|---|---|
+| `GET /api/notes?page=N` | Ten active notes per page, ordered by creation time then ID; deleted notes excluded |
+| `POST /api/notes` | Create from `{title, contentMd}`; returns 201 |
+| `GET /api/notes/:id` | Read one active note; deleted or missing notes return 404 |
+| `PATCH /api/notes/:id` | Update `{title, contentMd, expectedVersion}`; optional `draft: true` skips the named revision; stale versions return 409 with `latestVersion` |
+| `DELETE /api/notes/:id` | Soft-delete `{expectedVersion}`; no hard-delete route exists |
+| `POST /api/notes/:id/restore` | Restore from Trash with `{expectedVersion}` |
+
+Server code derives `content_plain` and grapheme counts, creates initial and
+manual revision snapshots, and never accepts client-supplied derived fields,
+seed keys, timestamps, or revision reasons. Mutation bodies use the 1 MiB note
+ceiling.
 
 ## HTTP boundary
 

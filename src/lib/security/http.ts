@@ -13,6 +13,7 @@ export interface ApiErrorPayload {
   readonly error: {
     readonly code: string;
     readonly message: string;
+    readonly [key: string]: unknown;
   };
 }
 
@@ -90,11 +91,12 @@ export function jsonError(
   code: string,
   message: string,
   headers?: HeadersInit,
+  details?: Record<string, unknown>,
 ): Response {
   return jsonResponse(
     status,
     {
-      error: { code, message },
+      error: { ...details, code, message },
     } satisfies ApiErrorPayload,
     headers,
   );
@@ -376,7 +378,7 @@ export function createRateLimiter(options: RateLimitOptions): RateLimiter {
   };
 }
 
-export function createGuardedJsonRoute<TData, TRouteContext = undefined>(
+export function createGuardedJsonRoute<TData, TRouteContext = unknown>(
   options: GuardedJsonRouteOptions<TData, TRouteContext>,
 ): (request: Request, routeContext?: TRouteContext) => Promise<Response> {
   if (!Number.isSafeInteger(options.maxBytes) || options.maxBytes < 1) {
@@ -464,7 +466,7 @@ export function createGuardedJsonRoute<TData, TRouteContext = undefined>(
   };
 }
 
-export function createGuardedReadHandler<TRouteContext = undefined>(
+export function createGuardedReadHandler<TRouteContext = unknown>(
   options: GuardedReadRouteOptions<TRouteContext>,
 ): (request: Request, routeContext?: TRouteContext) => Promise<Response> {
   return async (request, routeContext) => {
