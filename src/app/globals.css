@@ -1,0 +1,33 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+body {
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    "Noto Sans",
+    sans-serif;
+}
+
+::selection {
+  background-color: #a7f3d0;
+  color: #052e16;
+}
