@@ -3,9 +3,11 @@
 Local, single-user Czech voice-notes proof of concept. The UI, voice commands,
 and user-facing errors are Czech; code and documentation are English.
 
-This repository currently implements **P01 - Workspace, database container, and
-Czech shell**. Typed-note CRUD, exports, dictation, and AI features arrive in
-later phases. No AI key or paid provider request is needed to run this phase.
+This repository currently implements **P01-P03**: the workspace, database
+container, and Czech shell; the Markdown codec and exact text limits; and the
+Drizzle schema, migrations, and isolated database tests. Typed-note CRUD,
+exports, dictation, and AI features arrive in later phases. No AI key or paid
+provider request is needed to run the implemented phases.
 
 ## Prerequisites
 
@@ -81,8 +83,35 @@ and the `test` Compose profile:
 docker compose --profile test up -d db-test
 ```
 
-Migrations and seeding are intentionally not implemented in P01; there are no
-placeholder `db:migrate` or `db:seed` scripts.
+### Migrations and test database
+
+Committed SQL migrations live in `drizzle/`; `drizzle/0000_initial.sql` creates
+the `vector`, `unaccent`, and `pg_trgm` extensions before the vector column and
+then creates `notes`, `note_revisions`, `note_tags`, `note_chunks`, and
+`ai_usage` with their checks, cascades, and indexes.
+
+Create the gitignored `.env.test.local` with both targets for manual test CLI
+use:
+
+```bash
+DATABASE_URL=postgresql://ai_voice_notes:ai_voice_notes@127.0.0.1:5432/ai_voice_notes
+TEST_DATABASE_URL=postgresql://ai_voice_notes:ai_voice_notes@127.0.0.1:5433/ai_voice_notes_test
+```
+
+Adjust the ports when using the local host-port override. The test-database
+guard requires both URLs, distinct targets, a database name ending in `_test`,
+and a loopback test host before any destructive SQL.
+
+```bash
+pnpm db:migrate:test   # apply committed migrations to TEST_DATABASE_URL
+pnpm test:db           # migrate the isolated test DB, then run tests/db
+```
+
+`pnpm test` runs unit tests and skips the isolated database suite unless the
+test harness supplies both URLs. `pnpm db:migrate` applies committed migrations
+to the development database; run it only after explicit authorization and, if
+the development database contains data, after taking a backup. Migrations do not
+seed data, and test commands never migrate the development database.
 
 ## Scripts
 
@@ -93,7 +122,10 @@ placeholder `db:migrate` or `db:seed` scripts.
 | `pnpm start` | Start the production build on the validated loopback origin |
 | `pnpm lint` | ESLint with Next.js core-web-vitals and TypeScript rules |
 | `pnpm typecheck` | Strict TypeScript check without emitting files |
-| `pnpm test` | Vitest unit tests |
+| `pnpm test` | Vitest unit tests; isolated DB tests are skipped without the test harness |
+| `pnpm test:db` | Migrate the isolated `_test` database and run `tests/db` |
+| `pnpm db:migrate:test` | Apply committed migrations to the guarded test database |
+| `pnpm db:migrate` | Apply committed migrations to the development database (explicit authorization required) |
 
 ## Markdown subset
 

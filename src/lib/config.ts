@@ -1,4 +1,4 @@
-import { CONTENT_MAX_GRAPHEMES } from "./notes/limits";
+import { CONTENT_MAX_GRAPHEMES } from "./notes/limits.ts";
 
 export const MIN_SUPPORTED_NODE_VERSION = "22.19.0";
 export const DEFAULT_APP_ORIGIN = "http://127.0.0.1:3000";

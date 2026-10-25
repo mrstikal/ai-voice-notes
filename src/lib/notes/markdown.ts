@@ -12,7 +12,7 @@ import remarkParse from "remark-parse";
 import { unified } from "unified";
 import { SKIP, visit } from "unist-util-visit";
 
-import { countGraphemes } from "./limits";
+import { countGraphemes } from "./limits.ts";
 
 export const SAFE_LINK_PROTOCOLS = ["http:", "https:", "mailto:"] as const;
 
