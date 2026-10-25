@@ -3,12 +3,12 @@
 Local, single-user Czech voice-notes proof of concept. The UI, voice commands,
 and user-facing errors are Czech; code and documentation are English.
 
-This repository currently implements **P01-P05**: the workspace, database
+This repository currently implements **P01-P06**: the workspace, database
 container, and Czech shell; the Markdown codec and exact text limits; the
 Drizzle schema, migrations, and isolated database tests; the local HTTP guard;
-and the versioned notes CRUD API. Typed-note UI, exports, dictation, and AI
-features arrive in later phases. No AI key or paid provider request is needed to
-run the implemented phases.
+the versioned notes CRUD API; and the paginated notes and Trash UI. Exports,
+dictation, and AI features arrive in later phases. No AI key or paid provider
+request is needed to run the implemented phases.
 
 ## Prerequisites
 
@@ -126,6 +126,7 @@ seed data, and test commands never migrate the development database.
 | `pnpm typecheck` | Strict TypeScript check without emitting files |
 | `pnpm test` | Vitest unit/API tests; the DB suite also runs when both URLs are present |
 | `pnpm test:db` | Migrate the isolated `_test` database and run `tests/db` |
+| `pnpm test:e2e` | Build and run the offline Playwright notes/Trash flow |
 | `pnpm db:migrate:test` | Apply committed migrations to the guarded test database |
 | `pnpm db:migrate` | Apply committed migrations to the development database (explicit authorization required) |
 
@@ -165,6 +166,25 @@ Server code derives `content_plain` and grapheme counts, creates initial and
 manual revision snapshots, and never accepts client-supplied derived fields,
 seed keys, timestamps, or revision reasons. Mutation bodies use the 1 MiB note
 ceiling.
+
+## End-to-end tests
+
+Install the Playwright Chromium browser once:
+
+```bash
+pnpm exec playwright install chromium
+```
+
+Then run:
+
+```bash
+pnpm test:e2e
+```
+
+The command builds Next.js, starts `scripts/test-server.ts` on
+`127.0.0.1:3100`, asserts the guarded `_test` targets, migrates and truncates
+only the isolated test database, and runs the offline notes/Trash flow. No seed
+or provider key is used.
 
 ## HTTP boundary
 

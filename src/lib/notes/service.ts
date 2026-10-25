@@ -78,6 +78,7 @@ export interface NoteServiceOptions {
 
 export interface NoteService {
   listActiveNotes(page: number): Promise<NotePageDto>;
+  listDeletedNotes(page: number): Promise<NotePageDto>;
   getNote(id: string): Promise<NoteDetailDto>;
   createNote(input: CreateNoteInput): Promise<NoteDetailDto>;
   updateNote(id: string, input: UpdateNoteInput): Promise<NoteDetailDto>;
@@ -252,6 +253,43 @@ function toSnapshot(
   };
 }
 
+export function parsePageParam(
+  value: string | string[] | null | undefined,
+): number {
+  const raw = Array.isArray(value) ? value[0] : value;
+
+  if (raw === undefined || raw === null) {
+    return 1;
+  }
+
+  if (!/^\d+$/.test(raw)) {
+    throw new InvalidPageError();
+  }
+
+  const page = Number(raw);
+
+  if (!Number.isSafeInteger(page) || page < 1) {
+    throw new InvalidPageError();
+  }
+
+  return page;
+}
+
+function pageWindow(page: number): { pageSize: number; offset: number } {
+  if (!Number.isSafeInteger(page) || page < 1) {
+    throw new InvalidPageError();
+  }
+
+  const pageSize = 10;
+  const offset = (page - 1) * pageSize;
+
+  if (!Number.isSafeInteger(offset)) {
+    throw new InvalidPageError("Číslo stránky je příliš velké.");
+  }
+
+  return { pageSize, offset };
+}
+
 async function throwCasFailure(
   db: repository.NotesExecutor,
   id: string,
@@ -276,18 +314,23 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
 
   return {
     async listActiveNotes(page) {
-      if (!Number.isSafeInteger(page) || page < 1) {
-        throw new InvalidPageError();
-      }
-
-      const pageSize = 10;
-      const offset = (page - 1) * pageSize;
-
-      if (!Number.isSafeInteger(offset)) {
-        throw new InvalidPageError("Číslo stránky je příliš velké.");
-      }
-
+      const { pageSize, offset } = pageWindow(page);
       const rows = await repository.listActiveNotesPage(db, {
+        limit: pageSize + 1,
+        offset,
+      });
+
+      return {
+        items: rows.slice(0, pageSize).map(toSummary),
+        page,
+        pageSize,
+        hasNext: rows.length > pageSize,
+      };
+    },
+
+    async listDeletedNotes(page) {
+      const { pageSize, offset } = pageWindow(page);
+      const rows = await repository.listDeletedNotesPage(db, {
         limit: pageSize + 1,
         offset,
       });
@@ -439,6 +482,14 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
           await throwCasFailure(tx, id, true);
           throw new NoteConflictError(current.version);
         }
+
+        await repository.insertRevision(tx, {
+          noteId: id,
+          noteVersion: updated.version,
+          reason: "restore",
+          beforeSnapshot: toSnapshot(current, tags),
+          afterSnapshot: toSnapshot(updated, tags),
+        });
 
         return toDetail(updated, tags);
       });

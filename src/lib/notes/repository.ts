@@ -54,6 +54,19 @@ export async function listActiveNotesPage(
     .offset(options.offset);
 }
 
+export async function listDeletedNotesPage(
+  db: NotesExecutor,
+  options: { limit: number; offset: number },
+): Promise<NoteRow[]> {
+  return db
+    .select()
+    .from(notes)
+    .where(isNotNull(notes.deletedAt))
+    .orderBy(desc(notes.deletedAt), desc(notes.id))
+    .limit(options.limit)
+    .offset(options.offset);
+}
+
 export async function insertNote(
   db: NotesExecutor,
   values: {

@@ -151,7 +151,7 @@ describe("notes API", () => {
   });
 
   it("rejects invalid page numbers before calling the service", async () => {
-    for (const page of ["0", "-1", "1.5", "abc", ""]) {
+    for (const page of ["0", "-1", "1.5", "abc", "", "1e2", "0x10", "+2", "2.0"]) {
       const response = await listNotes(
         request(`/api/notes?page=${encodeURIComponent(page)}`),
       );

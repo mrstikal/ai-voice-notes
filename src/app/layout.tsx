@@ -25,13 +25,29 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
               AI hlasové poznámky
             </Link>
             <nav aria-label="Hlavní navigace">
-              <ul className="flex items-center gap-5 text-sm font-medium">
+              <ul className="flex flex-wrap items-center gap-5 text-sm font-medium">
                 <li>
                   <Link
                     className="rounded-sm text-stone-700 hover:text-emerald-800 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-700"
                     href="/"
                   >
                     Domů
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    className="rounded-sm text-stone-700 hover:text-emerald-800 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-700"
+                    href="/notes"
+                  >
+                    Poznámky
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    className="rounded-sm text-stone-700 hover:text-emerald-800 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-700"
+                    href="/notes/trash"
+                  >
+                    Koš
                   </Link>
                 </li>
                 <li>

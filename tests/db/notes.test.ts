@@ -303,6 +303,14 @@ describe.skipIf(!hasTestDatabase)("note service", () => {
     expect(restored.deletedAt).toBeNull();
     expect((await service.getNote(note.id)).version).toBe(3);
 
+    const revisionsAfterRestore = await getRevisions(note.id);
+    expect(revisionsAfterRestore).toHaveLength(2);
+    expect(revisionsAfterRestore[1]?.reason).toBe("restore");
+    expect(revisionsAfterRestore[1]?.noteVersion).toBe(3);
+    expect(revisionsAfterRestore[1]?.beforeSnapshot).toEqual(
+      revisionsAfterRestore[1]?.afterSnapshot,
+    );
+
     await expect(service.restoreNote(note.id, 3)).rejects.toBeInstanceOf(
       NoteNotFoundError,
     );
@@ -322,6 +330,22 @@ describe.skipIf(!hasTestDatabase)("note service", () => {
     await expect(
       service.deleteNote(staleDeleteNote.id, 1),
     ).rejects.toBeInstanceOf(NoteConflictError);
+  });
+
+  it("lists only deleted notes for the Trash view", async () => {
+    const active = await createNote("Aktivní", "A");
+    const first = await createNote("Smazaná 1", "1");
+    const second = await createNote("Smazaná 2", "2");
+
+    await service.deleteNote(first.id, 1);
+    await service.deleteNote(second.id, 1);
+
+    const page = await service.listDeletedNotes(1);
+    const ids = page.items.map((item) => item.id).sort();
+
+    expect(ids).toEqual([first.id, second.id].sort());
+    expect(page.items.every((item) => item.deletedAt instanceof Date)).toBe(true);
+    expect(page.items.some((item) => item.id === active.id)).toBe(false);
   });
 
   it("lets exactly one of two concurrent writers win the CAS race", async () => {
