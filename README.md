@@ -146,6 +146,16 @@ indentation are omitted; the parsed AST retains them for the editor and exports.
 `NOTE_MAX_CHARACTERS` may lower the configured content limit but cannot exceed
 20,000.
 
+## HTTP boundary
+
+API mutations are guarded by the configured loopback `Host` and an exact
+`Origin`, require `application/json`, and are read with per-route streaming byte
+ceilings: 1 MiB for note edits, 16 KiB for token/tool routes, and 3 MiB for
+reviewed meeting saves. Raw meeting audio will use a separate 25 MiB stream cap.
+A body over its ceiling receives an explicit Czech 413 without truncation.
+Costly routes can attach a Zod schema and an in-memory rate limiter; rejected
+requests never call the route handler. GET/HEAD routes never mutate or bill.
+
 ## Troubleshooting
 
 - **Health returns 503:** run `docker compose ps` and `docker compose up -d db`,

@@ -31,6 +31,10 @@ type VersionTuple = readonly [number, number, number];
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
+export function isLoopbackHostname(hostname: string): boolean {
+  return LOOPBACK_HOSTS.has(hostname);
+}
+
 function parseVersion(version: string, label: string): VersionTuple {
   const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(version.trim());
   if (!match) {
@@ -138,7 +142,7 @@ function parseAppOrigin(rawOrigin: string | undefined): ParsedOrigin {
     );
   }
 
-  if (!LOOPBACK_HOSTS.has(url.hostname)) {
+  if (!isLoopbackHostname(url.hostname)) {
     throw new ConfigurationError(
       "APP_ORIGIN musí používat pouze loopback adresu (127.0.0.1, localhost nebo ::1).",
     );
@@ -187,7 +191,7 @@ function parseOptionalPostgresUrl(
     throw new ConfigurationError(`${name} musí obsahovat hostitele a název databáze.`);
   }
 
-  if (!LOOPBACK_HOSTS.has(url.hostname)) {
+  if (!isLoopbackHostname(url.hostname)) {
     throw new ConfigurationError(
       `${name} musí používat pouze loopback hostitele (127.0.0.1, localhost nebo ::1).`,
     );
