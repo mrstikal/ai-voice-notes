@@ -73,6 +73,9 @@ export async function insertNote(
     title: string;
     contentMd: string;
     contentPlain: string;
+    seedKey?: string;
+    createdAt?: Date;
+    updatedAt?: Date;
   },
 ): Promise<NoteRow> {
   const rows = await db.insert(notes).values(values).returning();
@@ -172,6 +175,7 @@ export async function insertRevision(
     reason: string;
     beforeSnapshot: NoteSnapshot;
     afterSnapshot: NoteSnapshot;
+    createdAt?: Date;
   },
 ): Promise<void> {
   await db.insert(noteRevisions).values(values);

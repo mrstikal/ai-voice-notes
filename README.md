@@ -3,12 +3,13 @@
 Local, single-user Czech voice-notes proof of concept. The UI, voice commands,
 and user-facing errors are Czech; code and documentation are English.
 
-This repository currently implements **P01-P06**: the workspace, database
+This repository currently implements **P01-P07B**: the workspace, database
 container, and Czech shell; the Markdown codec and exact text limits; the
 Drizzle schema, migrations, and isolated database tests; the local HTTP guard;
-the versioned notes CRUD API; and the paginated notes and Trash UI. Exports,
-dictation, and AI features arrive in later phases. No AI key or paid provider
-request is needed to run the implemented phases.
+the versioned notes CRUD API; the paginated notes and Trash UI; and the optional
+transaction-safe demo-note seed CLI. Exports, dictation, and AI features arrive
+in later phases. No AI key or paid provider request is needed to run the
+implemented phases.
 
 ## Prerequisites
 
@@ -127,6 +128,7 @@ seed data, and test commands never migrate the development database.
 | `pnpm test` | Vitest unit/API tests; the DB suite also runs when both URLs are present |
 | `pnpm test:db` | Migrate the isolated `_test` database and run `tests/db` |
 | `pnpm test:e2e` | Build and run the offline Playwright notes/Trash flow |
+| `pnpm db:seed` | Explicitly replace the `demo-v1:*` demo notes in the dev database |
 | `pnpm db:migrate:test` | Apply committed migrations to the guarded test database |
 | `pnpm db:migrate` | Apply committed migrations to the development database (explicit authorization required) |
 
@@ -166,6 +168,23 @@ Server code derives `content_plain` and grapheme counts, creates initial and
 manual revision snapshots, and never accepts client-supplied derived fields,
 seed keys, timestamps, or revision reasons. Mutation bodies use the 1 MiB note
 ceiling.
+
+## Seeding demo notes
+
+`pnpm db:seed` is an optional, explicit CLI for the development database. It
+never runs during `dev`, startup, build, install, or migrations. The command
+warns before it hard-deletes only notes whose `seed_key` starts with `demo-v1:`,
+inserts the 20 current Czech fixtures and their initial revisions in one
+transaction under a PostgreSQL advisory lock, and leaves user notes and other
+seed namespaces untouched. Dates are randomized per invocation; D01 is always
+dated within the current UTC day and the others fall within the last 30 days.
+An edited or soft-deleted demo note is replaced on the next run.
+
+Test mode uses only the guarded `_test` database; it never falls back to the
+development target. `pnpm test:db` runs the seed tests, including repeatability,
+revision timestamps, rollback on injected failure, and a check that missing or
+invalid `TEST_DATABASE_URL` does not mutate the development database. No seed of
+the development database, no audio, and no AI call is part of the test suite.
 
 ## End-to-end tests
 

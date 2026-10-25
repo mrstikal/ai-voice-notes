@@ -308,6 +308,42 @@ async function throwCasFailure(
   throw new NoteConflictError(latest.version);
 }
 
+export interface SeedNoteCreateInput {
+  readonly seedKey: string;
+  readonly title: string;
+  readonly contentMd: string;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+}
+
+export async function createSeededNoteInTransaction(
+  db: repository.NotesExecutor,
+  input: SeedNoteCreateInput,
+  limits: NoteGraphemeLimits = DEFAULT_NOTE_GRAPHEME_LIMITS,
+): Promise<NoteDetailDto> {
+  const prepared = prepareNote(input.title, input.contentMd, limits);
+  const note = await repository.insertNote(db, {
+    seedKey: input.seedKey,
+    title: input.title,
+    contentMd: input.contentMd,
+    contentPlain: prepared.contentPlain,
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt,
+  });
+  const tags: string[] = [];
+
+  await repository.insertRevision(db, {
+    noteId: note.id,
+    noteVersion: 1,
+    reason: "initial",
+    beforeSnapshot: EMPTY_NOTE_SNAPSHOT,
+    afterSnapshot: toSnapshot(note, tags),
+    createdAt: input.createdAt,
+  });
+
+  return toDetail(note, tags);
+}
+
 export function createNoteService(options: NoteServiceOptions): NoteService {
   const db = options.db;
   const limits = options.limits ?? DEFAULT_NOTE_GRAPHEME_LIMITS;
