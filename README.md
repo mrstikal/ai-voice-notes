@@ -95,6 +95,25 @@ placeholder `db:migrate` or `db:seed` scripts.
 | `pnpm typecheck` | Strict TypeScript check without emitting files |
 | `pnpm test` | Vitest unit tests |
 
+## Markdown subset
+
+Canonical note content is Markdown. The codec supports H1-H3, paragraphs, soft
+and hard breaks, bold/italic, bullet/ordered/task lists, safe links,
+blockquotes, and inline/fenced code. Safe link protocols are `http:`, `https:`,
+and `mailto:`; relative paths and fragments are also allowed. Unsupported
+constructs (raw HTML, tables, images, H4-H6, definitions, link references,
+footnotes, strikethrough, thematic breaks) and unsafe destinations
+(`javascript:`, `data:`, `file:`, protocol-relative URLs) make the whole note
+source-only: the raw source is preserved verbatim, no clickable link is exposed,
+and visual/DOCX conversion is refused. Limits are 160 graphemes for the title
+and 20,000 visible graphemes for the content, counted with
+`Intl.Segmenter("cs", { granularity: "grapheme" })`.
+`content_plain` is a flat, block-separated projection for search and limits:
+Markdown markers, list bullets/numbers, task checkbox state, and nesting
+indentation are omitted; the parsed AST retains them for the editor and exports.
+`NOTE_MAX_CHARACTERS` may lower the configured content limit but cannot exceed
+20,000.
+
 ## Troubleshooting
 
 - **Health returns 503:** run `docker compose ps` and `docker compose up -d db`,

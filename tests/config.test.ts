@@ -10,6 +10,7 @@ import {
   validateStartupEnvironment,
   type Environment,
 } from "../src/lib/config";
+import { CONTENT_MAX_GRAPHEMES } from "../src/lib/notes/limits";
 
 const SUPPORTED_NODE = "22.19.0";
 
@@ -20,6 +21,8 @@ function configWith(env: Environment = {}, nodeVersion = SUPPORTED_NODE) {
 describe("loadConfig", () => {
   it("returns documented defaults without environment values", () => {
     const config = configWith();
+
+    expect(config.noteMaxCharacters).toBe(CONTENT_MAX_GRAPHEMES);
 
     expect(config).toEqual({
       appOrigin: DEFAULT_APP_ORIGIN,
@@ -131,6 +134,10 @@ describe("loadConfig", () => {
     expect(config.noteMaxCharacters).toBe(15_000);
     expect(config.meetingMaxMinutes).toBe(20);
     expect(config.aiRequestBudgetUsd).toBe(3.25);
+
+    expect(() =>
+      configWith({ NOTE_MAX_CHARACTERS: String(CONTENT_MAX_GRAPHEMES + 1) }),
+    ).toThrow(ConfigurationError);
 
     for (const invalid of ["0", "-1", "1.5", "abc"]) {
       expect(() => configWith({ NOTE_MAX_CHARACTERS: invalid })).toThrow(

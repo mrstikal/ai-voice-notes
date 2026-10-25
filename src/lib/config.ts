@@ -1,6 +1,8 @@
+import { CONTENT_MAX_GRAPHEMES } from "./notes/limits";
+
 export const MIN_SUPPORTED_NODE_VERSION = "22.19.0";
 export const DEFAULT_APP_ORIGIN = "http://127.0.0.1:3000";
-export const DEFAULT_NOTE_MAX_CHARACTERS = 20_000;
+export const DEFAULT_NOTE_MAX_CHARACTERS = CONTENT_MAX_GRAPHEMES;
 export const DEFAULT_MEETING_MAX_MINUTES = 15;
 export const DEFAULT_AI_REQUEST_BUDGET_USD = 2.0;
 
@@ -269,6 +271,17 @@ export function loadConfig(
   nodeVersion: string = process.versions.node,
 ): AppConfig {
   const startup = validateStartupEnvironment(env, nodeVersion);
+  const noteMaxCharacters = parsePositiveInteger(
+    env,
+    "NOTE_MAX_CHARACTERS",
+    DEFAULT_NOTE_MAX_CHARACTERS,
+  );
+
+  if (noteMaxCharacters > CONTENT_MAX_GRAPHEMES) {
+    throw new ConfigurationError(
+      `NOTE_MAX_CHARACTERS nesmí překročit ${CONTENT_MAX_GRAPHEMES}.`,
+    );
+  }
 
   return {
     ...startup,
@@ -278,11 +291,7 @@ export function loadConfig(
       "TEST_DATABASE_URL",
     ),
     aiTestMode: parseAiTestMode(env),
-    noteMaxCharacters: parsePositiveInteger(
-      env,
-      "NOTE_MAX_CHARACTERS",
-      DEFAULT_NOTE_MAX_CHARACTERS,
-    ),
+    noteMaxCharacters,
     meetingMaxMinutes: parsePositiveInteger(
       env,
       "MEETING_MAX_MINUTES",
