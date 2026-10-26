@@ -80,11 +80,13 @@ test("paginated notes, rename, delete, restore, and safe title", async ({ page }
     page.getByText("Poznámka 11 přejmenovaná", { exact: true }),
   ).toBeVisible();
   await page
-    .getByRole("button", { name: /^Obnovit poznámku/ })
+    .getByRole("button", {
+      name: "Obnovit poznámku Poznámka 11 přejmenovaná",
+    })
     .click();
   await expect(
-    page.getByText("Koš je prázdný", { exact: true }),
-  ).toBeVisible();
+    page.getByText("Poznámka 11 přejmenovaná", { exact: true }),
+  ).toHaveCount(0);
 
   await mainNavigation
     .getByRole("link", { name: "Poznámky", exact: true })

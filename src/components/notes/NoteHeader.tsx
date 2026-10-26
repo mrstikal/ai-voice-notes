@@ -18,6 +18,7 @@ import {
 
 interface NoteHeaderProps {
   readonly note: NoteDetail;
+  readonly onNoteUpdated?: (note: NoteDetail) => void;
 }
 
 function conflictMessage(error: NoteApiError): string {
@@ -28,11 +29,8 @@ function conflictMessage(error: NoteApiError): string {
   return `${error.message} Aktuální verze: ${error.latestVersion}.`;
 }
 
-export function NoteHeader({ note }: NoteHeaderProps) {
+export function NoteHeader({ note, onNoteUpdated }: NoteHeaderProps) {
   const router = useRouter();
-  const [currentTitle, setCurrentTitle] = useState(note.title);
-  const [currentVersion, setCurrentVersion] = useState(note.version);
-  const [currentUpdatedAt, setCurrentUpdatedAt] = useState(note.updatedAt);
   const [isRenaming, setIsRenaming] = useState(false);
   const [newTitle, setNewTitle] = useState(note.title);
   const [isSaving, setIsSaving] = useState(false);
@@ -42,7 +40,7 @@ export function NoteHeader({ note }: NoteHeaderProps) {
   const [status, setStatus] = useState<string | null>(null);
 
   function openRename() {
-    setNewTitle(currentTitle);
+    setNewTitle(note.title);
     setError(null);
     setStatus(null);
     setIsRenaming(true);
@@ -66,7 +64,7 @@ export function NoteHeader({ note }: NoteHeaderProps) {
       return;
     }
 
-    if (trimmedTitle === currentTitle) {
+    if (trimmedTitle === note.title) {
       setIsRenaming(false);
       return;
     }
@@ -77,15 +75,13 @@ export function NoteHeader({ note }: NoteHeaderProps) {
       const updated = await updateNote(note.id, {
         title: trimmedTitle,
         contentMd: note.contentMd,
-        expectedVersion: currentVersion,
+        expectedVersion: note.version,
       });
 
-      setCurrentTitle(updated.title);
-      setCurrentVersion(updated.version);
-      setCurrentUpdatedAt(updated.updatedAt);
       setNewTitle(updated.title);
       setIsRenaming(false);
       setStatus("Název byl uložen.");
+      onNoteUpdated?.(updated);
       router.refresh();
     } catch (renameError) {
       setError(
@@ -104,7 +100,7 @@ export function NoteHeader({ note }: NoteHeaderProps) {
     setIsDeleting(true);
 
     try {
-      await deleteNote(note.id, currentVersion);
+      await deleteNote(note.id, note.version);
       router.push("/notes");
       router.refresh();
     } catch (deleteError) {
@@ -125,7 +121,7 @@ export function NoteHeader({ note }: NoteHeaderProps) {
       <div className="mt-3 flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <h1 className="text-3xl font-semibold tracking-tight text-stone-950 sm:text-4xl">
-            {currentTitle || "Bez názvu"}
+            {note.title || "Bez názvu"}
           </h1>
           <p className="mt-3 text-sm text-stone-500">
             Vytvořeno{" "}
@@ -133,10 +129,10 @@ export function NoteHeader({ note }: NoteHeaderProps) {
               {formatCzechDateTime(note.createdAt)}
             </time>
             {" · "}Upraveno{" "}
-            <time dateTime={currentUpdatedAt}>
-              {formatCzechDateTime(currentUpdatedAt)}
+            <time dateTime={note.updatedAt}>
+              {formatCzechDateTime(note.updatedAt)}
             </time>
-            {" · "}Verze {currentVersion}
+            {" · "}Verze {note.version}
           </p>
           {note.tags.length > 0 ? (
             <p className="mt-2 text-sm text-stone-600">
@@ -219,7 +215,7 @@ export function NoteHeader({ note }: NoteHeaderProps) {
       {confirmingDelete ? (
         <div className="mt-5 rounded-xl border border-red-200 bg-red-50 p-4">
           <p className="font-medium text-red-950" role="alert">
-            Opravdu smazat poznámku „{currentTitle || "Bez názvu"}“?
+            Opravdu smazat poznámku „{note.title || "Bez názvu"}“?
           </p>
           <p className="mt-1 text-sm text-red-900">
             Poznámka se přesune do koše a můžete ji odtud obnovit.
