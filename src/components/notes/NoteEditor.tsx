@@ -1,6 +1,7 @@
 "use client";
 
 import type { Editor, JSONContent } from "@tiptap/core";
+import { TextSelection } from "@tiptap/pm/state";
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import {
   useCallback,
@@ -39,7 +40,15 @@ import {
   type VisualConversionFailure,
 } from "@/lib/notes/editor-markdown";
 import { isSafeLinkDestination, parseNoteMarkdown } from "@/lib/notes/markdown";
+import {
+  appendCommittedText,
+  insertCommittedTextAtCursor,
+} from "@/lib/voice/transcript-session";
 
+import {
+  BodyDictationControls,
+  type BodyInsertMode,
+} from "../voice/DictationControls";
 import { MarkdownSource } from "./MarkdownSource";
 
 type EditorMode = "source" | "visual";
@@ -410,6 +419,7 @@ export function NoteEditor({ note, onSaved, onDirtyChange }: NoteEditorProps) {
 
   const sourceTextRef = useRef(note.contentMd);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const pendingSelectionRef = useRef<number | null>(null);
   const modeRef = useRef<EditorMode>("source");
   const savedContentRef = useRef(note.contentMd);
   const versionRef = useRef(note.version);
@@ -474,6 +484,18 @@ export function NoteEditor({ note, onSaved, onDirtyChange }: NoteEditorProps) {
   useEffect(() => {
     titleRef.current = note.title;
   }, [note.title]);
+
+  useEffect(() => {
+    const pending = pendingSelectionRef.current;
+    const textarea = textareaRef.current;
+
+    if (pending === null || textarea === null) {
+      return;
+    }
+
+    pendingSelectionRef.current = null;
+    textarea.setSelectionRange(pending, pending);
+  }, [source]);
 
   const handleEditorReady = useCallback((editor: Editor) => {
     visualEditorRef.current = editor;
@@ -732,6 +754,88 @@ export function NoteEditor({ note, onSaved, onDirtyChange }: NoteEditorProps) {
   const notifyChange = useCallback(() => {
     controllerRef.current?.notifyChange();
   }, []);
+
+  const insertDictatedText = useCallback(
+    (text: string, insertMode: BodyInsertMode) => {
+      if (text === "") {
+        return;
+      }
+
+      if (modeRef.current === "visual") {
+        const editor = visualEditorRef.current;
+
+        if (editor === null) {
+          setError(
+            "Vizuální editor není připravený. Přepněte do zdrojového režimu.",
+          );
+          return;
+        }
+
+        if (insertMode === "end") {
+          const separator =
+            editor.state.doc.textContent.length > 0 &&
+            !/\s$/u.test(editor.state.doc.textContent) &&
+            !/^\s/u.test(text)
+              ? " "
+              : "";
+          const endSelection = TextSelection.near(
+            editor.state.doc.resolve(editor.state.doc.content.size),
+            -1,
+          );
+          editor
+            .chain()
+            .focus()
+            .insertContentAt(endSelection.from, {
+              type: "text",
+              text: `${separator}${text}`,
+            })
+            .run();
+          return;
+        }
+
+        const { $from } = editor.state.selection;
+        const before = $from.parent.textBetween(
+          0,
+          $from.parentOffset,
+          undefined,
+          "\0",
+        );
+        const separator =
+          before.length > 0 && !/\s$/u.test(before) && !/^\s/u.test(text)
+            ? " "
+            : "";
+        editor.chain().focus().insertContent({
+          type: "text",
+          text: `${separator}${text}`,
+        }).run();
+        return;
+      }
+
+      const current = sourceTextRef.current;
+
+      if (insertMode === "end") {
+        const next = appendCommittedText(current, text);
+        sourceTextRef.current = next;
+        setSource(next);
+        pendingSelectionRef.current = next.length;
+        storeDraft(next);
+        notifyChange();
+        return;
+      }
+
+      const cursor =
+        pendingSelectionRef.current ??
+        textareaRef.current?.selectionStart ??
+        current.length;
+      const result = insertCommittedTextAtCursor(current, text, cursor);
+      sourceTextRef.current = result.content;
+      setSource(result.content);
+      pendingSelectionRef.current = result.cursor;
+      storeDraft(result.content);
+      notifyChange();
+    },
+    [notifyChange, storeDraft],
+  );
 
   const clearRecoverableError = useCallback(() => {
     if (conflictRef.current === null) {
@@ -1021,6 +1125,18 @@ export function NoteEditor({ note, onSaved, onDirtyChange }: NoteEditorProps) {
 
   const alertMessage = [autosaveError, error].filter(Boolean).join(" ");
   const canSave = dirty || hasAutosavedContent;
+  const bodyDictationDisabled =
+    conflict !== null || overLimit || recovery !== null || isExplicitSaving;
+  const bodyDictationDisabledReason =
+    conflict !== null
+      ? "Diktování textu je pozastaveno, dokud nevyřešíte konflikt uložení."
+      : overLimit
+        ? "Diktování textu je pozastaveno, protože obsah překračuje limit."
+        : recovery !== null
+          ? "Nejprve obnovte nebo zahoďte nalezený koncept."
+          : isExplicitSaving
+            ? "Počkejte na dokončení ukládání."
+            : null;
 
   return (
     <section aria-labelledby="note-editor-heading" className="mt-8">
@@ -1194,6 +1310,12 @@ export function NoteEditor({ note, onSaved, onDirtyChange }: NoteEditorProps) {
           ) : null}
         </section>
       ) : null}
+
+      <BodyDictationControls
+        onCommit={insertDictatedText}
+        disabled={bodyDictationDisabled}
+        disabledReason={bodyDictationDisabledReason}
+      />
 
       <div className="mt-4">
         {mode === "source" ? (
