@@ -175,13 +175,14 @@ The versioned CRUD API uses the P04 Host/Origin and bounded-body guard:
 | `POST /api/notes` | Create from `{title, contentMd}`; returns 201 |
 | `GET /api/notes/:id` | Read one active note; deleted or missing notes return 404 |
 | `PATCH /api/notes/:id` | Update `{title, contentMd, expectedVersion}`; optional `draft: true` skips the named revision; stale versions return 409 with `latestVersion` |
+| `PATCH /api/notes/:id/title` | Voice-title update `{title, expectedVersion}`; changes only the title and creates a server-derived `voice` revision |
 | `DELETE /api/notes/:id` | Soft-delete `{expectedVersion}`; no hard-delete route exists |
 | `POST /api/notes/:id/restore` | Restore from Trash with `{expectedVersion}` |
 
-Server code derives `content_plain` and grapheme counts, creates initial and
-manual revision snapshots, and never accepts client-supplied derived fields,
-seed keys, timestamps, or revision reasons. Mutation bodies use the 1 MiB note
-ceiling.
+Server code derives `content_plain` and grapheme counts, creates initial,
+manual, voice, and restore revision snapshots, and never accepts
+client-supplied derived fields, seed keys, timestamps, or revision reasons.
+Mutation bodies use the 1 MiB note ceiling.
 
 ## Editor and autosave
 

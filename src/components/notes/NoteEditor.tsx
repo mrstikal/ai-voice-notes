@@ -47,6 +47,7 @@ type EditorMode = "source" | "visual";
 interface NoteEditorProps {
   readonly note: NoteDetail;
   readonly onSaved?: (note: NoteDetail) => void;
+  readonly onDirtyChange?: (dirty: boolean) => void;
 }
 
 interface ConflictState {
@@ -390,7 +391,7 @@ function VisualMarkdownEditor({
   );
 }
 
-export function NoteEditor({ note, onSaved }: NoteEditorProps) {
+export function NoteEditor({ note, onSaved, onDirtyChange }: NoteEditorProps) {
   const [mode, setMode] = useState<EditorMode>("source");
   const [source, setSource] = useState(note.contentMd);
   const [localSavedContent, setLocalSavedContent] = useState(note.contentMd);
@@ -420,6 +421,7 @@ export function NoteEditor({ note, onSaved }: NoteEditorProps) {
   const visualEditorRef = useRef<Editor | null>(null);
   const controllerRef = useRef<DraftAutosaveController | null>(null);
   const onSavedRef = useRef(onSaved);
+  const onDirtyChangeRef = useRef(onDirtyChange);
 
   const isClientReady = useSyncExternalStore(
     subscribeToNothing,
@@ -456,6 +458,14 @@ export function NoteEditor({ note, onSaved }: NoteEditorProps) {
   useEffect(() => {
     onSavedRef.current = onSaved;
   }, [onSaved]);
+
+  useEffect(() => {
+    onDirtyChangeRef.current = onDirtyChange;
+  }, [onDirtyChange]);
+
+  useEffect(() => {
+    onDirtyChangeRef.current?.(dirty || recovery !== null);
+  }, [dirty, recovery]);
 
   useEffect(() => {
     modeRef.current = mode;

@@ -35,6 +35,13 @@ export const updateNoteInputSchema = z
   })
   .strict();
 
+export const updateNoteTitleInputSchema = z
+  .object({
+    title: z.string(),
+    expectedVersion: expectedVersionSchema,
+  })
+  .strict();
+
 export const deleteNoteInputSchema = z
   .object({
     expectedVersion: expectedVersionSchema,
@@ -45,6 +52,7 @@ export const restoreNoteInputSchema = deleteNoteInputSchema;
 
 export type CreateNoteInput = z.infer<typeof createNoteInputSchema>;
 export type UpdateNoteInput = z.infer<typeof updateNoteInputSchema>;
+export type UpdateNoteTitleInput = z.infer<typeof updateNoteTitleInputSchema>;
 export type DeleteNoteInput = z.infer<typeof deleteNoteInputSchema>;
 export type RestoreNoteInput = z.infer<typeof restoreNoteInputSchema>;
 
@@ -82,6 +90,10 @@ export interface NoteService {
   getNote(id: string): Promise<NoteDetailDto>;
   createNote(input: CreateNoteInput): Promise<NoteDetailDto>;
   updateNote(id: string, input: UpdateNoteInput): Promise<NoteDetailDto>;
+  updateNoteTitle(
+    id: string,
+    input: UpdateNoteTitleInput,
+  ): Promise<NoteDetailDto>;
   deleteNote(id: string, expectedVersion: number): Promise<NoteDetailDto>;
   restoreNote(id: string, expectedVersion: number): Promise<NoteDetailDto>;
 }
@@ -460,6 +472,51 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
             afterSnapshot: toSnapshot(updated, tags),
           });
         }
+
+        return toDetail(updated, tags);
+      });
+    },
+
+    async updateNoteTitle(id, input) {
+      assertNoteId(id);
+
+      return db.transaction(async (tx) => {
+        const current = await repository.findNoteByIdForUpdate(tx, id);
+        if (!current || current.deletedAt) {
+          throw new NoteNotFoundError();
+        }
+
+        if (current.version !== input.expectedVersion) {
+          throw new NoteConflictError(current.version);
+        }
+
+        const tags = await repository.getNoteTags(tx, id);
+
+        if (current.title === input.title) {
+          return toDetail(current, tags);
+        }
+
+        const prepared = prepareNote(input.title, current.contentMd, limits);
+        const updated = await repository.updateNoteCas(tx, {
+          id,
+          expectedVersion: input.expectedVersion,
+          title: input.title,
+          contentMd: current.contentMd,
+          contentPlain: prepared.contentPlain,
+        });
+
+        if (!updated) {
+          await throwCasFailure(tx, id, false);
+          throw new NoteConflictError(current.version);
+        }
+
+        await repository.insertRevision(tx, {
+          noteId: id,
+          noteVersion: updated.version,
+          reason: "voice",
+          beforeSnapshot: toSnapshot(current, tags),
+          afterSnapshot: toSnapshot(updated, tags),
+        });
 
         return toDetail(updated, tags);
       });

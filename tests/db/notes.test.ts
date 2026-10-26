@@ -235,6 +235,27 @@ describe.skipIf(!hasTestDatabase)("note service", () => {
     );
   });
 
+  it("creates a voice revision for a confirmed dictated title", async () => {
+    const note = await createNote("Původní", "Text poznámky");
+
+    const updated = await service.updateNoteTitle(note.id, {
+      title: "Nadiktovaný název",
+      expectedVersion: note.version,
+    });
+
+    expect(updated.version).toBe(2);
+    expect(updated.title).toBe("Nadiktovaný název");
+    expect(updated.contentMd).toBe("Text poznámky");
+
+    const revisions = await getRevisions(note.id);
+    expect(revisions).toHaveLength(2);
+    expect(revisions[1]?.reason).toBe("voice");
+    expect(revisions[1]?.afterSnapshot).toMatchObject({
+      title: "Nadiktovaný název",
+      contentMd: "Text poznámky",
+    });
+  });
+
   it("persists draft saves without revisions and creates a named checkpoint on explicit save", async () => {
     const note = await createNote("Draft", "Původní");
 

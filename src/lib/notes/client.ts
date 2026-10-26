@@ -111,6 +111,19 @@ export async function updateNote(
   });
 }
 
+export async function updateVoiceTitle(
+  id: string,
+  input: {
+    title: string;
+    expectedVersion: number;
+  },
+): Promise<NoteDetail> {
+  return requestJson<NoteDetail>(`/api/notes/${id}/title`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
 export async function deleteNote(
   id: string,
   expectedVersion: number,

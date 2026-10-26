@@ -6,6 +6,7 @@ import {
   GET as getNote,
   PATCH as updateNote,
 } from "@/app/api/notes/[id]/route";
+import { PATCH as updateTitle } from "@/app/api/notes/[id]/title/route";
 import { POST as restoreNote } from "@/app/api/notes/[id]/restore/route";
 import {
   NoteConflictError,
@@ -20,6 +21,7 @@ const service = vi.hoisted(() => ({
   getNote: vi.fn(),
   createNote: vi.fn(),
   updateNote: vi.fn(),
+  updateNoteTitle: vi.fn(),
   deleteNote: vi.fn(),
   restoreNote: vi.fn(),
 }));
@@ -377,6 +379,30 @@ describe("notes API", () => {
       expectedVersion: 1,
       draft: true,
     });
+  });
+
+  it("updates only the title through the dedicated voice title route", async () => {
+    service.updateNoteTitle.mockResolvedValue(
+      noteDetail({ version: 2, title: "Nadiktovaný název" }),
+    );
+
+    const response = await updateTitle(
+      request(`/api/notes/${NOTE_ID}/title`, {
+        method: "PATCH",
+        body: {
+          title: "Nadiktovaný název",
+          expectedVersion: 1,
+        },
+      }),
+      context(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(service.updateNoteTitle).toHaveBeenCalledWith(NOTE_ID, {
+      title: "Nadiktovaný název",
+      expectedVersion: 1,
+    });
+    expect(service.updateNote).not.toHaveBeenCalled();
   });
 
   it("rejects PATCH without expectedVersion and invalid UUIDs before calling the service", async () => {
