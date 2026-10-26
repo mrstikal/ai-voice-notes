@@ -3,13 +3,14 @@
 Local, single-user Czech voice-notes proof of concept. The UI, voice commands,
 and user-facing errors are Czech; code and documentation are English.
 
-This repository currently implements **P01-P07B**: the workspace, database
+This repository currently implements **P01-P09**: the workspace, database
 container, and Czech shell; the Markdown codec and exact text limits; the
 Drizzle schema, migrations, and isolated database tests; the local HTTP guard;
-the versioned notes CRUD API; the paginated notes and Trash UI; and the optional
-transaction-safe demo-note seed CLI. Exports, dictation, and AI features arrive
-in later phases. No AI key or paid provider request is needed to run the
-implemented phases.
+the versioned notes CRUD API; the paginated notes and Trash UI; the optional
+transaction-safe demo-note seed CLI; the Markdown-first source/visual editor;
+and the debounced autosave with conflict recovery. Exports, dictation, and AI
+features arrive in later phases. No AI key or paid provider request is needed
+to run the implemented phases.
 
 ## Prerequisites
 
@@ -169,6 +170,29 @@ manual revision snapshots, and never accepts client-supplied derived fields,
 seed keys, timestamps, or revision reasons. Mutation bodies use the 1 MiB note
 ceiling.
 
+## Editor and autosave
+
+The note detail page edits canonical Markdown in a source textarea and in a
+Markdown-first visual editor. Both modes share one content state, so the
+grapheme counter, the limit check, and the save flow behave identically.
+
+Typing is autosaved after ~800 ms of inactivity as a versioned draft PATCH
+(`draft: true`). Draft saves update `notes.version` but create no named
+revision, so the history does not grow per keystroke; the explicit **Uložit**
+button creates one named `manual` revision (a checkpoint). Writes for one note
+are serialized: at most one request is in flight, and the explicit save takes
+over a pending debounced draft instead of racing it. Content that exceeds the
+limit or cannot be serialized is never sent.
+
+An unsaved draft is kept per browser tab in `sessionStorage` under
+`note-draft:{noteId}:{baseVersion}` and offered for recovery after a reload.
+The stored draft is deleted only after the server acknowledges a save. Leaving
+the page with unsaved changes warns first.
+
+A stale write (HTTP 409) pauses autosaving and shows the local text next to the
+current server text with copy and reload actions. Nothing is merged or
+overwritten automatically: the user compares, copies, or reloads and decides.
+
 ## Seeding demo notes
 
 `pnpm db:seed` is an optional, explicit CLI for the development database. It
@@ -202,8 +226,9 @@ pnpm test:e2e
 
 The command builds Next.js, starts `scripts/test-server.ts` on
 `127.0.0.1:3100`, asserts the guarded `_test` targets, migrates and truncates
-only the isolated test database, and runs the offline notes/Trash flow. No seed
-or provider key is used.
+only the isolated test database, and runs the offline notes/Trash, editor, and
+autosave flows (including the two-tab conflict case). No seed or provider key
+is used.
 
 ## HTTP boundary
 

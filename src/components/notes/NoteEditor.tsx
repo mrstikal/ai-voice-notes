@@ -9,14 +9,27 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 
 import {
   NoteApiError,
+  fetchNote,
   formatCzechDateTime,
   updateNote,
   type NoteDetail,
 } from "@/lib/notes/client";
+import {
+  DRAFT_AUTOSAVE_DEBOUNCE_MS,
+  DraftAutosaveController,
+  clearStoredDrafts,
+  readStoredDraft,
+  syncStoredDraft,
+  writeStoredDraft,
+  type DraftAutosaveStatus,
+  type DraftSaveOutcome,
+  type StoredNoteDraft,
+} from "@/lib/notes/draft";
 import { CONTENT_MAX_GRAPHEMES } from "@/lib/notes/limits";
 import {
   NOTE_EDITOR_EXTENSIONS,
@@ -34,6 +47,25 @@ type EditorMode = "source" | "visual";
 interface NoteEditorProps {
   readonly note: NoteDetail;
   readonly onSaved?: (note: NoteDetail) => void;
+}
+
+interface ConflictState {
+  readonly latestVersion: number;
+  readonly serverContentMd: string | null;
+  readonly serverNote: NoteDetail | null;
+  readonly serverLoadFailed: boolean;
+}
+
+function subscribeToNothing(): () => void {
+  return () => undefined;
+}
+
+function getClientSnapshot(): boolean {
+  return true;
+}
+
+function getServerSnapshot(): boolean {
+  return false;
 }
 
 function formatCount(value: number): string {
@@ -351,7 +383,8 @@ function VisualMarkdownEditor({
         <EditorContent editor={editor} />
       </div>
       <p className="mt-2 text-xs text-stone-500">
-        Shift+Enter vloží pevný zlomek. Změny se ukládají tlačítkem Uložit.
+        Shift+Enter vloží pevný zlomek. Změny se ukládají automaticky; tlačítko
+        Uložit vytvoří v historii bod obnovy.
       </p>
     </div>
   );
@@ -364,11 +397,53 @@ export function NoteEditor({ note, onSaved }: NoteEditorProps) {
   const [localVersion, setLocalVersion] = useState(note.version);
   const [visualContent, setVisualContent] = useState<JSONContent | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [autosaveError, setAutosaveError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isExplicitSaving, setIsExplicitSaving] = useState(false);
   const [visualDirty, setVisualDirty] = useState(false);
-  const sourceRef = useRef<HTMLTextAreaElement>(null);
+  const [hasAutosavedContent, setHasAutosavedContent] = useState(false);
+  const [conflict, setConflict] = useState<ConflictState | null>(null);
+  const [recoveryDismissed, setRecoveryDismissed] = useState(false);
+  const [copyNotice, setCopyNotice] = useState<string | null>(null);
+
+  const sourceTextRef = useRef(note.contentMd);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const modeRef = useRef<EditorMode>("source");
+  const savedContentRef = useRef(note.contentMd);
+  const versionRef = useRef(note.version);
+  const titleRef = useRef(note.title);
+  const conflictRef = useRef<ConflictState | null>(null);
+  const conflictRequestRef = useRef(0);
+  const restoreBaseVersionRef = useRef<number | null>(null);
+  const visualEditedRef = useRef(false);
   const visualEditorRef = useRef<Editor | null>(null);
+  const controllerRef = useRef<DraftAutosaveController | null>(null);
+  const onSavedRef = useRef(onSaved);
+
+  const isClientReady = useSyncExternalStore(
+    subscribeToNothing,
+    getClientSnapshot,
+    getServerSnapshot,
+  );
+
+  const storedDraft = useMemo(() => {
+    if (!isClientReady) {
+      return null;
+    }
+
+    const stored = readStoredDraft(note.id);
+
+    if (!stored || stored.contentMd === note.contentMd) {
+      return null;
+    }
+
+    return stored;
+  }, [isClientReady, note.contentMd, note.id]);
+
+  const recovery: StoredNoteDraft | null = recoveryDismissed
+    ? null
+    : storedDraft;
 
   const deferredSource = useDeferredValue(source);
   const parsed = useMemo(
@@ -376,48 +451,334 @@ export function NoteEditor({ note, onSaved }: NoteEditorProps) {
     [deferredSource],
   );
   const overLimit = parsed.graphemeCount > CONTENT_MAX_GRAPHEMES;
-  const parentHasNewerVersion = note.version > localVersion;
-  const savedContent = parentHasNewerVersion ? note.contentMd : localSavedContent;
-  const version = parentHasNewerVersion ? note.version : localVersion;
-  const dirty = source !== savedContent || visualDirty;
+  const dirty = source !== localSavedContent || visualDirty;
+
+  useEffect(() => {
+    onSavedRef.current = onSaved;
+  }, [onSaved]);
+
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
+
+  useEffect(() => {
+    titleRef.current = note.title;
+  }, [note.title]);
 
   const handleEditorReady = useCallback((editor: Editor) => {
     visualEditorRef.current = editor;
   }, []);
 
-  const handleVisualChange = useCallback((markdown: string) => {
-    setSource(markdown);
-    setVisualDirty(false);
-    setStatus(null);
-    setError(null);
+  const readCurrentContent = useCallback((): string | null => {
+    if (modeRef.current === "visual") {
+      const editor = visualEditorRef.current;
+
+      if (!editor) {
+        return sourceTextRef.current;
+      }
+
+      try {
+        return serializeVisualJson(editor.getJSON());
+      } catch {
+        return null;
+      }
+    }
+
+    return sourceTextRef.current;
   }, []);
+
+  const storeDraft = useCallback(
+    (contentMd: string) => {
+      if (contentMd === savedContentRef.current) {
+        clearStoredDrafts(note.id);
+        return;
+      }
+
+      writeStoredDraft({
+        noteId: note.id,
+        baseVersion: versionRef.current,
+        contentMd,
+        savedAt: new Date().toISOString(),
+      });
+    },
+    [note.id],
+  );
+
+  const loadServerVersion = useCallback(
+    async (noteId: string, requestId: number) => {
+      try {
+        const serverNote = await fetchNote(noteId);
+
+        setConflict((current) => {
+          if (!current || requestId !== conflictRequestRef.current) {
+            return current;
+          }
+
+          const refreshed: ConflictState = {
+            ...current,
+            latestVersion: serverNote.version,
+            serverContentMd: serverNote.contentMd,
+            serverNote,
+            serverLoadFailed: false,
+          };
+          conflictRef.current = refreshed;
+          return refreshed;
+        });
+      } catch {
+        setConflict((current) => {
+          if (!current || requestId !== conflictRequestRef.current) {
+            return current;
+          }
+
+          const failed: ConflictState = {
+            ...current,
+            serverLoadFailed: true,
+          };
+          conflictRef.current = failed;
+          return failed;
+        });
+      }
+    },
+    [],
+  );
+
+  const showConflict = useCallback(
+    async (latestVersion: number, message: string) => {
+      const nextConflict: ConflictState = {
+        latestVersion,
+        serverContentMd: null,
+        serverNote: null,
+        serverLoadFailed: false,
+      };
+
+      conflictRequestRef.current += 1;
+      conflictRef.current = nextConflict;
+      setConflict(nextConflict);
+      setStatus(null);
+      setError(
+        `${message} Aktuální verze: ${latestVersion}. Váš text zůstal v editoru. Automatické ukládání je pozastaveno.`,
+      );
+      controllerRef.current?.pause();
+
+      await loadServerVersion(note.id, conflictRequestRef.current);
+    },
+    [loadServerVersion, note.id],
+  );
+
+  const saveDraft = useCallback(
+    async (contentMd: string): Promise<DraftSaveOutcome> => {
+      try {
+        const updated = await updateNote(note.id, {
+          contentMd,
+          draft: true,
+          expectedVersion: versionRef.current,
+          title: titleRef.current,
+        });
+
+        versionRef.current = updated.version;
+        savedContentRef.current = updated.contentMd;
+        restoreBaseVersionRef.current = null;
+        setLocalVersion(updated.version);
+        setLocalSavedContent(updated.contentMd);
+        setHasAutosavedContent(true);
+        setAutosaveError(null);
+        setRecoveryDismissed(true);
+
+        syncStoredDraft({
+          noteId: note.id,
+          acknowledgedContentMd: updated.contentMd,
+          currentContentMd: readCurrentContent(),
+          baseVersion: updated.version,
+        });
+
+        onSavedRef.current?.(updated);
+
+        return {
+          status: "saved",
+          version: updated.version,
+          contentMd: updated.contentMd,
+          updatedAt: updated.updatedAt,
+        };
+      } catch (saveError) {
+        if (saveError instanceof NoteApiError && saveError.status === 409) {
+          return {
+            status: "conflict",
+            latestVersion: saveError.latestVersion ?? versionRef.current,
+            message: saveError.message,
+          };
+        }
+
+        return {
+          status: "failed",
+          message:
+            saveError instanceof NoteApiError
+              ? saveError.message
+              : "Poznámku se nepodařilo uložit.",
+        };
+      }
+    },
+    [note.id, readCurrentContent],
+  );
+
+  const getAutosaveContent = useCallback((): string | null => {
+    const content = readCurrentContent();
+
+    if (content === null) {
+      return null;
+    }
+
+    if (content === savedContentRef.current) {
+      return null;
+    }
+
+    if (parseNoteMarkdown(content).graphemeCount > CONTENT_MAX_GRAPHEMES) {
+      return null;
+    }
+
+    return content;
+  }, [readCurrentContent]);
+
+  const handleAutosaveStatus = useCallback(
+    (next: DraftAutosaveStatus) => {
+      switch (next.kind) {
+        case "saving":
+          setIsSaving(true);
+          return;
+        case "saved":
+          setIsSaving(false);
+          setStatus(
+            `Uloženo · verze ${next.version} · ${formatCzechDateTime(next.updatedAt)}`,
+          );
+          return;
+        case "conflict":
+          setIsSaving(false);
+          void showConflict(next.latestVersion, next.message);
+          return;
+        case "failed":
+          setIsSaving(false);
+          setStatus(null);
+          setAutosaveError(
+            `Ukládání konceptu se nezdařilo. ${next.message} Váš text zůstal v editoru.`,
+          );
+          return;
+        case "idle":
+          setIsSaving(false);
+          return;
+      }
+    },
+    [showConflict],
+  );
+
+  useEffect(() => {
+    const controller = new DraftAutosaveController({
+      debounceMs: DRAFT_AUTOSAVE_DEBOUNCE_MS,
+      getContent: getAutosaveContent,
+      onStatus: handleAutosaveStatus,
+      save: saveDraft,
+    });
+
+    controllerRef.current = controller;
+
+    return () => {
+      controller.dispose();
+      controllerRef.current = null;
+    };
+  }, [getAutosaveContent, handleAutosaveStatus, saveDraft]);
+
+  useEffect(() => {
+    if (restoreBaseVersionRef.current !== null) {
+      return;
+    }
+
+    if (note.version <= versionRef.current) {
+      return;
+    }
+
+    if (note.contentMd !== savedContentRef.current) {
+      return;
+    }
+
+    versionRef.current = note.version;
+    setLocalVersion(note.version);
+  }, [note.contentMd, note.version]);
+
+  useEffect(() => {
+    if (!dirty && conflict === null && recovery === null) {
+      return;
+    }
+
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [conflict, dirty, recovery]);
+
+  const notifyChange = useCallback(() => {
+    controllerRef.current?.notifyChange();
+  }, []);
+
+  const clearRecoverableError = useCallback(() => {
+    if (conflictRef.current === null) {
+      setError(null);
+    }
+  }, []);
+
+  const handleVisualChange = useCallback(
+    (markdown: string) => {
+      setSource(markdown);
+      sourceTextRef.current = markdown;
+      setVisualDirty(false);
+      storeDraft(markdown);
+    },
+    [storeDraft],
+  );
 
   const handleVisualError = useCallback((message: string) => {
     setError(message);
   }, []);
 
   const handleVisualPending = useCallback(() => {
+    visualEditedRef.current = true;
     setVisualDirty(true);
     setStatus(null);
-    setError(null);
-  }, []);
+    clearRecoverableError();
+    setRecoveryDismissed(true);
+    notifyChange();
+  }, [clearRecoverableError, notifyChange]);
 
   function handleSourceChange(value: string) {
     setSource(value);
+    sourceTextRef.current = value;
     setVisualDirty(false);
     setStatus(null);
-    setError(null);
+    clearRecoverableError();
+    setRecoveryDismissed(true);
+    storeDraft(value);
+    notifyChange();
   }
 
   function handleShowVisual() {
-    setError(null);
+    if (mode === "visual") {
+      return;
+    }
+
     setStatus(null);
+    clearRecoverableError();
 
     try {
       const content = convertMarkdownToVisual(source);
+      visualEditedRef.current = false;
+      visualEditorRef.current = null;
       setVisualContent(content);
       setVisualDirty(false);
       setMode("visual");
+      modeRef.current = "visual";
     } catch (conversionError) {
       if (conversionError instanceof VisualConversionError) {
         setError(describeVisualFailure(conversionError.failure));
@@ -429,8 +790,8 @@ export function NoteEditor({ note, onSaved }: NoteEditorProps) {
   }
 
   function handleShowSource() {
-    setError(null);
     setStatus(null);
+    clearRecoverableError();
 
     if (mode === "visual" && visualEditorRef.current) {
       try {
@@ -438,32 +799,45 @@ export function NoteEditor({ note, onSaved }: NoteEditorProps) {
           visualEditorRef.current.getJSON(),
         );
         setSource(markdown);
+        sourceTextRef.current = markdown;
         setVisualDirty(false);
+
+        if (visualEditedRef.current) {
+          storeDraft(markdown);
+          setRecoveryDismissed(true);
+        }
       } catch {
         setError(
           "Vizuální obsah nelze bezpečně převést zpět do Markdownu. Přepnuto do zdrojového režimu s posledním bezpečně převedeným textem.",
         );
         setStatus("Poslední vizuální úprava nebyla přenesena do zdrojového textu.");
         setVisualContent(null);
+        visualEditorRef.current = null;
         setVisualDirty(false);
         setMode("source");
+        modeRef.current = "source";
         return;
       }
     }
 
     setVisualContent(null);
+    visualEditorRef.current = null;
     setMode("source");
+    modeRef.current = "source";
   }
 
   async function handleSave() {
-    setError(null);
+    clearRecoverableError();
     setStatus(null);
+    setCopyNotice(null);
 
     let markdown = source;
+
     if (mode === "visual" && visualEditorRef.current) {
       try {
         markdown = serializeVisualJson(visualEditorRef.current.getJSON());
         setSource(markdown);
+        sourceTextRef.current = markdown;
       } catch (serializationError) {
         setError(
           serializationError instanceof Error
@@ -482,51 +856,161 @@ export function NoteEditor({ note, onSaved }: NoteEditorProps) {
       return;
     }
 
+    storeDraft(markdown);
+
+    controllerRef.current?.cancelPending();
+    await controllerRef.current?.waitForIdle();
+    controllerRef.current?.cancelPending();
+
     setIsSaving(true);
+    setIsExplicitSaving(true);
 
     try {
       const updated = await updateNote(note.id, {
         contentMd: markdown,
-        expectedVersion: version,
-        title: note.title,
+        expectedVersion: versionRef.current,
+        title: titleRef.current,
       });
 
+      versionRef.current = updated.version;
+      savedContentRef.current = updated.contentMd;
+      restoreBaseVersionRef.current = null;
       setLocalVersion(updated.version);
       setLocalSavedContent(updated.contentMd);
       setSource(updated.contentMd);
+      sourceTextRef.current = updated.contentMd;
       setVisualDirty(false);
+      setHasAutosavedContent(false);
+      conflictRef.current = null;
+      setConflict(null);
+      setAutosaveError(null);
+      setRecoveryDismissed(true);
       setStatus(
         `Uloženo · verze ${updated.version} · ${formatCzechDateTime(updated.updatedAt)}`,
       );
+
+      syncStoredDraft({
+        noteId: note.id,
+        acknowledgedContentMd: updated.contentMd,
+        currentContentMd: markdown,
+        baseVersion: updated.version,
+      });
+
       onSaved?.(updated);
     } catch (saveError) {
-      if (saveError instanceof NoteApiError) {
-        if (saveError.status === 409) {
-          const latestVersion =
-            saveError.latestVersion === undefined
-              ? ""
-              : ` Aktuální verze: ${saveError.latestVersion}.`;
-          setError(
-            `${saveError.message}${latestVersion} Váš text zůstal v editoru.`,
-          );
-        } else {
-          setError(`${saveError.message} Váš text zůstal v editoru.`);
-        }
+      if (saveError instanceof NoteApiError && saveError.status === 409) {
+        await showConflict(
+          saveError.latestVersion ?? versionRef.current,
+          saveError.message,
+        );
       } else {
         setError(
-          "Poznámku se nepodařilo uložit. Váš text zůstal v editoru.",
+          saveError instanceof NoteApiError
+            ? `${saveError.message} Váš text zůstal v editoru.`
+            : "Poznámku se nepodařilo uložit. Váš text zůstal v editoru.",
         );
       }
     } finally {
+      controllerRef.current?.cancelPending();
+
+      if (conflictRef.current === null) {
+        controllerRef.current?.resume();
+      }
+
       setIsSaving(false);
+      setIsExplicitSaving(false);
+    }
+  }
+
+  function handleRestoreDraft() {
+    if (!recovery) {
+      return;
+    }
+
+    const draft = recovery;
+
+    setSource(draft.contentMd);
+    sourceTextRef.current = draft.contentMd;
+    visualEditedRef.current = false;
+    visualEditorRef.current = null;
+    setVisualContent(null);
+    setVisualDirty(false);
+    setMode("source");
+    modeRef.current = "source";
+    setRecoveryDismissed(true);
+    setStatus(null);
+    restoreBaseVersionRef.current = draft.baseVersion;
+    versionRef.current = draft.baseVersion;
+    setLocalVersion(draft.baseVersion);
+    storeDraft(draft.contentMd);
+    notifyChange();
+  }
+
+  function handleDiscardDraft() {
+    clearStoredDrafts(note.id);
+    setRecoveryDismissed(true);
+  }
+
+  function handleLoadServerVersion() {
+    if (!conflict || conflict.serverNote === null) {
+      return;
+    }
+
+    const serverNote = conflict.serverNote;
+
+    setSource(serverNote.contentMd);
+    sourceTextRef.current = serverNote.contentMd;
+    savedContentRef.current = serverNote.contentMd;
+    visualEditedRef.current = false;
+    visualEditorRef.current = null;
+    versionRef.current = serverNote.version;
+    setLocalVersion(serverNote.version);
+    setLocalSavedContent(serverNote.contentMd);
+    titleRef.current = serverNote.title;
+    setVisualContent(null);
+    setVisualDirty(false);
+    setHasAutosavedContent(false);
+    setMode("source");
+    modeRef.current = "source";
+    conflictRef.current = null;
+    setConflict(null);
+    setError(null);
+    setAutosaveError(null);
+    setStatus(null);
+    setRecoveryDismissed(true);
+    restoreBaseVersionRef.current = null;
+    clearStoredDrafts(note.id);
+    controllerRef.current?.resume();
+    onSaved?.(serverNote);
+  }
+
+  async function handleCopyText(value: string, label: string) {
+    try {
+      if (!navigator.clipboard) {
+        throw new Error("Schránka není dostupná.");
+      }
+
+      await navigator.clipboard.writeText(value);
+      setCopyNotice(`${label} byl zkopírován do schránky.`);
+    } catch {
+      setCopyNotice(
+        "Kopírování do schránky selhalo. Text zvolte a zkopírujte ručně.",
+      );
     }
   }
 
   const statusText = isSaving
-    ? "Ukládám…"
+    ? "Ukládá se…"
     : dirty
       ? "Neuložené změny"
-      : status ?? "Vše je uloženo.";
+      : conflict !== null
+        ? "Konflikt uložení – automatické ukládání je pozastaveno."
+        : recovery !== null
+          ? "Nalezen neuložený koncept – obnovte ho nebo zahoďte."
+          : status ?? "Vše je uloženo.";
+
+  const alertMessage = [autosaveError, error].filter(Boolean).join(" ");
+  const canSave = dirty || hasAutosavedContent;
 
   return (
     <section aria-labelledby="note-editor-heading" className="mt-8">
@@ -545,7 +1029,7 @@ export function NoteEditor({ note, onSaved }: NoteEditorProps) {
           <button
             aria-pressed={mode === "source"}
             className="rounded-md px-3 py-1.5 text-sm font-semibold text-stone-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 aria-pressed:bg-emerald-800 aria-pressed:text-white disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={isSaving}
+            disabled={isExplicitSaving}
             onClick={handleShowSource}
             type="button"
           >
@@ -554,7 +1038,7 @@ export function NoteEditor({ note, onSaved }: NoteEditorProps) {
           <button
             aria-pressed={mode === "visual"}
             className="rounded-md px-3 py-1.5 text-sm font-semibold text-stone-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 aria-pressed:bg-emerald-800 aria-pressed:text-white disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={isSaving}
+            disabled={isExplicitSaving}
             onClick={handleShowVisual}
             type="button"
           >
@@ -563,17 +1047,155 @@ export function NoteEditor({ note, onSaved }: NoteEditorProps) {
         </div>
       </div>
 
+      {recovery ? (
+        <section
+          aria-labelledby="note-recovery-heading"
+          className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4"
+          role="region"
+        >
+          <h3
+            className="text-sm font-semibold text-amber-950"
+            id="note-recovery-heading"
+          >
+            Nalezen neuložený koncept
+          </h3>
+          <p className="mt-1 text-sm text-amber-900">
+            V této kartě je uložený rozpracovaný text poznámky (verze{" "}
+            {recovery.baseVersion}). Obnovit jej do editoru, nebo ho zahodit?
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              className="rounded-lg bg-amber-800 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-700"
+              onClick={handleRestoreDraft}
+              type="button"
+            >
+              Obnovit koncept
+            </button>
+            <button
+              className="rounded-lg border border-amber-300 px-4 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-700"
+              onClick={handleDiscardDraft}
+              type="button"
+            >
+              Zahodit koncept
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {conflict ? (
+        <section
+          aria-labelledby="note-conflict-heading"
+          className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4"
+          role="region"
+        >
+          <h3
+            className="text-sm font-semibold text-amber-950"
+            id="note-conflict-heading"
+          >
+            Konflikt uložení
+          </h3>
+          <p className="mt-1 text-sm text-amber-900">
+            Poznámka byla mezitím změněna. Automatické ukládání je
+            pozastaveno. Texty se nikdy nepřipojují ani nepřepisují automaticky –
+            porovnejte je a rozhodněte ručně. Načtením serverové verze se text
+            v editoru nahradí, proto si svůj text nejprve zkopírujte.
+          </p>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <div>
+              <label
+                className="block text-sm font-medium text-amber-950"
+                htmlFor="note-conflict-local"
+              >
+                Můj text (verze {localVersion})
+              </label>
+              <textarea
+                className="mt-1 min-h-32 w-full rounded-lg border border-amber-300 bg-white p-2 font-mono text-xs"
+                id="note-conflict-local"
+                readOnly
+                value={source}
+              />
+            </div>
+            <div>
+              <label
+                className="block text-sm font-medium text-amber-950"
+                htmlFor="note-conflict-server"
+              >
+                Text na serveru (verze {conflict.latestVersion})
+              </label>
+              <textarea
+                className="mt-1 min-h-32 w-full rounded-lg border border-amber-300 bg-white p-2 font-mono text-xs"
+                id="note-conflict-server"
+                readOnly
+                value={
+                  conflict.serverContentMd ??
+                  (conflict.serverLoadFailed
+                    ? "Serverovou verzi se nepodařilo načíst."
+                    : "Načítání serverové verze…")
+                }
+              />
+            </div>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              className="rounded-lg border border-amber-300 px-4 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-700"
+              onClick={() => void handleCopyText(source, "Můj text")}
+              type="button"
+            >
+              Zkopírovat můj text
+            </button>
+            <button
+              className="rounded-lg border border-amber-300 px-4 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-700"
+              disabled={conflict.serverContentMd === null}
+              onClick={() =>
+                void handleCopyText(
+                  conflict.serverContentMd ?? "",
+                  "Serverová verze",
+                )
+              }
+              type="button"
+            >
+              Zkopírovat serverovou verzi
+            </button>
+            <button
+              className="rounded-lg bg-amber-800 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={conflict.serverNote === null}
+              onClick={handleLoadServerVersion}
+              type="button"
+            >
+              Načíst serverovou verzi
+            </button>
+            {conflict.serverLoadFailed ? (
+              <button
+                className="rounded-lg border border-amber-300 px-4 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-700"
+                onClick={() => {
+                  conflictRequestRef.current += 1;
+                  void loadServerVersion(note.id, conflictRequestRef.current);
+                }}
+                type="button"
+              >
+                Zkusit načíst serverovou verzi znovu
+              </button>
+            ) : null}
+          </div>
+          {copyNotice ? (
+            <p aria-live="polite" className="mt-2 text-sm text-amber-900">
+              {copyNotice}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+
       <div className="mt-4">
         {mode === "source" ? (
           <MarkdownSource
-            disabled={isSaving}
+            disabled={isExplicitSaving}
             onChange={handleSourceChange}
-            textareaRef={sourceRef}
+            textareaRef={textareaRef}
             value={source}
           />
         ) : visualContent ? (
           <VisualMarkdownEditor
-            disabled={isSaving}
+            disabled={isExplicitSaving}
             initialContent={visualContent}
             onChange={handleVisualChange}
             onEditorReady={handleEditorReady}
@@ -599,11 +1221,11 @@ export function NoteEditor({ note, onSaved }: NoteEditorProps) {
         </p>
         <button
           className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={isSaving || overLimit || !dirty}
+          disabled={isSaving || overLimit || !canSave}
           onClick={() => void handleSave()}
           type="button"
         >
-          {isSaving ? "Ukládám…" : "Uložit"}
+          {isExplicitSaving ? "Ukládám…" : "Uložit"}
         </button>
       </div>
 
@@ -618,12 +1240,12 @@ export function NoteEditor({ note, onSaved }: NoteEditorProps) {
         </p>
       ) : null}
 
-      {error ? (
+      {alertMessage ? (
         <p
           className="mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900"
           role="alert"
         >
-          {error}
+          {alertMessage}
         </p>
       ) : null}
 

@@ -90,6 +90,12 @@ export async function createNote(input: {
   });
 }
 
+export async function fetchNote(id: string): Promise<NoteDetail> {
+  return requestJson<NoteDetail>(`/api/notes/${id}`, {
+    method: "GET",
+  });
+}
+
 export async function updateNote(
   id: string,
   input: {

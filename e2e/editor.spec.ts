@@ -108,7 +108,9 @@ test("visual and source editor, explicit save, reload, and source-only safety", 
 
   await page.getByRole("button", { name: "Uložit", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("Uloženo");
-  await expect(page.getByRole("status")).toContainText("verze 2");
+  const savedStatus = await page.getByRole("status").textContent();
+  const savedVersion = Number(/verze (\d+)/.exec(savedStatus ?? "")?.[1]);
+  expect(savedVersion).toBeGreaterThanOrEqual(2);
 
   await page.reload();
   await expect(page.getByLabel("Obsah (Markdown)")).toHaveValue(/Nadpis H1/);

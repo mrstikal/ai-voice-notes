@@ -132,6 +132,7 @@ function normalizedCounterText(): string {
 
 afterEach(() => {
   cleanup();
+  window.sessionStorage.clear();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
