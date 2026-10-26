@@ -3,6 +3,11 @@ import {
   type ElevenLabsTransport,
   type ScribeTokenTransportRequest,
 } from "../../src/lib/elevenlabs/client";
+import type {
+  MicrophoneLock,
+  MicrophoneLockManager,
+  MicrophoneLockMode,
+} from "../../src/lib/voice/microphone";
 
 export class UnmockedProviderCallError extends Error {
   constructor() {
@@ -64,4 +69,44 @@ export function installUnmockedProviderGuard(): void {
 
 export function resetProviderMocks(): void {
   setElevenLabsTransportForTests(null);
+}
+
+export interface FakeLockManager extends MicrophoneLockManager {
+  readonly heldNames: Set<string>;
+}
+
+export function createFakeLockManager(): FakeLockManager {
+  const heldNames = new Set<string>();
+
+  return {
+    heldNames,
+    async request(
+      name: string,
+      options: {
+        readonly mode?: MicrophoneLockMode;
+        readonly ifAvailable?: boolean;
+      },
+      callback: (lock: MicrophoneLock | null) => Promise<void> | void,
+    ) {
+      if (heldNames.has(name)) {
+        if (options.ifAvailable) {
+          await callback(null);
+          return;
+        }
+
+        throw new Error("Queued Web Locks are not implemented in this fake.");
+      }
+
+      heldNames.add(name);
+
+      try {
+        await callback({
+          name,
+          mode: options.mode ?? "exclusive",
+        });
+      } finally {
+        heldNames.delete(name);
+      }
+    },
+  };
 }
