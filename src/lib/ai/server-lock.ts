@@ -1,6 +1,7 @@
 import { Client } from "pg";
 
 import { reconcileInterruptedReservations } from "./usage.ts";
+import { loadConfig, type AppConfig } from "../config.ts";
 import { createDatabase } from "../db/client.ts";
 
 const SERVER_LOCK_KEY = 7001001;
@@ -12,12 +13,12 @@ type LockGlobal = typeof globalThis & {
 
 const lockGlobal = globalThis as LockGlobal;
 
-function runtimeDatabaseUrl(): string | undefined {
+function runtimeDatabaseUrl(config: AppConfig): string | undefined {
   if (process.env.NODE_ENV === "test") {
-    return process.env.TEST_DATABASE_URL?.trim();
+    return config.testDatabaseUrl ?? undefined;
   }
 
-  return process.env.DATABASE_URL?.trim();
+  return config.databaseUrl ?? undefined;
 }
 
 export async function acquireServerLock(): Promise<void> {
@@ -33,7 +34,20 @@ export async function acquireServerLock(): Promise<void> {
     return;
   }
 
-  const databaseUrl = runtimeDatabaseUrl();
+  let config: AppConfig;
+
+  try {
+    config = loadConfig();
+  } catch (error) {
+    console.error(
+      error instanceof Error
+        ? error.message
+        : "Konfigurace aplikace je neplatná.",
+    );
+    process.exit(1);
+  }
+
+  const databaseUrl = runtimeDatabaseUrl(config);
 
   if (!databaseUrl) {
     return;

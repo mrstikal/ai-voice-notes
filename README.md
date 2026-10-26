@@ -57,9 +57,18 @@ live check is separately authorized.
 | `DATABASE_URL` | Development PostgreSQL URL | compose `db` service |
 | `TEST_DATABASE_URL` | Isolated test PostgreSQL URL | compose `db-test` service |
 | `AI_TEST_MODE` | Test-only switch; leave empty normally | empty |
+| `ELEVENLABS_API_KEY` | Server-side ElevenLabs key; empty until an authorized live check | empty |
+| `ELEVENLABS_API_BASE_URL` | ElevenLabs API endpoint; test mode requires a loopback mock | `https://api.elevenlabs.io` |
 | `NOTE_MAX_CHARACTERS` | Maximum visible note characters | `20000` |
 | `MEETING_MAX_MINUTES` | Maximum meeting length | `15` |
 | `AI_REQUEST_BUDGET_USD` | Local estimated AI admission budget | `2.00` |
+
+When `AI_TEST_MODE=1`, startup requires `DATABASE_URL` (and, when set,
+`TEST_DATABASE_URL`) to name a database ending with `_test`, a loopback
+`ELEVENLABS_API_BASE_URL` with an explicit port, and exact dummy provider keys
+for any configured credential (`test-only-elevenlabs`,
+`test-only-openrouter`, `test-only-openai`, `test-only-gemini`). Real keys are
+rejected before a provider client is constructed.
 
 `APP_ORIGIN` is validated at startup. Only `127.0.0.1`, `localhost`, or `::1`
 with an explicit port is accepted; paths, credentials, and other hosts are

@@ -4,8 +4,10 @@ import {
   ConfigurationError,
   DEFAULT_AI_REQUEST_BUDGET_USD,
   DEFAULT_APP_ORIGIN,
+  DEFAULT_ELEVENLABS_API_BASE_URL,
   DEFAULT_MEETING_MAX_MINUTES,
   DEFAULT_NOTE_MAX_CHARACTERS,
+  TEST_MODE_PROVIDER_KEYS,
   loadConfig,
   validateStartupEnvironment,
   type Environment,
@@ -13,6 +15,19 @@ import {
 import { CONTENT_MAX_GRAPHEMES } from "../src/lib/notes/limits";
 
 const SUPPORTED_NODE = "22.19.0";
+
+const TEST_MODE_ENV: Environment = {
+  AI_TEST_MODE: "1",
+  DATABASE_URL:
+    "postgresql://ai_voice_notes:ai_voice_notes@127.0.0.1:55433/ai_voice_notes_test",
+  TEST_DATABASE_URL:
+    "postgresql://ai_voice_notes:ai_voice_notes@127.0.0.1:55433/ai_voice_notes_test",
+  ELEVENLABS_API_KEY: TEST_MODE_PROVIDER_KEYS.ELEVENLABS_API_KEY,
+  ELEVENLABS_API_BASE_URL: "http://127.0.0.1:4010",
+  OPENROUTER_API_KEY: TEST_MODE_PROVIDER_KEYS.OPENROUTER_API_KEY,
+  OPENAI_API_KEY: TEST_MODE_PROVIDER_KEYS.OPENAI_API_KEY,
+  GEMINI_API_KEY: TEST_MODE_PROVIDER_KEYS.GEMINI_API_KEY,
+};
 
 function configWith(env: Environment = {}, nodeVersion = SUPPORTED_NODE) {
   return loadConfig(env, nodeVersion);
@@ -32,6 +47,11 @@ describe("loadConfig", () => {
       testDatabaseUrl: null,
       aiTestMode: false,
       allowForwardedLoopback: false,
+      elevenLabsApiKey: null,
+      elevenLabsApiBaseUrl: DEFAULT_ELEVENLABS_API_BASE_URL,
+      openRouterApiKey: null,
+      openAiApiKey: null,
+      geminiApiKey: null,
       noteMaxCharacters: DEFAULT_NOTE_MAX_CHARACTERS,
       meetingMaxMinutes: DEFAULT_MEETING_MAX_MINUTES,
       aiRequestBudgetUsd: DEFAULT_AI_REQUEST_BUDGET_USD,
@@ -173,10 +193,10 @@ describe("loadConfig", () => {
   });
 
   it("parses AI_TEST_MODE strictly", () => {
-    expect(configWith({ AI_TEST_MODE: "1" }).aiTestMode).toBe(true);
     expect(configWith({ AI_TEST_MODE: "0" }).aiTestMode).toBe(false);
     expect(configWith({ AI_TEST_MODE: "" }).aiTestMode).toBe(false);
     expect(() => configWith({ AI_TEST_MODE: "true" })).toThrow(ConfigurationError);
+    expect(configWith(TEST_MODE_ENV).aiTestMode).toBe(true);
   });
 });
 

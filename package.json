@@ -21,6 +21,7 @@
     "db:seed": "node scripts/seed-notes.ts"
   },
   "dependencies": {
+    "@elevenlabs/elevenlabs-js": "2.74.0",
     "@next/env": "16.4.3",
     "@tiptap/core": "3.32.0",
     "@tiptap/extension-blockquote": "3.32.0",

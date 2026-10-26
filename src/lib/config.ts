@@ -5,6 +5,16 @@ export const DEFAULT_APP_ORIGIN = "http://127.0.0.1:3000";
 export const DEFAULT_NOTE_MAX_CHARACTERS = CONTENT_MAX_GRAPHEMES;
 export const DEFAULT_MEETING_MAX_MINUTES = 15;
 export const DEFAULT_AI_REQUEST_BUDGET_USD = 2.0;
+export const DEFAULT_ELEVENLABS_API_BASE_URL = "https://api.elevenlabs.io";
+
+export const TEST_MODE_PROVIDER_KEYS = {
+  ELEVENLABS_API_KEY: "test-only-elevenlabs",
+  OPENROUTER_API_KEY: "test-only-openrouter",
+  OPENAI_API_KEY: "test-only-openai",
+  GEMINI_API_KEY: "test-only-gemini",
+} as const;
+
+export type ProviderKeyName = keyof typeof TEST_MODE_PROVIDER_KEYS;
 
 export type Environment = Record<string, string | undefined>;
 
@@ -23,6 +33,11 @@ export interface AppConfig {
   testDatabaseUrl: string | null;
   aiTestMode: boolean;
   allowForwardedLoopback: boolean;
+  elevenLabsApiKey: string | null;
+  elevenLabsApiBaseUrl: string;
+  openRouterApiKey: string | null;
+  openAiApiKey: string | null;
+  geminiApiKey: string | null;
   noteMaxCharacters: number;
   meetingMaxMinutes: number;
   aiRequestBudgetUsd: number;
@@ -202,6 +217,159 @@ function parseOptionalPostgresUrl(
   return value;
 }
 
+function parseOptionalSecret(
+  env: Environment,
+  name: ProviderKeyName,
+): string | null {
+  const value = env[name]?.trim();
+  if (!value) {
+    return null;
+  }
+
+  if (value.length > 512) {
+    throw new ConfigurationError(`${name} je příliš dlouhý.`);
+  }
+
+  if (/[\s\x00-\x1f\x7f]/u.test(value)) {
+    throw new ConfigurationError(`${name} obsahuje neplatné znaky.`);
+  }
+
+  return value;
+}
+
+function parseElevenLabsApiBaseUrl(
+  env: Environment,
+  aiTestMode: boolean,
+): string {
+  const value =
+    env.ELEVENLABS_API_BASE_URL?.trim() || DEFAULT_ELEVENLABS_API_BASE_URL;
+
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new ConfigurationError(
+      "ELEVENLABS_API_BASE_URL musí být platná adresa, například https://api.elevenlabs.io.",
+    );
+  }
+
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new ConfigurationError(
+      "ELEVENLABS_API_BASE_URL musí používat protokol http nebo https.",
+    );
+  }
+
+  if (url.username !== "" || url.password !== "") {
+    throw new ConfigurationError(
+      "ELEVENLABS_API_BASE_URL nesmí obsahovat přihlašovací údaje.",
+    );
+  }
+
+  if (url.search !== "" || url.hash !== "") {
+    throw new ConfigurationError(
+      "ELEVENLABS_API_BASE_URL nesmí obsahovat dotaz ani fragment.",
+    );
+  }
+
+  if (aiTestMode) {
+    if (url.protocol !== "http:") {
+      throw new ConfigurationError(
+        "ELEVENLABS_API_BASE_URL musí v AI_TEST_MODE=1 používat http na loopback mocku.",
+      );
+    }
+
+    if (!isLoopbackHostname(url.hostname)) {
+      throw new ConfigurationError(
+        "ELEVENLABS_API_BASE_URL musí v AI_TEST_MODE=1 mířit na loopback adresu.",
+      );
+    }
+
+    if (url.port === "") {
+      throw new ConfigurationError(
+        "ELEVENLABS_API_BASE_URL musí v AI_TEST_MODE=1 obsahovat explicitní port mock serveru.",
+      );
+    }
+  }
+
+  return `${url.origin}${url.pathname.replace(/\/+$/u, "")}`;
+}
+
+function databaseNameFromUrl(value: string): string {
+  const url = new URL(value);
+
+  try {
+    return decodeURIComponent(url.pathname.slice(1));
+  } catch {
+    throw new ConfigurationError(
+      "Databázová adresa obsahuje neplatný název databáze.",
+    );
+  }
+}
+
+const FORBIDDEN_DATABASE_QUERY_KEYS = new Set([
+  "host",
+  "hostaddr",
+  "port",
+  "dbname",
+  "database",
+  "user",
+  "password",
+]);
+
+function assertAiTestModeDatabase(name: string, value: string): void {
+  const url = new URL(value);
+
+  for (const key of url.searchParams.keys()) {
+    if (FORBIDDEN_DATABASE_QUERY_KEYS.has(key.toLowerCase())) {
+      throw new ConfigurationError(
+        `${name} nesmí v AI_TEST_MODE=1 přepisovat cíl databáze v query parametrech.`,
+      );
+    }
+  }
+
+  if (!databaseNameFromUrl(value).endsWith("_test")) {
+    throw new ConfigurationError(
+      `${name} musí v AI_TEST_MODE=1 mířit na databázi s názvem končícím na _test.`,
+    );
+  }
+}
+
+function assertAiTestModeEnvironment(options: {
+  databaseUrl: string | null;
+  testDatabaseUrl: string | null;
+  elevenLabsApiKey: string | null;
+  openRouterApiKey: string | null;
+  openAiApiKey: string | null;
+  geminiApiKey: string | null;
+}): void {
+  if (!options.databaseUrl) {
+    throw new ConfigurationError(
+      "AI_TEST_MODE=1 vyžaduje DATABASE_URL s testovací databází končící na _test.",
+    );
+  }
+
+  assertAiTestModeDatabase("DATABASE_URL", options.databaseUrl);
+
+  if (options.testDatabaseUrl !== null) {
+    assertAiTestModeDatabase("TEST_DATABASE_URL", options.testDatabaseUrl);
+  }
+
+  const keys = [
+    ["ELEVENLABS_API_KEY", options.elevenLabsApiKey],
+    ["OPENROUTER_API_KEY", options.openRouterApiKey],
+    ["OPENAI_API_KEY", options.openAiApiKey],
+    ["GEMINI_API_KEY", options.geminiApiKey],
+  ] as const;
+
+  for (const [name, value] of keys) {
+    if (value !== null && value !== TEST_MODE_PROVIDER_KEYS[name]) {
+      throw new ConfigurationError(
+        `${name} musí být v AI_TEST_MODE=1 přesně "${TEST_MODE_PROVIDER_KEYS[name]}".`,
+      );
+    }
+  }
+}
+
 function parsePositiveInteger(
   env: Environment,
   name: "NOTE_MAX_CHARACTERS" | "MEETING_MAX_MINUTES",
@@ -293,6 +461,17 @@ export function loadConfig(
   nodeVersion: string = process.versions.node,
 ): AppConfig {
   const startup = validateStartupEnvironment(env, nodeVersion);
+  const aiTestMode = parseAiTestMode(env);
+  const databaseUrl = parseOptionalPostgresUrl(env.DATABASE_URL, "DATABASE_URL");
+  const testDatabaseUrl = parseOptionalPostgresUrl(
+    env.TEST_DATABASE_URL,
+    "TEST_DATABASE_URL",
+  );
+  const elevenLabsApiKey = parseOptionalSecret(env, "ELEVENLABS_API_KEY");
+  const openRouterApiKey = parseOptionalSecret(env, "OPENROUTER_API_KEY");
+  const openAiApiKey = parseOptionalSecret(env, "OPENAI_API_KEY");
+  const geminiApiKey = parseOptionalSecret(env, "GEMINI_API_KEY");
+  const elevenLabsApiBaseUrl = parseElevenLabsApiBaseUrl(env, aiTestMode);
   const noteMaxCharacters = parsePositiveInteger(
     env,
     "NOTE_MAX_CHARACTERS",
@@ -305,14 +484,27 @@ export function loadConfig(
     );
   }
 
+  if (aiTestMode) {
+    assertAiTestModeEnvironment({
+      databaseUrl,
+      testDatabaseUrl,
+      elevenLabsApiKey,
+      openRouterApiKey,
+      openAiApiKey,
+      geminiApiKey,
+    });
+  }
+
   return {
     ...startup,
-    databaseUrl: parseOptionalPostgresUrl(env.DATABASE_URL, "DATABASE_URL"),
-    testDatabaseUrl: parseOptionalPostgresUrl(
-      env.TEST_DATABASE_URL,
-      "TEST_DATABASE_URL",
-    ),
-    aiTestMode: parseAiTestMode(env),
+    databaseUrl,
+    testDatabaseUrl,
+    aiTestMode,
+    elevenLabsApiKey,
+    elevenLabsApiBaseUrl,
+    openRouterApiKey,
+    openAiApiKey,
+    geminiApiKey,
     noteMaxCharacters,
     meetingMaxMinutes: parsePositiveInteger(
       env,
