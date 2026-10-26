@@ -16,6 +16,8 @@ import {
   countGraphemes,
 } from "@/lib/notes/limits";
 
+import { ExportMenu } from "./ExportMenu";
+
 interface NoteHeaderProps {
   readonly note: NoteDetail;
   readonly onNoteUpdated?: (note: NoteDetail) => void;
@@ -142,6 +144,7 @@ export function NoteHeader({ note, onNoteUpdated }: NoteHeaderProps) {
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <ExportMenu noteId={note.id} />
           {!isRenaming ? (
             <button
               className="rounded-lg border border-stone-300 px-3 py-2 text-sm font-semibold text-stone-800 hover:bg-stone-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
