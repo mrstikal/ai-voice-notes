@@ -31,6 +31,7 @@ describe("loadConfig", () => {
       databaseUrl: null,
       testDatabaseUrl: null,
       aiTestMode: false,
+      allowForwardedLoopback: false,
       noteMaxCharacters: DEFAULT_NOTE_MAX_CHARACTERS,
       meetingMaxMinutes: DEFAULT_MEETING_MAX_MINUTES,
       aiRequestBudgetUsd: DEFAULT_AI_REQUEST_BUDGET_USD,
@@ -43,6 +44,22 @@ describe("loadConfig", () => {
     expect(config.appOrigin).toBe("http://127.0.0.1:3100");
     expect(config.appHost).toBe("127.0.0.1");
     expect(config.appPort).toBe(3100);
+  });
+
+  it("parses the forwarded-loopback opt-in", () => {
+    expect(configWith().allowForwardedLoopback).toBe(false);
+    expect(
+      configWith({ APP_ALLOW_FORWARDED_LOOPBACK: "0" }).allowForwardedLoopback,
+    ).toBe(false);
+    expect(
+      configWith({ APP_ALLOW_FORWARDED_LOOPBACK: "1" }).allowForwardedLoopback,
+    ).toBe(true);
+
+    for (const value of ["true", "yes", "2"]) {
+      expect(() =>
+        configWith({ APP_ALLOW_FORWARDED_LOOPBACK: value }),
+      ).toThrow(ConfigurationError);
+    }
   });
 
   it("accepts localhost and IPv6 loopback origins", () => {

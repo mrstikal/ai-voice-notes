@@ -1,3 +1,4 @@
+import JSZip from "jszip";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { GET as exportNote } from "@/app/api/notes/[id]/export/route";
@@ -189,7 +190,8 @@ describe("Markdown export API", () => {
   it("rejects missing or unsupported formats before loading the note", async () => {
     for (const path of [
       `/api/notes/${NOTE_ID}/export`,
-      exportUrl(NOTE_ID, "docx"),
+      exportUrl(NOTE_ID, "pdf"),
+      exportUrl(NOTE_ID, "MD"),
       exportUrl(NOTE_ID, ""),
     ]) {
       const response = await exportNote(request(path), context());
@@ -198,6 +200,66 @@ describe("Markdown export API", () => {
     }
 
     expect(service.getNote).not.toHaveBeenCalled();
+  });
+
+  it("exports a DOCX ZIP with the Czech title as filename metadata", async () => {
+    service.getNote.mockResolvedValue(
+      noteDetail({
+        contentMd: "# Nadpis\n\nText s **důrazem** a [odkazem](https://example.com).",
+        title: "Poznámka pro DOCX",
+      }),
+    );
+
+    const response = await exportNote(
+      request(exportUrl(NOTE_ID, "docx")),
+      context(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe(
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    );
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("content-disposition")).toContain(
+      "filename=\"Poznamka-pro-DOCX.docx\"",
+    );
+    expect(response.headers.get("content-disposition")).toContain(
+      "filename*=UTF-8''Pozn%C3%A1mka%20pro%20DOCX.docx",
+    );
+
+    const zip = await JSZip.loadAsync(Buffer.from(await response.arrayBuffer()));
+    const document = await zip.file("word/document.xml")?.async("string");
+    const relationships = await zip
+      .file("word/_rels/document.xml.rels")
+      ?.async("string");
+
+    expect(document).toContain("Nadpis");
+    expect(document).toContain("důrazem");
+    expect(document).toContain("<w:b/>");
+    expect(relationships).toContain("https://example.com");
+  });
+
+  it("returns 422 for source-only DOCX while Markdown still exports exactly", async () => {
+    const contentMd = "| A | B |\n| --- | --- |\n| 1 | 2 |";
+    service.getNote.mockResolvedValue(noteDetail({ contentMd }));
+
+    const docx = await exportNote(
+      request(exportUrl(NOTE_ID, "docx")),
+      context(),
+    );
+    expect(docx.status).toBe(422);
+    expect(await errorCode(docx)).toBe("unsupported_markdown");
+
+    const markdown = await exportNote(
+      request(exportUrl(NOTE_ID, "md")),
+      context(),
+    );
+    expect(markdown.status).toBe(200);
+    expect(
+      Buffer.from(await markdown.arrayBuffer()).equals(
+        Buffer.from(contentMd, "utf8"),
+      ),
+    ).toBe(true);
   });
 
   it("rejects invalid UUIDs and missing or deleted notes", async () => {

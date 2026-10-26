@@ -22,6 +22,7 @@ export interface AppConfig {
   databaseUrl: string | null;
   testDatabaseUrl: string | null;
   aiTestMode: boolean;
+  allowForwardedLoopback: boolean;
   noteMaxCharacters: number;
   meetingMaxMinutes: number;
   aiRequestBudgetUsd: number;
@@ -91,6 +92,7 @@ export interface StartupEnvironment {
   appOrigin: string;
   appHost: string;
   appPort: number;
+  allowForwardedLoopback: boolean;
 }
 
 function extractExplicitPort(value: string): string | null {
@@ -255,6 +257,21 @@ function parseAiTestMode(env: Environment): boolean {
   throw new ConfigurationError("AI_TEST_MODE může být pouze 1 nebo 0.");
 }
 
+function parseAllowForwardedLoopback(env: Environment): boolean {
+  const rawValue = env.APP_ALLOW_FORWARDED_LOOPBACK?.trim();
+  if (!rawValue || rawValue === "0") {
+    return false;
+  }
+
+  if (rawValue === "1") {
+    return true;
+  }
+
+  throw new ConfigurationError(
+    "APP_ALLOW_FORWARDED_LOOPBACK může být pouze 1 nebo 0.",
+  );
+}
+
 export function validateStartupEnvironment(
   env: Environment = process.env,
   nodeVersion: string = process.versions.node,
@@ -267,6 +284,7 @@ export function validateStartupEnvironment(
     appOrigin: appOrigin.origin,
     appHost: appOrigin.host,
     appPort: appOrigin.port,
+    allowForwardedLoopback: parseAllowForwardedLoopback(env),
   };
 }
 

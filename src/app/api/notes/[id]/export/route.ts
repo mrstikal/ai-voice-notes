@@ -9,6 +9,12 @@ import {
   getNoteService,
   toNoteErrorResponse,
 } from "@/lib/notes/service";
+import { UnsupportedMarkdownError } from "@/lib/notes/markdown";
+import {
+  DocxExportTooLargeError,
+  renderNoteDocx,
+} from "@/lib/notes/export-docx";
+import { buildDownloadContentDisposition } from "@/lib/notes/export-filename";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,12 +24,8 @@ type ExportRouteContext = {
 };
 
 const MARKDOWN_MEDIA_TYPE = "text/markdown; charset=utf-8";
-const FALLBACK_FILENAME = "Poznamka";
-const DEFAULT_FILENAME = "Poznámka";
-const FILENAME_RESERVED_PATTERN = /[<>:"/\\|?*]/g;
-const FILENAME_CONTROL_PATTERN =
-  /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
-const ASCII_ATTR_CHAR_PATTERN = /[A-Za-z0-9!#$&+\-.^_`|~]/;
+const DOCX_MEDIA_TYPE =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 async function readNoteId(
   context: ExportRouteContext | undefined,
@@ -37,69 +39,46 @@ async function readNoteId(
   return id;
 }
 
-function sanitizeFilenameBase(title: string, fallback: string): string {
-  const cleaned = title
-    .normalize("NFC")
-    .replace(FILENAME_CONTROL_PATTERN, "")
-    .replace(FILENAME_RESERVED_PATTERN, "-")
-    .replace(/\s+/g, " ")
-    .replace(/^[.\s-]+|[.\s-]+$/g, "");
-
-  return cleaned === "" ? fallback : cleaned;
-}
-
-function asciiFallbackFilename(title: string): string {
-  const ascii = title
-    .normalize("NFKD")
-    .replace(/\p{M}/gu, "")
-    .replace(FILENAME_CONTROL_PATTERN, "")
-    .replace(FILENAME_RESERVED_PATTERN, "-")
-    .replace(/[^A-Za-z0-9._ -]/g, "-")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^[.\s-]+|[.\s-]+$/g, "");
-
-  return `${ascii === "" ? FALLBACK_FILENAME : ascii}.md`;
-}
-
-function percentEncodeFilename(filename: string): string {
-  const bytes = new TextEncoder().encode(filename);
-  let encoded = "";
-
-  for (const byte of bytes) {
-    const character = String.fromCharCode(byte);
-
-    if (ASCII_ATTR_CHAR_PATTERN.test(character)) {
-      encoded += character;
-    } else {
-      encoded += `%${byte.toString(16).toUpperCase().padStart(2, "0")}`;
-    }
-  }
-
-  return encoded;
-}
-
-function contentDisposition(title: string): string {
-  const asciiFilename = asciiFallbackFilename(title);
-  const unicodeFilename = `${sanitizeFilenameBase(title, DEFAULT_FILENAME)}.md`;
-
-  return [
-    "attachment",
-    `filename="${asciiFilename}"`,
-    `filename*=UTF-8''${percentEncodeFilename(unicodeFilename)}`,
-  ].join("; ");
-}
-
 function markdownResponse(contentMd: string, title: string): Response {
   return new Response(new TextEncoder().encode(contentMd), {
     status: 200,
     headers: {
       "cache-control": "no-store",
-      "content-disposition": contentDisposition(title),
+      "content-disposition": buildDownloadContentDisposition(title, "md"),
       "content-type": MARKDOWN_MEDIA_TYPE,
       "x-content-type-options": "nosniff",
     },
   });
+}
+
+function docxResponse(buffer: Buffer, title: string): Response {
+  return new Response(Uint8Array.from(buffer), {
+    status: 200,
+    headers: {
+      "cache-control": "no-store",
+      "content-disposition": buildDownloadContentDisposition(title, "docx"),
+      "content-type": DOCX_MEDIA_TYPE,
+      "x-content-type-options": "nosniff",
+    },
+  });
+}
+
+function exportErrorResponse(error: unknown): Response {
+  if (error instanceof UnsupportedMarkdownError) {
+    return jsonError(
+      422,
+      "unsupported_markdown",
+      error.message,
+      undefined,
+      { reasons: error.reasons },
+    );
+  }
+
+  if (error instanceof DocxExportTooLargeError) {
+    return jsonError(422, "docx_too_large", error.message);
+  }
+
+  return toNoteErrorResponse(error);
 }
 
 export const GET = createGuardedReadHandler<ExportRouteContext>({
@@ -107,11 +86,11 @@ export const GET = createGuardedReadHandler<ExportRouteContext>({
     try {
       const format = new URL(request.url).searchParams.get("format");
 
-      if (format !== "md") {
+      if (format !== "md" && format !== "docx") {
         return jsonError(
           400,
           "invalid_format",
-          "Podporovaný formát exportu je pouze md.",
+          "Podporované formáty exportu jsou md a docx.",
         );
       }
 
@@ -123,9 +102,16 @@ export const GET = createGuardedReadHandler<ExportRouteContext>({
         throw new NoteNotFoundError();
       }
 
-      return markdownResponse(note.contentMd, note.title);
+      if (format === "md") {
+        return markdownResponse(note.contentMd, note.title);
+      }
+
+      return docxResponse(
+        await renderNoteDocx(note.title, note.contentMd),
+        note.title,
+      );
     } catch (error) {
-      return toNoteErrorResponse(error);
+      return exportErrorResponse(error);
     }
   },
 });

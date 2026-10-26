@@ -1,6 +1,6 @@
 import type { ZodType } from "zod";
 
-import { validateStartupEnvironment } from "../config.ts";
+import { isLoopbackHostname, validateStartupEnvironment } from "../config.ts";
 
 export const NOTE_EDIT_MAX_BYTES = 1_048_576;
 export const TOKEN_TOOL_MAX_BYTES = 16 * 1024;
@@ -46,6 +46,7 @@ export interface GuardedJsonRouteOptions<TData, TRouteContext> {
   readonly schema: ZodType<TData>;
   readonly methods?: readonly MutationMethod[];
   readonly appOrigin?: string;
+  readonly allowForwardedLoopback?: boolean;
   readonly rateLimit?: RateLimitOptions & { readonly key?: string };
   readonly handler: (
     context: GuardedJsonRouteContext<TData, TRouteContext>,
@@ -54,6 +55,7 @@ export interface GuardedJsonRouteOptions<TData, TRouteContext> {
 
 export interface GuardedReadRouteOptions<TRouteContext> {
   readonly appOrigin?: string;
+  readonly allowForwardedLoopback?: boolean;
   readonly handler: (
     request: Request,
     routeContext: TRouteContext | undefined,
@@ -61,7 +63,11 @@ export interface GuardedReadRouteOptions<TRouteContext> {
 }
 
 type ResolvedOrigin =
-  | { readonly ok: true; readonly origin: string }
+  | {
+      readonly ok: true;
+      readonly origin: string;
+      readonly allowForwardedLoopback: boolean;
+    }
   | { readonly ok: false; readonly response: Response };
 
 function jsonResponse(
@@ -114,17 +120,71 @@ function invalidConfigResponse(): Response {
   );
 }
 
-function resolveAppOrigin(appOrigin?: string): ResolvedOrigin {
+interface ForwardedLoopback {
+  readonly host: string;
+  readonly port: string;
+}
+
+function parseForwardedLoopbackHost(value: string | null): ForwardedLoopback | null {
+  const trimmed = value?.trim().toLowerCase();
+
+  if (!trimmed || /[/?#@\\]/u.test(trimmed)) {
+    return null;
+  }
+
+  let parsed: URL;
+
+  try {
+    parsed = new URL(`http://${trimmed}`);
+  } catch {
+    return null;
+  }
+
+  if (
+    parsed.protocol !== "http:" ||
+    parsed.username !== "" ||
+    parsed.password !== "" ||
+    parsed.pathname !== "/" ||
+    parsed.search !== "" ||
+    parsed.hash !== "" ||
+    parsed.port === "" ||
+    !isLoopbackHostname(parsed.hostname)
+  ) {
+    return null;
+  }
+
+  return { host: parsed.host, port: parsed.port };
+}
+
+function resolveAppOrigin(
+  appOrigin?: string,
+  allowForwardedLoopback?: boolean,
+): ResolvedOrigin {
   if (appOrigin !== undefined && appOrigin.trim() === "") {
     return { ok: false, response: invalidConfigResponse() };
   }
 
   try {
-    const env = appOrigin === undefined ? process.env : { APP_ORIGIN: appOrigin };
+    const env =
+      appOrigin === undefined
+        ? {
+            ...process.env,
+            ...(allowForwardedLoopback === undefined
+              ? {}
+              : {
+                  APP_ALLOW_FORWARDED_LOOPBACK: allowForwardedLoopback ? "1" : "0",
+                }),
+          }
+        : {
+            APP_ORIGIN: appOrigin,
+            APP_ALLOW_FORWARDED_LOOPBACK: allowForwardedLoopback ? "1" : "0",
+          };
+    const startup = validateStartupEnvironment(env);
 
     return {
       ok: true,
-      origin: validateStartupEnvironment(env).appOrigin,
+      origin: startup.appOrigin,
+      allowForwardedLoopback: startup.allowForwardedLoopback,
     };
   } catch {
     return { ok: false, response: invalidConfigResponse() };
@@ -134,6 +194,7 @@ function resolveAppOrigin(appOrigin?: string): ResolvedOrigin {
 export function checkLocalHost(
   request: Request,
   appOrigin: string,
+  allowForwardedLoopback = false,
 ): Response | null {
   if (appOrigin.trim() === "") {
     return invalidConfigResponse();
@@ -152,7 +213,14 @@ export function checkLocalHost(
   const expectedHost = parsedOrigin.host.toLowerCase();
   const actualHost = request.headers.get("host")?.trim().toLowerCase();
 
-  if (!actualHost || actualHost !== expectedHost) {
+  if (
+    !actualHost ||
+    (actualHost !== expectedHost &&
+      !(
+        allowForwardedLoopback &&
+        parseForwardedLoopbackHost(actualHost) !== null
+      ))
+  ) {
     return jsonError(
       403,
       "invalid_host",
@@ -163,13 +231,54 @@ export function checkLocalHost(
   return null;
 }
 
+function matchesForwardedLoopbackOrigin(
+  request: Request,
+  origin: string,
+): boolean {
+  const requestHost = parseForwardedLoopbackHost(
+    request.headers.get("host"),
+  );
+
+  if (!requestHost) {
+    return false;
+  }
+
+  let parsedOrigin: URL;
+
+  try {
+    parsedOrigin = new URL(origin);
+  } catch {
+    return false;
+  }
+
+  return (
+    parsedOrigin.protocol === "http:" &&
+    parsedOrigin.username === "" &&
+    parsedOrigin.password === "" &&
+    parsedOrigin.pathname === "/" &&
+    parsedOrigin.search === "" &&
+    parsedOrigin.hash === "" &&
+    parsedOrigin.port !== "" &&
+    isLoopbackHostname(parsedOrigin.hostname) &&
+    parsedOrigin.port === requestHost.port
+  );
+}
+
 export function checkMutationOrigin(
   request: Request,
   appOrigin: string,
+  allowForwardedLoopback = false,
 ): Response | null {
   const origin = request.headers.get("origin");
 
-  if (origin === null || origin !== appOrigin) {
+  if (
+    origin === null ||
+    (origin !== appOrigin &&
+      !(
+        allowForwardedLoopback &&
+        matchesForwardedLoopbackOrigin(request, origin)
+      ))
+  ) {
     return jsonError(
       403,
       "invalid_origin",
@@ -401,17 +510,28 @@ export function createGuardedJsonRoute<TData, TRouteContext = unknown>(
       );
     }
 
-    const resolved = resolveAppOrigin(options.appOrigin);
+    const resolved = resolveAppOrigin(
+      options.appOrigin,
+      options.allowForwardedLoopback,
+    );
     if (!resolved.ok) {
       return resolved.response;
     }
 
-    const hostError = checkLocalHost(request, resolved.origin);
+    const hostError = checkLocalHost(
+      request,
+      resolved.origin,
+      resolved.allowForwardedLoopback,
+    );
     if (hostError) {
       return hostError;
     }
 
-    const originError = checkMutationOrigin(request, resolved.origin);
+    const originError = checkMutationOrigin(
+      request,
+      resolved.origin,
+      resolved.allowForwardedLoopback,
+    );
     if (originError) {
       return originError;
     }
@@ -478,12 +598,19 @@ export function createGuardedReadHandler<TRouteContext = unknown>(
       );
     }
 
-    const resolved = resolveAppOrigin(options.appOrigin);
+    const resolved = resolveAppOrigin(
+      options.appOrigin,
+      options.allowForwardedLoopback,
+    );
     if (!resolved.ok) {
       return resolved.response;
     }
 
-    const hostError = checkLocalHost(request, resolved.origin);
+    const hostError = checkLocalHost(
+      request,
+      resolved.origin,
+      resolved.allowForwardedLoopback,
+    );
     if (hostError) {
       return hostError;
     }

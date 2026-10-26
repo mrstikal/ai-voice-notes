@@ -8,6 +8,7 @@ import {
 } from "../../scripts/test-db-guard";
 import { createDatabase, closeDb, getPool, type DatabaseConnection } from "../../src/lib/db/client";
 import {
+  aiBudget,
   aiUsage,
   noteChunks,
   noteRevisions,
@@ -257,9 +258,10 @@ describe.skipIf(!hasTestDatabase)("isolated database schema", () => {
 
     const tables = await connection.pool.query<{ table_name: string }>(
       "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ANY($1::text[]) ORDER BY table_name",
-      [["ai_usage", "note_chunks", "note_revisions", "note_tags", "notes"]],
+      [["ai_budget", "ai_usage", "note_chunks", "note_revisions", "note_tags", "notes"]],
     );
     expect(tables.rows.map((row) => row.table_name)).toEqual([
+      "ai_budget",
       "ai_usage",
       "note_chunks",
       "note_revisions",
@@ -460,6 +462,25 @@ describe.skipIf(!hasTestDatabase)("isolated database schema", () => {
         status: "ready",
       }),
     ).rejects.toThrow();
+  });
+
+  it("keeps one non-negative budget row", async () => {
+    const rows = await connection.db.select().from(aiBudget);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.id).toBe(1);
+    expect(rows[0]?.budgetUsd).toBe("2.000000");
+
+    await expect(
+      connection.pool.query(
+        "INSERT INTO ai_budget (id, budget_usd) VALUES (2, 1.00)",
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+
+    await expect(
+      connection.pool.query(
+        "UPDATE ai_budget SET budget_usd = -1 WHERE id = 1",
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
   });
 
   it("enforces AI usage status and non-negative cost checks", async () => {

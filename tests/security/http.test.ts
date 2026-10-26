@@ -380,6 +380,129 @@ describe("local HTTP guard", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  it("accepts forwarded loopback ports only when explicitly enabled", () => {
+    const forwardedRequest = new Request(REQUEST_URL, {
+      headers: { host: "127.0.0.1:53508" },
+    });
+
+    expect(
+      checkLocalHost(forwardedRequest, APP_ORIGIN)?.status,
+    ).toBe(403);
+    expect(
+      checkLocalHost(forwardedRequest, APP_ORIGIN, true),
+    ).toBeNull();
+    expect(
+      checkLocalHost(
+        new Request(REQUEST_URL, { headers: { host: "localhost:53508" } }),
+        APP_ORIGIN,
+        true,
+      ),
+    ).toBeNull();
+    expect(
+      checkLocalHost(
+        new Request(REQUEST_URL, { headers: { host: "evil.example:53508" } }),
+        APP_ORIGIN,
+        true,
+      )?.status,
+    ).toBe(403);
+    expect(
+      checkLocalHost(
+        new Request(REQUEST_URL, {
+          headers: { host: "127.0.0.1:53508/path" },
+        }),
+        APP_ORIGIN,
+        true,
+      )?.status,
+    ).toBe(403);
+  });
+
+  it("accepts a matching forwarded loopback mutation origin only when enabled", async () => {
+    const handler = vi.fn(async () => jsonOk({ ok: true }));
+    const route = createGuardedJsonRoute({
+      appOrigin: APP_ORIGIN,
+      allowForwardedLoopback: true,
+      maxBytes: NOTE_EDIT_MAX_BYTES,
+      schema: noteMutationPayloadSchema,
+      handler,
+    });
+    const forwardedHeaders = {
+      host: "127.0.0.1:53508",
+      origin: "http://127.0.0.1:53508",
+    };
+
+    const accepted = await route(
+      jsonRequest({ title: "Test", contentMd: "x" }, forwardedHeaders),
+    );
+    expect(accepted.status).toBe(200);
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    const aliasAccepted = await route(
+      jsonRequest(
+        { title: "Test", contentMd: "x" },
+        { host: "localhost:53508", origin: "http://127.0.0.1:53508" },
+      ),
+    );
+    expect(aliasAccepted.status).toBe(200);
+    expect(handler).toHaveBeenCalledTimes(2);
+
+    const mismatchedPort = await route(
+      jsonRequest(
+        { title: "Test", contentMd: "x" },
+        { host: "127.0.0.1:53508", origin: "http://127.0.0.1:53509" },
+      ),
+    );
+    expect(mismatchedPort.status).toBe(403);
+    expect((await readError(mismatchedPort)).error.code).toBe(
+      "invalid_origin",
+    );
+
+    const nonLoopbackOrigin = await route(
+      jsonRequest(
+        { title: "Test", contentMd: "x" },
+        { host: "127.0.0.1:53508", origin: "http://evil.example:53508" },
+      ),
+    );
+    expect(nonLoopbackOrigin.status).toBe(403);
+    expect((await readError(nonLoopbackOrigin)).error.code).toBe(
+      "invalid_origin",
+    );
+
+    const disabledRoute = createGuardedJsonRoute({
+      appOrigin: APP_ORIGIN,
+      maxBytes: NOTE_EDIT_MAX_BYTES,
+      schema: noteMutationPayloadSchema,
+      handler,
+    });
+    const disabled = await disabledRoute(
+      jsonRequest({ title: "Test", contentMd: "x" }, forwardedHeaders),
+    );
+    expect(disabled.status).toBe(403);
+    expect((await readError(disabled)).error.code).toBe("invalid_host");
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads the forwarded-loopback opt-in from the environment", async () => {
+    vi.stubEnv("APP_ORIGIN", APP_ORIGIN);
+    vi.stubEnv("APP_ALLOW_FORWARDED_LOOPBACK", "1");
+
+    try {
+      const handler = vi.fn(async () => jsonOk({ ok: true }));
+      const route = createGuardedReadHandler({ handler });
+
+      const response = await route(
+        new Request(REQUEST_URL, {
+          method: "GET",
+          headers: { host: "127.0.0.1:53508" },
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(handler).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("rejects an empty origin in the exported Host check", () => {
     const response = checkLocalHost(
       new Request(REQUEST_URL, {

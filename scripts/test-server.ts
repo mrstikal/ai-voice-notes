@@ -38,6 +38,7 @@ async function main(): Promise<void> {
         ...process.env,
         NODE_ENV: "production",
         APP_ORIGIN: TEST_ORIGIN,
+        APP_ALLOW_FORWARDED_LOOPBACK: "0",
         DATABASE_URL: targets.testUrl,
         TEST_DATABASE_URL: targets.testUrl,
       },

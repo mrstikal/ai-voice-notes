@@ -15,6 +15,12 @@ export function ExportMenu({ noteId }: ExportMenuProps) {
         >
           Markdown (.md)
         </a>
+        <a
+          className="block rounded-md px-3 py-2 text-sm font-medium text-stone-800 hover:bg-stone-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+          href={`/api/notes/${noteId}/export?format=docx`}
+        >
+          DOCX (.docx)
+        </a>
       </div>
     </details>
   );

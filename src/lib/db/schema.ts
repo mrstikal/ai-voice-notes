@@ -149,6 +149,33 @@ export const noteChunks = pgTable(
   ],
 );
 
+export const aiBudget = pgTable(
+  "ai_budget",
+  {
+    id: integer("id").primaryKey().default(1),
+    budgetUsd: numeric("budget_usd", {
+      precision: 12,
+      scale: 6,
+    }).notNull(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check("ai_budget_single_row", sql`${table.id} = 1`),
+    check("ai_budget_nonnegative", sql`${table.budgetUsd} >= 0`),
+  ],
+);
+
 export const aiUsage = pgTable(
   "ai_usage",
   {

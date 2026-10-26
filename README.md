@@ -53,6 +53,7 @@ live check is separately authorized.
 | Variable | Purpose | Default |
 |---|---|---|
 | `APP_ORIGIN` | Loopback origin with explicit port | `http://127.0.0.1:3000` |
+| `APP_ALLOW_FORWARDED_LOOPBACK` | Accept a different loopback Host/Origin port from a local port forwarder | `0` |
 | `DATABASE_URL` | Development PostgreSQL URL | compose `db` service |
 | `TEST_DATABASE_URL` | Isolated test PostgreSQL URL | compose `db-test` service |
 | `AI_TEST_MODE` | Test-only switch; leave empty normally | empty |
@@ -62,7 +63,10 @@ live check is separately authorized.
 
 `APP_ORIGIN` is validated at startup. Only `127.0.0.1`, `localhost`, or `::1`
 with an explicit port is accepted; paths, credentials, and other hosts are
-rejected with a Czech error.
+rejected with a Czech error. Set `APP_ALLOW_FORWARDED_LOOPBACK=1` only when a
+local IDE or remote port forwarder rewrites the port (for example VS Code
+forwarding `3000` to `53508`); forwarded Host and Origin must still be loopback
+and use the same port.
 
 ## Databases
 
