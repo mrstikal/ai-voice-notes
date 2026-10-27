@@ -4,8 +4,10 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import type { NoteDetail } from "@/lib/notes/client";
+import type { LlmProviderStatus } from "@/lib/ai/structured";
 import type { TtsProviderStatus } from "@/lib/tts/provider";
 
+import { AiEditControls } from "../ai/AiEditControls";
 import { ManualProposalPanel } from "../ai/ManualProposalPanel";
 import { RevisionHistory } from "./RevisionHistory";
 import { AudioPlayer } from "../tts/AudioPlayer";
@@ -17,12 +19,16 @@ interface NoteWorkspaceProps {
   readonly note: NoteDetail;
   readonly providerStatus: TtsProviderStatus | null;
   readonly providerError: string | null;
+  readonly llmStatus: LlmProviderStatus | null;
+  readonly llmError: string | null;
 }
 
 export function NoteWorkspace({
   note: initialNote,
   providerStatus,
   providerError,
+  llmStatus,
+  llmError,
 }: NoteWorkspaceProps) {
   const router = useRouter();
   const [note, setNote] = useState(initialNote);
@@ -59,6 +65,14 @@ export function NoteWorkspace({
         note={note}
         providerError={providerError}
         providerStatus={providerStatus}
+      />
+      <AiEditControls
+        disabled={editorDirty}
+        key={`ai:${note.version}`}
+        llmError={llmError}
+        llmStatus={llmStatus}
+        note={note}
+        onNoteUpdated={handleExternalNoteUpdate}
       />
       <ManualProposalPanel
         disabled={editorDirty}

@@ -12,6 +12,10 @@ import {
   getTtsProviderStatus,
   type TtsProviderStatus,
 } from "@/lib/tts/provider";
+import {
+  getLlmProviderStatus,
+  type LlmProviderStatus,
+} from "@/lib/ai/structured";
 
 export const dynamic = "force-dynamic";
 
@@ -29,12 +33,21 @@ export default async function NoteDetailPage({ params }: NoteDetailPageProps) {
   let note;
   let ttsStatus: TtsProviderStatus | null = null;
   let ttsError: string | null = null;
+  let llmStatus: LlmProviderStatus | null = null;
+  let llmError: string | null = null;
 
   try {
     ttsStatus = getTtsProviderStatus();
   } catch {
     ttsError =
       "Stav čtení nahlas se nepodařilo načíst. Zkontrolujte konfiguraci aplikace.";
+  }
+
+  try {
+    llmStatus = getLlmProviderStatus();
+  } catch {
+    llmError =
+      "Stav AI úprav se nepodařilo načíst. Zkontrolujte konfiguraci aplikace.";
   }
 
   try {
@@ -51,6 +64,8 @@ export default async function NoteDetailPage({ params }: NoteDetailPageProps) {
     <div className="mx-auto max-w-3xl px-6 py-12">
       <NoteWorkspace
         key={note.id}
+        llmError={llmError}
+        llmStatus={llmStatus}
         note={toClientDetail(note)}
         providerError={ttsError}
         providerStatus={ttsStatus}

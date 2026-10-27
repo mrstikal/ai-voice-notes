@@ -159,3 +159,31 @@ export function snapshotsEqual(
     left.tags.every((tag, index) => tag === right.tags[index])
   );
 }
+
+export function changedSnapshotFields(
+  current: RevisionSnapshot,
+  target: RevisionSnapshot,
+): string[] {
+  const fields: string[] = [];
+
+  if (current.title !== target.title) {
+    fields.push(`Titulek: „${current.title}“ → „${target.title}“`);
+  }
+
+  if (current.category !== target.category) {
+    fields.push(
+      `Kategorie: ${current.category ?? "—"} → ${target.category ?? "—"}`,
+    );
+  }
+
+  if (
+    current.tags.length !== target.tags.length ||
+    current.tags.some((tag, index) => tag !== target.tags[index])
+  ) {
+    fields.push(
+      `Štítky: ${current.tags.join(", ") || "—"} → ${target.tags.join(", ") || "—"}`,
+    );
+  }
+
+  return fields;
+}

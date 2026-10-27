@@ -8,6 +8,7 @@ import {
   type NoteDetail,
 } from "@/lib/notes/client";
 import {
+  changedSnapshotFields,
   computeRevisionDiff,
   fetchRevisions,
   restoreRevision,
@@ -16,7 +17,6 @@ import {
   type RevisionDiff,
   type RevisionHistory as RevisionHistoryData,
   type RevisionReason,
-  type RevisionSnapshot,
 } from "@/lib/notes/revision-client";
 
 const reasonLabels: Record<RevisionReason, string> = {
@@ -44,34 +44,6 @@ function DiffView({ diff }: DiffViewProps) {
       {diff.suffix}
     </pre>
   );
-}
-
-function changedFields(
-  current: RevisionSnapshot,
-  target: RevisionSnapshot,
-): string[] {
-  const fields: string[] = [];
-
-  if (current.title !== target.title) {
-    fields.push(`Titulek: „${current.title}“ → „${target.title}“`);
-  }
-
-  if (current.category !== target.category) {
-    fields.push(
-      `Kategorie: ${current.category ?? "—"} → ${target.category ?? "—"}`,
-    );
-  }
-
-  if (
-    current.tags.length !== target.tags.length ||
-    current.tags.some((tag, index) => tag !== target.tags[index])
-  ) {
-    fields.push(
-      `Štítky: ${current.tags.join(", ") || "—"} → ${target.tags.join(", ") || "—"}`,
-    );
-  }
-
-  return fields;
 }
 
 function errorMessage(error: unknown): string {
@@ -308,7 +280,7 @@ export function RevisionHistory({
             z verze {preview.noteVersion}. Vznikne nová revize s důvodem
             Obnovení verze; stará historie zůstane zachovaná.
           </p>
-          {changedFields(history.currentSnapshot, preview.afterSnapshot).map(
+          {changedSnapshotFields(history.currentSnapshot, preview.afterSnapshot).map(
             (field) => (
               <p className="mt-1 text-sm text-amber-950" key={field}>
                 {field}
