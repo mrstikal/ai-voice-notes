@@ -6,6 +6,7 @@ import { useState } from "react";
 import type { NoteDetail } from "@/lib/notes/client";
 import type { TtsProviderStatus } from "@/lib/tts/provider";
 
+import { ManualProposalPanel } from "../ai/ManualProposalPanel";
 import { AudioPlayer } from "../tts/AudioPlayer";
 import { DictationControls } from "../voice/DictationControls";
 import { NoteEditor } from "./NoteEditor";
@@ -49,6 +50,13 @@ export function NoteWorkspace({
         note={note}
         providerError={providerError}
         providerStatus={providerStatus}
+      />
+      <ManualProposalPanel
+        disabled={editorDirty}
+        key={note.version}
+        noteId={note.id}
+        noteTitle={note.title}
+        noteVersion={note.version}
       />
     </>
   );

@@ -1,4 +1,6 @@
 import { sql } from "drizzle-orm";
+import type { LlmOperation } from "../ai/schemas.ts";
+import type { OperationCandidate } from "../notes/operations.ts";
 import {
   check,
   index,
@@ -219,5 +221,75 @@ export const aiUsage = pgTable(
     ),
     index("ai_usage_started_at_idx").on(table.startedAt.desc()),
     index("ai_usage_status_idx").on(table.status),
+  ],
+);
+
+export const editProposals = pgTable(
+  "edit_proposals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    noteId: uuid("note_id")
+      .notNull()
+      .references(() => notes.id, { onDelete: "cascade" }),
+    noteTitle: text("note_title").notNull(),
+    expectedVersion: integer("expected_version").notNull(),
+    originalHash: text("original_hash").notNull(),
+    operation: jsonb("operation").$type<LlmOperation>().notNull(),
+    beforeMd: text("before_md").notNull(),
+    afterMd: text("after_md").notNull(),
+    selectedCandidate: jsonb("selected_candidate").$type<OperationCandidate | null>(),
+    status: text("status").notNull().default("pending"),
+    confirmationNonceHash: text("confirmation_nonce_hash").notNull(),
+    expiresAt: timestamp("expires_at", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check(
+      "edit_proposals_expected_version_positive",
+      sql`${table.expectedVersion} >= 1`,
+    ),
+    check(
+      "edit_proposals_original_hash_hex",
+      sql`${table.originalHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "edit_proposals_nonce_hash_hex",
+      sql`${table.confirmationNonceHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "edit_proposals_status_check",
+      sql`${table.status} in ('pending', 'rejected', 'applied', 'expired')`,
+    ),
+    check(
+      "edit_proposals_operation_object",
+      sql`jsonb_typeof(${table.operation}) = 'object'`,
+    ),
+    check(
+      "edit_proposals_selected_candidate_object",
+      sql`${table.selectedCandidate} is null or jsonb_typeof(${table.selectedCandidate}) = 'object'`,
+    ),
+    index("edit_proposals_note_status_expires_idx").on(
+      table.noteId,
+      table.status,
+      table.expiresAt,
+    ),
+    index("edit_proposals_status_expires_idx").on(
+      table.status,
+      table.expiresAt,
+    ),
   ],
 );

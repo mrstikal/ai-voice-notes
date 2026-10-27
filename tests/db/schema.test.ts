@@ -258,11 +258,22 @@ describe.skipIf(!hasTestDatabase)("isolated database schema", () => {
 
     const tables = await connection.pool.query<{ table_name: string }>(
       "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ANY($1::text[]) ORDER BY table_name",
-      [["ai_budget", "ai_usage", "note_chunks", "note_revisions", "note_tags", "notes"]],
+      [
+        [
+          "ai_budget",
+          "ai_usage",
+          "edit_proposals",
+          "note_chunks",
+          "note_revisions",
+          "note_tags",
+          "notes",
+        ],
+      ],
     );
     expect(tables.rows.map((row) => row.table_name)).toEqual([
       "ai_budget",
       "ai_usage",
+      "edit_proposals",
       "note_chunks",
       "note_revisions",
       "note_tags",
@@ -274,6 +285,8 @@ describe.skipIf(!hasTestDatabase)("isolated database schema", () => {
     const expectedIndexes = [
       "ai_usage_started_at_idx",
       "ai_usage_status_idx",
+      "edit_proposals_note_status_expires_idx",
+      "edit_proposals_status_expires_idx",
       "note_chunks_note_version_chunk_unique",
       "note_chunks_note_version_idx",
       "note_revisions_note_created_at_idx",
@@ -309,6 +322,34 @@ describe.skipIf(!hasTestDatabase)("isolated database schema", () => {
     expect(first.deletedAt).toBeNull();
     expect(first.seedKey).toBeNull();
     expect(second.seedKey).toBeNull();
+  });
+
+  it("enforces edit-proposal status, hash and JSON constraints", async () => {
+    const note = await insertNote();
+    const insert = (status: string, hash: string) =>
+      connection.pool.query(
+        `INSERT INTO edit_proposals
+          (note_id, note_title, expected_version, original_hash, operation,
+           before_md, after_md, status, confirmation_nonce_hash, expires_at)
+         VALUES ($1, 'Návrh', 1, $2, '{}'::jsonb, 'Před', 'Po', $3, $2, now() + interval '5 minutes')`,
+        [note.id, hash, status],
+      );
+
+    await expect(insert("bogus", "a".repeat(64))).rejects.toMatchObject({
+      code: "23514",
+    });
+    await expect(insert("pending", "not-hex")).rejects.toMatchObject({
+      code: "23514",
+    });
+    await expect(
+      connection.pool.query(
+        `INSERT INTO edit_proposals
+          (note_id, note_title, expected_version, original_hash, operation,
+           before_md, after_md, status, confirmation_nonce_hash, expires_at)
+         VALUES ($1, 'Návrh', 1, $2, '[]'::jsonb, 'Před', 'Po', 'pending', $2, now() + interval '5 minutes')`,
+        [note.id, "a".repeat(64)],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
   });
 
   it("enforces unique seed keys and the positive note version", async () => {
