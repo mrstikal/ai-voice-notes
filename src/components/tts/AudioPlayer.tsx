@@ -38,6 +38,11 @@ import {
 import { TTS_SCOPE_LABELS, type TtsScope } from "@/lib/tts/scopes";
 import { getTtsSourceOptions } from "@/lib/tts/source-options";
 import {
+  getStopMonitorPreferenceServerSnapshot,
+  getStopMonitorPreferenceSnapshot,
+  subscribeStopMonitorPreference,
+} from "@/lib/voice/stop-monitor";
+import {
   getTtsVoicePreferenceServerSnapshot,
   getTtsVoicePreferenceSnapshot,
   subscribeTtsVoicePreference,
@@ -48,6 +53,7 @@ import type {
   MicrophoneLockManager,
 } from "@/lib/voice/microphone";
 
+import { SpokenStopMonitor } from "./SpokenStopMonitor";
 import { VoiceSelector } from "./VoiceSelector";
 
 type PlaybackPhase = "idle" | "loading" | "playing" | "paused";
@@ -127,6 +133,11 @@ export function AudioPlayer({
     getMediaActivitySnapshot,
     getMediaActivityServerSnapshot,
   );
+  const stopMonitorEnabled = useSyncExternalStore(
+    subscribeStopMonitorPreference,
+    getStopMonitorPreferenceSnapshot,
+    getStopMonitorPreferenceServerSnapshot,
+  );
   const storedVoice = useSyncExternalStore(
     subscribeTtsVoicePreference,
     getTtsVoicePreferenceSnapshot,
@@ -153,6 +164,7 @@ export function AudioPlayer({
   const [phase, setPhase] = useState<PlaybackPhase>("idle");
   const [currentIndex, setCurrentIndex] = useState<number | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [monitorActive, setMonitorActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -180,6 +192,8 @@ export function AudioPlayer({
   const mountedRef = useRef(true);
   const previousNoteVersionRef = useRef(note.version);
   const previousEffectiveVoiceRef = useRef(effectiveVoice);
+  const previousStopMonitorEnabledRef = useRef(stopMonitorEnabled);
+  const phaseRef = useRef(phase);
 
   const disposeAudio = useCallback(() => {
     const audio = audioRef.current;
@@ -227,10 +241,19 @@ export function AudioPlayer({
     if (mountedRef.current) {
       setCurrentIndex(null);
       setSelectedIndex(0);
+      setMonitorActive(false);
       setPhase("idle");
       setManifestLoading(false);
     }
   }, [disposeAudio, releasePlaybackLease]);
+
+  const stopPlaybackWithNotice = useCallback(
+    (message: string) => {
+      stopPlayback();
+      setNotice(message);
+    },
+    [stopPlayback],
+  );
 
   const clearManifest = useCallback(
     (message: string | null = null) => {
@@ -316,10 +339,38 @@ export function AudioPlayer({
   }, [disabled, stopPlayback]);
 
   useEffect(() => {
-    if (media.microphoneActive) {
+    if (media.dictationActive) {
       stopPlayback();
     }
-  }, [media.microphoneActive, stopPlayback]);
+  }, [media.dictationActive, stopPlayback]);
+
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
+
+  useEffect(() => {
+    previousStopMonitorEnabledRef.current = stopMonitorEnabled;
+  }, [stopMonitorEnabled]);
+
+  useEffect(
+    () =>
+      subscribeStopMonitorPreference(() => {
+        const enabled = getStopMonitorPreferenceSnapshot();
+
+        if (enabled === previousStopMonitorEnabledRef.current) {
+          return;
+        }
+
+        previousStopMonitorEnabledRef.current = enabled;
+
+        if (phaseRef.current !== "idle") {
+          stopPlaybackWithNotice(
+            "Změna experimentálního hlasového Stopu ukončila přehrávání. Spusťte ho znovu.",
+          );
+        }
+      }),
+    [stopPlaybackWithNotice],
+  );
 
   function buildSelection(): TtsSelectionPayload | null {
     if (scope === "range") {
@@ -506,7 +557,11 @@ export function AudioPlayer({
         }
 
         if (playbackLeaseRef.current === null) {
-          const lease = await tryAcquirePlaybackLease(playbackLocks);
+          const lease = await tryAcquirePlaybackLease(playbackLocks, {
+            microphoneLockMode: stopMonitorEnabled
+              ? "shared"
+              : "exclusive",
+          });
 
           if (generation !== generationRef.current || !mountedRef.current) {
             await lease?.release();
@@ -601,6 +656,7 @@ export function AudioPlayer({
           releasePlaybackLease();
           setCurrentIndex(null);
           setSelectedIndex(0);
+          setMonitorActive(false);
           setPhase("idle");
           setNotice("Přehrávání je dokončené.");
         });
@@ -621,6 +677,10 @@ export function AudioPlayer({
           return;
         }
 
+        // Start command-only listening as soon as audible playback is
+        // requested. Waiting for audio.play() to resolve made the monitor
+        // dependent on browser-specific media-promise timing.
+        setMonitorActive(true);
         await audio.play();
 
         if (
@@ -660,6 +720,7 @@ export function AudioPlayer({
       fetchImpl,
       playbackLocks,
       releasePlaybackLease,
+      stopMonitorEnabled,
     ],
   );
 
@@ -700,6 +761,11 @@ export function AudioPlayer({
   function handleStop() {
     stopPlayback();
     setNotice("Přehrávání bylo zastaveno.");
+  }
+
+  function handleSpokenStop() {
+    stopPlayback();
+    setNotice("Hlasový Stop zastavil přehrávání.");
   }
 
   function handlePrevious() {
@@ -795,7 +861,7 @@ export function AudioPlayer({
     providerStatus === null ||
     !providerStatus.configured ||
     availableVoices(providerStatus).length === 0;
-  const microphoneBusy = media.microphoneActive;
+  const microphoneBusy = media.dictationActive;
   const manifestDisabled =
     disabled || providerUnavailable || microphoneBusy || manifestLoading;
   const playDisabled =
@@ -1170,6 +1236,13 @@ export function AudioPlayer({
               ? " Přehrát se aktivuje po zaškrtnutí souhlasu výše."
               : ""}
           </p>
+
+          {stopMonitorEnabled ? (
+            <SpokenStopMonitor
+              active={monitorActive}
+              onStop={handleSpokenStop}
+            />
+          ) : null}
 
           <ol
             className="mt-4 space-y-2"

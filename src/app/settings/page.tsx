@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { SpokenStopSettings } from "@/components/settings/SpokenStopSettings";
 import { TtsCacheSettings } from "@/components/settings/TtsCacheSettings";
 import { TtsSettings } from "@/components/settings/TtsSettings";
 import { UsageSettings } from "@/components/settings/UsageSettings";
@@ -50,6 +51,9 @@ export default async function SettingsPage() {
       </div>
       <div className="mt-6">
         <TtsSettings error={ttsError} status={ttsStatus} />
+      </div>
+      <div className="mt-6">
+        <SpokenStopSettings />
       </div>
       <div className="mt-6">
         <TtsCacheSettings />

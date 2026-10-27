@@ -69,8 +69,17 @@ type CommittedListener = (data: {
   provider_id?: string;
 }) => void;
 
+export interface ScribeCommitMetadata {
+  readonly commandLatencyMs: number | null;
+}
+
 export interface UseScribeDictationOptions {
-  readonly onCommit: (segment: AcceptedTranscriptSegment) => void;
+  readonly onCommit: (
+    segment: AcceptedTranscriptSegment,
+    metadata: ScribeCommitMetadata,
+  ) => void;
+  readonly activityKind?: "dictation" | "stop-monitor";
+  readonly lockMode?: "exclusive" | "shared";
   readonly stopAfterFirstCommit?: boolean;
   readonly flushOnStop?: boolean;
   readonly vadSilenceThresholdSecs?: number;
@@ -87,6 +96,7 @@ export interface UseScribeDictationResult {
   readonly incompleteNotice: string | null;
   readonly start: () => void;
   readonly stop: (options?: { flush?: boolean }) => Promise<void>;
+  readonly commit: () => void;
   readonly clearTranscripts: () => void;
 }
 
@@ -144,8 +154,12 @@ export function useScribeDictation(
     session.status !== "idle" && session.status !== "error";
 
   useEffect(() => {
-    setMicrophoneOwnerActive(mediaOwnerId, microphoneActive);
-  }, [mediaOwnerId, microphoneActive]);
+    setMicrophoneOwnerActive(
+      mediaOwnerId,
+      microphoneActive,
+      options.activityKind ?? "dictation",
+    );
+  }, [mediaOwnerId, microphoneActive, options.activityKind]);
 
   useEffect(
     () => () => {
@@ -352,6 +366,10 @@ export function useScribeDictation(
       const reason = stopOptions.reason ?? "user";
       const flush = stopOptions.flush ?? flushOnStopRef.current;
       const stopping = (async () => {
+        // Let the caller assign stoppingPromiseRef before a stop that can
+        // finish synchronously; otherwise a completed stop leaves the ref
+        // permanently non-null and blocks the next start (StrictMode cleanup).
+        await Promise.resolve();
         setIsStopping(true);
 
         try {
@@ -490,12 +508,12 @@ export function useScribeDictation(
         const utteranceEndedAt = lastPartialAtRef.current;
         const receivedAt = Date.now();
         lastPartialAtRef.current = null;
-        recordVoiceCommitLatency(
-          utteranceEndedAt === null ? null : receivedAt - utteranceEndedAt,
-        );
+        const commandLatencyMs =
+          utteranceEndedAt === null ? null : receivedAt - utteranceEndedAt;
+        recordVoiceCommitLatency(commandLatencyMs);
 
         try {
-          onCommitRef.current(segment);
+          onCommitRef.current(segment, { commandLatencyMs });
         } finally {
           recordVoiceCommandLatency(
             utteranceEndedAt === null
@@ -524,12 +542,13 @@ export function useScribeDictation(
         startSession,
         stopSession,
         onStateChange: setSession,
+        lockMode: options.lockMode ?? "exclusive",
       });
       controllerRef.current = controller;
     }
 
     return controller;
-  }, [startSession, stopSession]);
+  }, [options.lockMode, startSession, stopSession]);
 
   const start = useCallback(() => {
     if (stoppingPromiseRef.current !== null) {
@@ -586,6 +605,9 @@ export function useScribeDictation(
     incompleteNotice,
     start,
     stop,
+    commit: () => {
+      scribeRef.current?.commit();
+    },
     clearTranscripts,
   };
 }

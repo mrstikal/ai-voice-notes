@@ -20,9 +20,11 @@ import {
   resetMediaActivityForTests,
   setMicrophoneOwnerActive,
 } from "../../src/lib/media/activity";
+import { TTS_PLAYBACK_LOCK_NAME } from "../../src/lib/tts/playback-lease";
 import { writeTtsVoicePreference } from "../../src/lib/tts/voice-preference";
 import { MICROPHONE_LOCK_NAME } from "../../src/lib/voice/microphone";
 import type { MicrophoneLockManager } from "../../src/lib/voice/microphone";
+import { createFakeLockManager } from "../helpers/provider-mocks";
 import type { NoteDetail } from "../../src/lib/notes/client";
 import type { TtsProviderStatus } from "../../src/lib/tts/provider";
 import type {
@@ -791,24 +793,24 @@ describe("AudioPlayer", () => {
     expect(network.calls[1]!.body).toMatchObject({ voice: "george" });
   });
 
-  it("holds the cross-tab microphone lease while playing and releases it on Stop", async () => {
-    let held = false;
+  it("holds the cross-tab playback and microphone leases while playing and releases them on Stop", async () => {
+    const heldNames = new Set<string>();
     const requestedModes: string[] = [];
     const locks: MicrophoneLockManager = {
       request(name, options, callback) {
         requestedModes.push(`${name}:${options?.mode ?? "exclusive"}`);
 
         return new Promise<void>((resolve) => {
-          if (held) {
+          if (heldNames.has(name)) {
             void Promise.resolve(callback(null)).then(resolve);
             return;
           }
 
-          held = true;
+          heldNames.add(name);
           void Promise.resolve(
             callback({ name, mode: options?.mode ?? "exclusive" }),
           ).then(() => {
-            held = false;
+            heldNames.delete(name);
             resolve();
           });
         });
@@ -830,37 +832,39 @@ describe("AudioPlayer", () => {
     await waitFor(() => {
       expect(audio.instances).toHaveLength(1);
     });
-    expect(held).toBe(true);
-    expect(requestedModes).toEqual([`${MICROPHONE_LOCK_NAME}:exclusive`]);
+    expect(heldNames.has(TTS_PLAYBACK_LOCK_NAME)).toBe(true);
+    expect(heldNames.has(MICROPHONE_LOCK_NAME)).toBe(true);
+    expect(requestedModes).toEqual([
+      `${TTS_PLAYBACK_LOCK_NAME}:exclusive`,
+      `${MICROPHONE_LOCK_NAME}:exclusive`,
+    ]);
 
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
 
     await waitFor(() => {
-      expect(held).toBe(false);
+      expect(heldNames.size).toBe(0);
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Přehrát" }));
     await waitFor(() => {
       expect(audio.instances).toHaveLength(2);
     });
-    expect(held).toBe(true);
+    expect(heldNames.has(TTS_PLAYBACK_LOCK_NAME)).toBe(true);
+    expect(heldNames.has(MICROPHONE_LOCK_NAME)).toBe(true);
 
     act(() => {
       audio.instances[1]!.triggerEnded();
     });
 
     await waitFor(() => {
-      expect(held).toBe(false);
+      expect(heldNames.size).toBe(0);
     });
     expect(screen.getByText("Přehrávání je dokončené.")).toBeDefined();
   });
 
   it("refuses playback when another tab owns the microphone lease", async () => {
-    const locks: MicrophoneLockManager = {
-      async request(_name, _options, callback) {
-        await callback(null);
-      },
-    };
+    const locks = createFakeLockManager();
+    locks.heldNames.add(MICROPHONE_LOCK_NAME);
     const { audio, network } = await renderPlayer({
       handler: () =>
         jsonResponse(manifest(["První sekce."])),
@@ -875,10 +879,11 @@ describe("AudioPlayer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Přehrát" }));
 
     expect(
-      await screen.findByText(/mikrofon nebo jiné přehrávání právě používá/i),
+      await screen.findByText(/mikrofon právě používá jiná karta/i),
     ).toBeDefined();
     expect(audio.instances).toHaveLength(0);
     expect(network.calls).toHaveLength(1);
+    expect(locks.heldNames.has(TTS_PLAYBACK_LOCK_NAME)).toBe(false);
   });
 
   it("shows a free cache replay without a provider cost", async () => {

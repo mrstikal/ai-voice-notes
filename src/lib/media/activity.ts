@@ -1,13 +1,17 @@
 const SERVER_SNAPSHOT = {
   playbackActive: false,
   microphoneActive: false,
+  dictationActive: false,
 } as const;
 
+export type MicrophoneActivityKind = "dictation" | "stop-monitor";
+
 let playbackOwners = new Set<string>();
-let microphoneOwners = new Set<string>();
+let microphoneOwners = new Map<string, MicrophoneActivityKind>();
 let snapshot: {
   readonly playbackActive: boolean;
   readonly microphoneActive: boolean;
+  readonly dictationActive: boolean;
 } = SERVER_SNAPSHOT;
 const listeners = new Set<() => void>();
 
@@ -15,11 +19,13 @@ function publish(): void {
   const next = {
     playbackActive: playbackOwners.size > 0,
     microphoneActive: microphoneOwners.size > 0,
+    dictationActive: [...microphoneOwners.values()].includes("dictation"),
   };
 
   if (
     next.playbackActive === snapshot.playbackActive &&
-    next.microphoneActive === snapshot.microphoneActive
+    next.microphoneActive === snapshot.microphoneActive &&
+    next.dictationActive === snapshot.dictationActive
   ) {
     return;
   }
@@ -41,9 +47,13 @@ export function setPlaybackOwnerActive(owner: string, active: boolean): void {
   publish();
 }
 
-export function setMicrophoneOwnerActive(owner: string, active: boolean): void {
+export function setMicrophoneOwnerActive(
+  owner: string,
+  active: boolean,
+  kind: MicrophoneActivityKind = "dictation",
+): void {
   if (active) {
-    microphoneOwners.add(owner);
+    microphoneOwners.set(owner, kind);
   } else {
     microphoneOwners.delete(owner);
   }
@@ -62,6 +72,7 @@ export function subscribeMediaActivity(listener: () => void): () => void {
 export function getMediaActivitySnapshot(): {
   readonly playbackActive: boolean;
   readonly microphoneActive: boolean;
+  readonly dictationActive: boolean;
 } {
   return snapshot;
 }
@@ -69,6 +80,7 @@ export function getMediaActivitySnapshot(): {
 export function getMediaActivityServerSnapshot(): {
   readonly playbackActive: boolean;
   readonly microphoneActive: boolean;
+  readonly dictationActive: boolean;
 } {
   return SERVER_SNAPSHOT;
 }
@@ -81,7 +93,7 @@ export function resetMediaActivityForTests(): void {
   }
 
   playbackOwners = new Set();
-  microphoneOwners = new Set();
+  microphoneOwners = new Map();
   snapshot = SERVER_SNAPSHOT;
   listeners.clear();
 }

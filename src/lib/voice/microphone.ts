@@ -93,8 +93,14 @@ export function isWebLocksSupported(
   return locks !== null && locks !== undefined && typeof locks.request === "function";
 }
 
+export interface MicrophoneLeaseOptions {
+  readonly locks?: MicrophoneLockManager | null;
+  readonly name?: string;
+  readonly mode?: MicrophoneLockMode;
+}
+
 export async function acquireMicrophoneLease(
-  options: { readonly locks?: MicrophoneLockManager | null } = {},
+  options: MicrophoneLeaseOptions = {},
 ): Promise<MicrophoneLease> {
   const locks =
     options.locks === undefined ? getNavigatorLocks() : options.locks;
@@ -125,8 +131,11 @@ export async function acquireMicrophoneLease(
   try {
     void locks
       .request(
-        MICROPHONE_LOCK_NAME,
-        { mode: "exclusive", ifAvailable: true },
+        options.name ?? MICROPHONE_LOCK_NAME,
+        {
+          mode: options.mode ?? "exclusive",
+          ifAvailable: true,
+        },
         async (lock) => {
           if (!lock) {
             resolveAcquired(false);
@@ -348,6 +357,7 @@ export interface MicrophoneSessionControllerOptions {
   readonly stopSession: (sessionId: number) => void | Promise<void>;
   readonly onStateChange?: (state: MicrophoneSessionState) => void;
   readonly locks?: MicrophoneLockManager | null;
+  readonly lockMode?: MicrophoneLockMode;
   readonly now?: () => number;
   readonly maxDurationMs?: number;
   readonly setTimer?: (
@@ -397,6 +407,7 @@ export class MicrophoneSessionController {
     try {
       const lease = await acquireMicrophoneLease({
         locks: this.options.locks,
+        mode: this.options.lockMode,
       });
 
       if (generation !== this.generation) {

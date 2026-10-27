@@ -253,6 +253,71 @@ service. It verifies:
   when the choice changes. Until P19B, the Settings panel offers only the
   explicit manual clear.
 
+## P20 experimental spoken Stop
+
+- **Default:** off. The setting is per browser (`localStorage`, key
+  `ai-voice-notes:stop-monitor-enabled`) and is enabled only by the explicit
+  checkbox on `/settings` after the Czech cost/microphone disclosure.
+- **Runtime:** while read-aloud playback is active, the player mounts the
+  normal Scribe dictation hook in command-only mode. It uses the existing
+  `ai-voice-notes:microphone` Web Lock and the same Scribe token/session
+  controller as P13B. Playback always holds `ai-voice-notes:tts-playback`;
+  with the monitor enabled it also holds `ai-voice-notes:microphone` in
+  **shared** mode, and the monitor requests the same lock shared. Another tab's
+  exclusive dictation is therefore refused even before the monitor connects,
+  while playback continues if a dictation already owns the microphone (spoken
+  Stop is then refused, button Stop still works). With the monitor disabled,
+  playback takes the microphone lock exclusively as in P19B.
+- **Command scope:** only a committed standalone `stop` (optional punctuation)
+  calls the local player Stop. If a partial stabilizes on exactly `stop` for
+  about 400 ms, the monitor requests a manual Scribe commit so the normal
+  committed path can run; the partial itself never stops audio. Partials and
+  all other committed text are ignored, never inserted into a note, and never
+  persisted. The browser requests echo cancellation and noise suppression;
+  headphones are recommended.
+- **Cleanup:** the monitor stops on button Stop, spoken Stop, natural end,
+  playback/provider failure, settings change, or page unmount. A busy
+  microphone (another tab or mode) refuses the monitor but never blocks the
+  physical button.
+- **Aggregates:** only attempts, successes and the slowest delay from the end
+  of speech to the committed command are stored under
+  `ai-voice-notes:stop-monitor-stats`. No audio or transcript is stored.
+  Reset is available in Settings.
+- **Evidence:** deterministic tests are in
+  `tests/voice/stop-monitor.test.ts` and
+  `tests/settings/spoken-stop.test.tsx`. They use a mocked Scribe connection,
+  mocked TTS echo/audio, a fake Web Locks manager, and no network/provider
+  call. They cover TTS echo, standalone stop, note immutability, mic close,
+  natural end, second-tab conflict, token failure, button Stop, settings and
+  aggregate storage.
+
+### Manual live procedure (user-verified 2026-10-27; formal aggregate not recorded)
+
+This procedure opens the microphone and consumes one Scribe token per
+playback start. It is not run automatically. The user verified the feature with
+a Jabra headset and accepted P20 on 2026-10-27; the formal ten-trial aggregate
+numbers were not recorded in this session.
+
+1. Use a desktop Chromium/Edge, headphones and a physical microphone. On
+   `/settings`, read the disclosure and explicitly enable the experimental
+   spoken Stop.
+2. Open a Czech note, load the read-aloud manifest/cost, consent to TTS, and
+   start playback.
+3. Confirm the player says it is listening, then say a standalone `stop` ten
+   times across ten playback starts. Record the reported aggregate attempts,
+   successes and slowest end-of-speech-to-command delay; do not record audio
+   or transcripts.
+4. On a separate trial, let playback end naturally and confirm the microphone
+   indicator closes. Repeat with the button Stop and with another tab owning
+   the microphone (spoken Stop refused, button still works).
+5. Optional failure trial: deny microphone permission or block the token
+   request; playback must continue and the button Stop must still stop audio.
+
+Report the ten successes, the slowest end-of-speech-to-command delay and any
+false positives/negatives.
+Label the result experimental; it is not a guarantee. Acceptance was based on
+the user's headset verification, not on a recorded ten-trial aggregate.
+
 ## Live evidence (2026-10-26)
 
 - **Authorization:** the user explicitly requested the live microphone/provider

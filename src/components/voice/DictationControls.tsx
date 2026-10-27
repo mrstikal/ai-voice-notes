@@ -293,7 +293,7 @@ export function DictationControls({
         </p>
       ) : null}
 
-      {!busy && media.microphoneActive ? (
+      {!busy && media.dictationActive ? (
         <p className="mt-4 text-sm leading-6 text-stone-700">
           Mikrofon právě používá jiný režim. Diktování názvu bude dostupné po
           jeho ukončení.
@@ -675,7 +675,7 @@ export function BodyDictationControls({
         </p>
       ) : null}
 
-      {!busy && media.microphoneActive ? (
+      {!busy && media.dictationActive ? (
         <p className="mt-3 text-sm leading-6 text-stone-700">
           Mikrofon právě používá jiný režim. Diktování textu bude dostupné po
           jeho ukončení.
