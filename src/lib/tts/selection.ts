@@ -1,17 +1,20 @@
-import type { List, ListItem, Root, RootContent } from "mdast";
-import { visit } from "unist-util-visit";
+import type { RootContent } from "mdast";
 
 import {
   collectMarkdownReasons,
   parseNoteMarkdown,
-  renderMarkdownBlock,
   type SourceOnlyReason,
 } from "../notes/markdown.ts";
 import { TtsTextError } from "./chunking.ts";
+import {
+  collectTtsBlockSpans,
+  collectTtsTaskLists,
+  type TtsBlockSpan,
+  type TtsTaskItemInfo,
+} from "./source-options.ts";
+import { TTS_SCOPES, type TtsScope } from "./scopes.ts";
 
-export const TTS_SCOPES = ["full", "range", "paragraph", "tasks"] as const;
-
-export type TtsScope = (typeof TTS_SCOPES)[number];
+export { TTS_SCOPES, type TtsScope };
 
 export interface TtsSelectionRequest {
   readonly scope: TtsScope;
@@ -28,51 +31,6 @@ export interface TtsSelection extends TtsSelectionRequest {
 const graphemeSegmenter = new Intl.Segmenter("cs", {
   granularity: "grapheme",
 });
-
-interface BlockSpan {
-  readonly node: RootContent;
-  readonly text: string;
-  readonly start: number;
-  readonly end: number;
-}
-
-interface TaskItemInfo {
-  readonly text: string;
-  readonly reasons: readonly SourceOnlyReason[];
-}
-
-interface TaskListInfo {
-  readonly items: readonly TaskItemInfo[];
-  readonly blockStart: number;
-  readonly blockEnd: number;
-}
-
-function collectBlockSpans(ast: Root): BlockSpan[] {
-  const spans: BlockSpan[] = [];
-  let offset = 0;
-
-  for (const node of ast.children) {
-    const text = renderMarkdownBlock(node);
-
-    if (text.length === 0) {
-      continue;
-    }
-
-    if (offset > 0) {
-      offset += 2;
-    }
-
-    spans.push({
-      node,
-      text,
-      start: offset,
-      end: offset + text.length,
-    });
-    offset += text.length;
-  }
-
-  return spans;
-}
 
 function graphemeBoundaries(text: string): Set<number> {
   const boundaries = new Set<number>([0, text.length]);
@@ -122,22 +80,6 @@ function validateRange(
   return { start, end };
 }
 
-function taskItemText(item: ListItem): TaskItemInfo {
-  const paragraphs = item.children.filter(
-    (child) => child.type === "paragraph",
-  );
-
-  return {
-    text: paragraphs
-      .map((child) => renderMarkdownBlock(child))
-      .join("\n")
-      .trim(),
-    reasons: paragraphs.flatMap((child) =>
-      collectMarkdownReasons(child),
-    ),
-  };
-}
-
 function unsupportedBlockError(
   reasons: readonly SourceOnlyReason[],
 ): TtsTextError {
@@ -158,7 +100,7 @@ function assertBlockSupported(node: RootContent): void {
 }
 
 function assertTaskItemsSupported(
-  items: readonly TaskItemInfo[],
+  items: readonly TtsTaskItemInfo[],
 ): void {
   const reasons = items.flatMap((item) => item.reasons);
 
@@ -167,37 +109,10 @@ function assertTaskItemsSupported(
   }
 }
 
-function collectTaskLists(spans: readonly BlockSpan[]): TaskListInfo[] {
-  const lists: TaskListInfo[] = [];
-
-  for (const span of spans) {
-    visit(span.node, "list", (node: List) => {
-      const items = node.children
-        .filter(
-          (item) => item.checked === true || item.checked === false,
-        )
-        .map(taskItemText)
-        .filter(
-          (item) => item.text.length > 0 || item.reasons.length > 0,
-        );
-
-      if (items.length > 0) {
-        lists.push({
-          items,
-          blockStart: span.start,
-          blockEnd: span.end,
-        });
-      }
-    });
-  }
-
-  return lists;
-}
-
 function selectParagraph(
   request: TtsSelectionRequest,
   plainText: string,
-  spans: readonly BlockSpan[],
+  spans: readonly TtsBlockSpan[],
 ): string {
   const paragraphs = spans.filter(
     (span) => span.node.type === "paragraph",
@@ -252,9 +167,9 @@ function selectParagraph(
 function selectTasks(
   request: TtsSelectionRequest,
   plainText: string,
-  spans: readonly BlockSpan[],
+  spans: readonly TtsBlockSpan[],
 ): string {
-  const lists = collectTaskLists(spans);
+  const lists = collectTtsTaskLists(spans);
 
   if (lists.length === 0) {
     throw new TtsTextError(
@@ -325,7 +240,7 @@ export function selectTtsText(
 ): TtsSelection {
   const parsed = parseNoteMarkdown(contentMd);
   const plainText = parsed.plainText;
-  const spans = collectBlockSpans(parsed.ast);
+  const spans = collectTtsBlockSpans(parsed.ast);
   const sourceOnlyError = () =>
     new TtsTextError(
       422,

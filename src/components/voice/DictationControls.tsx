@@ -20,6 +20,11 @@ import {
   countGraphemes,
 } from "@/lib/notes/limits";
 import {
+  getMediaActivityServerSnapshot,
+  getMediaActivitySnapshot,
+  subscribeMediaActivity,
+} from "@/lib/media/activity";
+import {
   getVoiceDiagnosticsServerSnapshot,
   getVoiceDiagnosticsSnapshot,
   subscribeVoiceDiagnostics,
@@ -98,6 +103,11 @@ export function DictationControls({
     getVadSilencePreferenceSnapshot,
     getVadSilencePreferenceServerSnapshot,
   );
+  const media = useSyncExternalStore(
+    subscribeMediaActivity,
+    getMediaActivitySnapshot,
+    getMediaActivityServerSnapshot,
+  );
 
   const dictation = useScribeDictation({
     stopAfterFirstCommit: true,
@@ -136,7 +146,12 @@ export function DictationControls({
     proposal !== null && note.version !== proposal.baseVersion;
   const busy = session.status !== "idle" && session.status !== "error";
   const startDisabled =
-    disabled || webLocksSupported !== true || busy || isStopping || isSaving;
+    disabled ||
+    media.playbackActive ||
+    webLocksSupported !== true ||
+    busy ||
+    isStopping ||
+    isSaving;
   const stopDisabled =
     !busy || session.status === "stopping" || isStopping || isSaving;
   const useDisabled =
@@ -268,6 +283,20 @@ export function DictationControls({
         <p className="mt-4 text-sm leading-6 text-stone-600">
           Nejprve uložte nebo zrušte neuložené změny textu, aby diktování
           názvu nepřepsalo obsah poznámky.
+        </p>
+      ) : null}
+
+      {media.playbackActive ? (
+        <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-950">
+          Během přehrávání čtení nahlas nelze diktovat. Nejprve přehrávání
+          zastavte.
+        </p>
+      ) : null}
+
+      {!busy && media.microphoneActive ? (
+        <p className="mt-4 text-sm leading-6 text-stone-700">
+          Mikrofon právě používá jiný režim. Diktování názvu bude dostupné po
+          jeho ukončení.
         </p>
       ) : null}
 
@@ -456,6 +485,11 @@ export function BodyDictationControls({
     getVoiceDiagnosticsSnapshot,
     getVoiceDiagnosticsServerSnapshot,
   );
+  const media = useSyncExternalStore(
+    subscribeMediaActivity,
+    getMediaActivitySnapshot,
+    getMediaActivityServerSnapshot,
+  );
 
   useEffect(() => {
     insertAtEndRef.current = insertAtEnd;
@@ -528,7 +562,11 @@ export function BodyDictationControls({
   } = dictation;
   const busy = session.status !== "idle" && session.status !== "error";
   const startDisabled =
-    disabled || webLocksSupported !== true || busy || isStopping;
+    disabled ||
+    media.playbackActive ||
+    webLocksSupported !== true ||
+    busy ||
+    isStopping;
   const stopDisabled =
     !busy || session.status === "stopping" || isStopping;
   const partialGraphemeCount = useMemo(
@@ -627,6 +665,20 @@ export function BodyDictationControls({
         <p className="mt-3 text-sm leading-6 text-stone-600">
           {disabledReason ??
             "Diktování textu je dostupné po vyřešení neuložených změn nebo limitu."}
+        </p>
+      ) : null}
+
+      {media.playbackActive ? (
+        <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-950">
+          Během přehrávání čtení nahlas nelze diktovat. Nejprve přehrávání
+          zastavte.
+        </p>
+      ) : null}
+
+      {!busy && media.microphoneActive ? (
+        <p className="mt-3 text-sm leading-6 text-stone-700">
+          Mikrofon právě používá jiný režim. Diktování textu bude dostupné po
+          jeho ukončení.
         </p>
       ) : null}
 

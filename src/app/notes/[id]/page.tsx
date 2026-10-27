@@ -8,6 +8,10 @@ import {
   getNoteService,
 } from "@/lib/notes/service";
 import { toClientDetail } from "@/lib/notes/view";
+import {
+  getTtsProviderStatus,
+  type TtsProviderStatus,
+} from "@/lib/tts/provider";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +27,15 @@ export default async function NoteDetailPage({ params }: NoteDetailPageProps) {
   const { id } = await params;
 
   let note;
+  let ttsStatus: TtsProviderStatus | null = null;
+  let ttsError: string | null = null;
+
+  try {
+    ttsStatus = getTtsProviderStatus();
+  } catch {
+    ttsError =
+      "Stav čtení nahlas se nepodařilo načíst. Zkontrolujte konfiguraci aplikace.";
+  }
 
   try {
     note = await getNoteService().getNote(id);
@@ -36,7 +49,12 @@ export default async function NoteDetailPage({ params }: NoteDetailPageProps) {
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-12">
-      <NoteWorkspace key={note.id} note={toClientDetail(note)} />
+      <NoteWorkspace
+        key={note.id}
+        note={toClientDetail(note)}
+        providerError={ttsError}
+        providerStatus={ttsStatus}
+      />
     </div>
   );
 }

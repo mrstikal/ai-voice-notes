@@ -10,11 +10,15 @@ import {
 import {
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
   useSyncExternalStore,
 } from "react";
 
+import {
+  setMicrophoneOwnerActive,
+} from "@/lib/media/activity";
 import {
   INITIAL_MICROPHONE_SESSION_STATE,
   SCRIBE_LANGUAGE_CODE,
@@ -111,6 +115,7 @@ export function useScribeDictation(
   const [incompleteNotice, setIncompleteNotice] = useState<string | null>(
     null,
   );
+  const mediaOwnerId = useId();
   const sessionIdRef = useRef<number | null>(null);
   const scribeRef = useRef<UseScribeReturn | null>(null);
   const controllerRef = useRef<MicrophoneSessionController | null>(null);
@@ -135,6 +140,19 @@ export function useScribeDictation(
   const onBeforeSessionCloseRef = useRef(options.onBeforeSessionClose);
   const hasStartedRef = useRef(false);
   const lastPartialAtRef = useRef<number | null>(null);
+  const microphoneActive =
+    session.status !== "idle" && session.status !== "error";
+
+  useEffect(() => {
+    setMicrophoneOwnerActive(mediaOwnerId, microphoneActive);
+  }, [mediaOwnerId, microphoneActive]);
+
+  useEffect(
+    () => () => {
+      setMicrophoneOwnerActive(mediaOwnerId, false);
+    },
+    [mediaOwnerId],
+  );
 
   useEffect(() => {
     onCommitRef.current = options.onCommit;
