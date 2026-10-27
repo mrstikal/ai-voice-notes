@@ -64,6 +64,56 @@ export interface FlushVoiceCommandsResult {
   readonly state: VoiceFormatState;
 }
 
+export interface TaskStateVoiceCommand {
+  readonly taskText: string;
+  readonly checked: boolean;
+}
+
+const TASK_DONE_PATTERN =
+  /^\s*ozna[cč](?:it)?\s+[úu]kol(?:u)?\s+(.+?)\s+jako\s+(?:hotov[ýyé](?:ho|mu)?|spln[ěe]n[ýyé]|spln[ěe]no)\s*$/iu;
+const TASK_UNDONE_PATTERN =
+  /^\s*zru[sš](?:it)?\s+ozna[cč]en[íi]\s+[úu]kolu\s+(.+?)\s*$/iu;
+
+function cleanTaskText(value: string): string {
+  return value
+    .replace(/\s+/gu, " ")
+    .replace(/^[\s„“"'‚‘(\[]+/u, "")
+    .replace(/[\s„“"'‚‘)\]]+$/u, "")
+    .trim();
+}
+
+export function parseTaskVoiceCommand(
+  text: string,
+): TaskStateVoiceCommand | null {
+  const normalized = text
+    .replace(/\s+/gu, " ")
+    .trim()
+    .replace(/[.!?…]+$/u, "")
+    .trim();
+
+  if (normalized === "") {
+    return null;
+  }
+
+  const done = TASK_DONE_PATTERN.exec(normalized);
+
+  if (done !== null) {
+    const taskText = cleanTaskText(done[1] ?? "");
+
+    return taskText === "" ? null : { taskText, checked: true };
+  }
+
+  const undone = TASK_UNDONE_PATTERN.exec(normalized);
+
+  if (undone !== null) {
+    const taskText = cleanTaskText(undone[1] ?? "");
+
+    return taskText === "" ? null : { taskText, checked: false };
+  }
+
+  return null;
+}
+
 interface WorkingState {
   marks: readonly InlineMark[];
   listVariant: VoiceListVariant | null;

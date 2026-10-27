@@ -1,7 +1,8 @@
 "use client";
 
 import type { Editor, JSONContent } from "@tiptap/core";
-import { TextSelection } from "@tiptap/pm/state";
+import { TextSelection, type Transaction } from "@tiptap/pm/state";
+import { ReplaceAroundStep } from "@tiptap/pm/transform";
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import {
   useCallback,
@@ -182,6 +183,30 @@ function describeVisualFailure(failure: VisualConversionFailure): string {
   return `Vizuální režim není dostupný, protože poznámka obsahuje ${reasons.join(", ")}. Upravte ji ve zdrojovém režimu.`;
 }
 
+function isTaskCheckboxStep(transaction: Transaction): boolean {
+  if (transaction.steps.length !== 1) {
+    return false;
+  }
+
+  const step = transaction.steps[0];
+
+  if (!(step instanceof ReplaceAroundStep)) {
+    return false;
+  }
+
+  const inserted = step.slice.content;
+
+  return (
+    step.gapFrom === step.from + 1 &&
+    step.gapTo === step.to - 1 &&
+    step.insert === 1 &&
+    step.slice.openStart === 0 &&
+    step.slice.openEnd === 0 &&
+    inserted.childCount === 1 &&
+    inserted.firstChild?.type.name === "taskItem"
+  );
+}
+
 interface ToolbarButtonProps {
   readonly label: string;
   readonly onClick: () => void;
@@ -216,6 +241,7 @@ interface VisualMarkdownEditorProps {
   readonly onError: (message: string) => void;
   readonly onPendingChange: () => void;
   readonly onEditorReady: (editor: Editor) => void;
+  readonly onTaskToggle: (markdown: string) => void;
 }
 
 function VisualMarkdownEditor({
@@ -225,10 +251,12 @@ function VisualMarkdownEditor({
   onError,
   onPendingChange,
   onEditorReady,
+  onTaskToggle,
 }: VisualMarkdownEditorProps) {
   const onChangeRef = useRef(onChange);
   const onErrorRef = useRef(onError);
   const onPendingChangeRef = useRef(onPendingChange);
+  const onTaskToggleRef = useRef(onTaskToggle);
   const serializationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -244,6 +272,10 @@ function VisualMarkdownEditor({
   useEffect(() => {
     onPendingChangeRef.current = onPendingChange;
   }, [onPendingChange]);
+
+  useEffect(() => {
+    onTaskToggleRef.current = onTaskToggle;
+  }, [onTaskToggle]);
 
   useEffect(
     () => () => {
@@ -267,7 +299,26 @@ function VisualMarkdownEditor({
     },
     extensions: NOTE_EDITOR_EXTENSIONS,
     immediatelyRender: false,
-    onUpdate: ({ editor: currentEditor }) => {
+    onUpdate: ({ editor: currentEditor, transaction }) => {
+      if (isTaskCheckboxStep(transaction)) {
+        if (serializationTimeoutRef.current !== null) {
+          clearTimeout(serializationTimeoutRef.current);
+          serializationTimeoutRef.current = null;
+        }
+
+        try {
+          onTaskToggleRef.current(serializeVisualJson(currentEditor.getJSON()));
+        } catch (error) {
+          onErrorRef.current(
+            error instanceof Error
+              ? error.message
+              : "Změnu úkolu nelze převést do Markdownu.",
+          );
+        }
+
+        return;
+      }
+
       onPendingChangeRef.current();
 
       if (serializationTimeoutRef.current !== null) {
@@ -513,6 +564,8 @@ export function NoteEditor({ note, onSaved, onDirtyChange }: NoteEditorProps) {
   const visualVoiceEndModeRef = useRef(false);
   const visualPendingParagraphRef = useRef(false);
   const controllerRef = useRef<DraftAutosaveController | null>(null);
+  const taskSaveChainRef = useRef<Promise<void>>(Promise.resolve());
+  const taskSavePendingRef = useRef(0);
   const onSavedRef = useRef(onSaved);
   const onDirtyChangeRef = useRef(onDirtyChange);
 
@@ -1101,6 +1154,107 @@ export function NoteEditor({ note, onSaved, onDirtyChange }: NoteEditorProps) {
     notifyChange();
   }, [clearRecoverableError, notifyChange]);
 
+  const handleTaskToggle = useCallback(
+    (markdown: string) => {
+      setSource(markdown);
+      sourceTextRef.current = markdown;
+      setVisualDirty(false);
+      setStatus(null);
+      setRecoveryDismissed(true);
+      clearRecoverableError();
+
+      if (conflictRef.current !== null) {
+        return;
+      }
+
+      controllerRef.current?.cancelPending();
+      taskSavePendingRef.current += 1;
+      setIsSaving(true);
+      setIsExplicitSaving(true);
+
+      taskSaveChainRef.current = taskSaveChainRef.current.then(async () => {
+        try {
+          await controllerRef.current?.waitForIdle();
+          controllerRef.current?.cancelPending();
+
+          if (conflictRef.current !== null) {
+            return;
+          }
+
+          controllerRef.current?.pause();
+          const updated = await updateNote(note.id, {
+            contentMd: markdown,
+            expectedVersion: versionRef.current,
+            title: titleRef.current,
+          });
+
+          versionRef.current = updated.version;
+          savedContentRef.current = updated.contentMd;
+          restoreBaseVersionRef.current = null;
+          setLocalVersion(updated.version);
+          setLocalSavedContent(updated.contentMd);
+          setHasAutosavedContent(false);
+          setAutosaveError(null);
+          setRecoveryDismissed(true);
+          setStatus(
+            `Uloženo · verze ${updated.version} · ${formatCzechDateTime(updated.updatedAt)}`,
+          );
+
+          syncStoredDraft({
+            noteId: note.id,
+            acknowledgedContentMd: updated.contentMd,
+            currentContentMd: readCurrentContent(),
+            baseVersion: updated.version,
+          });
+
+          onSaved?.(updated);
+        } catch (saveError) {
+          if (saveError instanceof NoteApiError && saveError.status === 409) {
+            await showConflict(
+              saveError.latestVersion ?? versionRef.current,
+              saveError.message,
+            );
+          } else {
+            storeDraft(markdown);
+            setStatus(null);
+            setError(
+              saveError instanceof NoteApiError
+                ? `${saveError.message} Změna úkolu zůstala v editoru.`
+                : "Změnu úkolu se nepodařilo uložit. Zůstala v editoru.",
+            );
+          }
+        } finally {
+          taskSavePendingRef.current -= 1;
+
+          if (taskSavePendingRef.current === 0) {
+            setIsSaving(false);
+            setIsExplicitSaving(false);
+          }
+
+          if (conflictRef.current === null) {
+            controllerRef.current?.resume();
+
+            if (
+              taskSavePendingRef.current === 0 &&
+              readCurrentContent() !== savedContentRef.current
+            ) {
+              notifyChange();
+            }
+          }
+        }
+      });
+    },
+    [
+      clearRecoverableError,
+      note.id,
+      notifyChange,
+      onSaved,
+      readCurrentContent,
+      showConflict,
+      storeDraft,
+    ],
+  );
+
   function handleSourceChange(value: string) {
     setSource(value);
     sourceTextRef.current = value;
@@ -1570,6 +1724,7 @@ export function NoteEditor({ note, onSaved, onDirtyChange }: NoteEditorProps) {
             onEditorReady={handleEditorReady}
             onError={handleVisualError}
             onPendingChange={handleVisualPending}
+            onTaskToggle={handleTaskToggle}
           />
         ) : null}
       </div>

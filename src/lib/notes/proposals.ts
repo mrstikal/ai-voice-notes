@@ -211,12 +211,10 @@ export class EditProposalInvalidError extends EditProposalError {
 }
 
 export class EditProposalNoMatchError extends EditProposalError {
-  constructor() {
-    super(
-      409,
-      "proposal_no_match",
-      "Cíl úpravy se v poznámce nepodařilo jednoznačně najít.",
-    );
+  constructor(
+    message = "Cíl úpravy se v poznámce nepodařilo jednoznačně najít.",
+  ) {
+    super(409, "proposal_no_match", message);
     this.name = "EditProposalNoMatchError";
   }
 }
@@ -400,7 +398,7 @@ function resolveFailureToProposalError(
     case "stale":
       return new EditProposalStaleError(result.code);
     case "no_match":
-      return new EditProposalNoMatchError();
+      return new EditProposalNoMatchError(result.message);
     case "invalid":
       return new EditProposalInvalidError(
         result.code,

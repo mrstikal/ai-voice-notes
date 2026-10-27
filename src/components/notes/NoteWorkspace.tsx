@@ -14,6 +14,7 @@ import { AudioPlayer } from "../tts/AudioPlayer";
 import { DictationControls } from "../voice/DictationControls";
 import { NoteEditor } from "./NoteEditor";
 import { NoteHeader } from "./NoteHeader";
+import { TaskVoiceControls } from "./TaskVoiceControls";
 
 interface NoteWorkspaceProps {
   readonly note: NoteDetail;
@@ -34,6 +35,7 @@ export function NoteWorkspace({
   const [note, setNote] = useState(initialNote);
   const [editorDirty, setEditorDirty] = useState(false);
   const [externalEditRevision, setExternalEditRevision] = useState(0);
+  const [taskVoiceNotice, setTaskVoiceNotice] = useState<string | null>(null);
 
   function handleNoteUpdated(updated: NoteDetail) {
     setNote(updated);
@@ -66,6 +68,22 @@ export function NoteWorkspace({
         providerError={providerError}
         providerStatus={providerStatus}
       />
+      <TaskVoiceControls
+        disabled={editorDirty}
+        key={`tasks:${externalEditRevision}`}
+        note={note}
+        onApplied={setTaskVoiceNotice}
+        onNoteUpdated={handleExternalNoteUpdate}
+      />
+      {taskVoiceNotice ? (
+        <p
+          aria-live="polite"
+          className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-medium text-emerald-950"
+          data-testid="task-voice-applied"
+        >
+          {taskVoiceNotice}
+        </p>
+      ) : null}
       <AiEditControls
         disabled={editorDirty}
         key={`ai:${note.version}`}

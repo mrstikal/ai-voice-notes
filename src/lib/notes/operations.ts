@@ -738,9 +738,26 @@ function setTaskChecked(
     );
   }
 
-  const candidates = collectTasks(ast, input.contentMd).filter(
+  const matching = collectTasks(ast, input.contentMd).filter(
     (task) => normalizeMatchText(task.text) === target,
   );
+
+  if (matching.length === 0) {
+    return noMatch(input, "Úkol se nepodařilo jednoznačně najít.");
+  }
+
+  const candidates = matching.filter(
+    (task) => task.checked !== operation.checked,
+  );
+
+  if (candidates.length === 0) {
+    return noMatch(
+      input,
+      operation.checked
+        ? "Úkol už je označený jako hotový."
+        : "Úkol už není označený jako hotový.",
+    );
+  }
   const publicCandidates: OperationCandidate[] = candidates.map(
     (task, index) => ({
       id: task.id,

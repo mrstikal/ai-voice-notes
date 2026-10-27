@@ -241,6 +241,27 @@ describe.skipIf(!hasTestDatabase)("P23 edit proposals", () => {
     expect(await proposalRows()).toHaveLength(0);
   });
 
+  it("keeps task-specific no-match reasons for already-finished tasks", async () => {
+    const note = await createBaseNote("- [x] Koupit mléko");
+
+    await expect(
+      proposals.create(note.id, {
+        operation: {
+          type: "set_task_checked",
+          taskText: "Koupit mléko",
+          checked: true,
+        },
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({
+      message: "Úkol už je označený jako hotový.",
+      name: "EditProposalNoMatchError",
+    });
+
+    expect(await proposalRows()).toHaveLength(0);
+    expect(await revisionCount(note.id)).toBe(1);
+  });
+
   it("rejects a proposal without changing the note and is idempotent", async () => {
     const note = await createBaseNote();
     const created = await proposals.create(note.id, {

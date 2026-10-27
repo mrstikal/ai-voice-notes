@@ -15,7 +15,10 @@ export type VoiceCommand =
   | { readonly type: "emphasis_end"; readonly normalized: "konec kurzivou" }
   | {
       readonly type: "list_start";
-      readonly normalized: "zacni seznam" | "zacni ukoly";
+      readonly normalized:
+        | "zacni seznam"
+        | "zacni ukoly"
+        | "vytvor seznam ukolu";
       readonly variant: VoiceListVariant;
     }
   | {
@@ -45,6 +48,7 @@ export const VOICE_COMMANDS: readonly VoiceCommand[] = [
   { type: "list_next", normalized: "dalsi polozka", variant: "bullet" },
   { type: "list_end", normalized: "konec seznamu", variant: "bullet" },
   { type: "list_start", normalized: "zacni ukoly", variant: "task" },
+  { type: "list_start", normalized: "vytvor seznam ukolu", variant: "task" },
   { type: "list_next", normalized: "dalsi ukol", variant: "task" },
   { type: "list_end", normalized: "konec ukolu", variant: "task" },
   { type: "stop", normalized: "stop" },
