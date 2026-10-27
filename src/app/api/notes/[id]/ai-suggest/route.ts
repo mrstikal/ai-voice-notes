@@ -1,14 +1,23 @@
 import { z } from "zod";
 
+import { ConfigurationError } from "@/lib/config";
 import { OpenRouterHttpError } from "@/lib/ai/openrouter";
 import {
   CleanupError,
   suggestCleanup,
 } from "@/lib/ai/cleanup";
 import {
+  SummaryError,
+  suggestSummary,
+} from "@/lib/ai/summary";
+import {
   StructuredLlmError,
   getStructuredLlmService,
 } from "@/lib/ai/structured";
+import {
+  UsageServiceError,
+  toUsageErrorResponse,
+} from "@/lib/ai/usage";
 import {
   hashNoteSource,
   resolveOperation,
@@ -39,23 +48,81 @@ const cleanupRequestSchema = z
   })
   .strict();
 
-type CleanupRequest = z.infer<typeof cleanupRequestSchema>;
+const summaryRequestSchema = z
+  .object({
+    kind: z.literal("summary"),
+    scope: z.enum(["full", "range"]),
+    start: z.number().int().nonnegative().optional(),
+    end: z.number().int().nonnegative().optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.scope === "full") {
+      if (value.start !== undefined || value.end !== undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Shrnutí celé poznámky nesmí obsahovat rozsah.",
+        });
+      }
 
-type CleanupRouteContext = {
+      return;
+    }
+
+    if (
+      value.start === undefined ||
+      value.end === undefined ||
+      value.start >= value.end
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Vybraný text vyžaduje platný začátek a konec.",
+      });
+    }
+  });
+
+const suggestRequestSchema = z.union([
+  cleanupRequestSchema,
+  summaryRequestSchema,
+]);
+
+type SuggestRequest = z.infer<typeof suggestRequestSchema>;
+
+type SuggestRouteContext = {
   params: Promise<{ id: string }>;
 };
 
 export const POST = createGuardedJsonRoute<
-  CleanupRequest,
-  CleanupRouteContext
+  SuggestRequest,
+  SuggestRouteContext
 >({
   maxBytes: 16 * 1024,
-  schema: cleanupRequestSchema,
+  schema: suggestRequestSchema,
   methods: ["POST"],
   handler: async ({ data, routeContext }) => {
     try {
       const { id } = await routeContext!.params;
       const note = await getNoteService().getNote(id);
+
+      if (data.kind === "summary") {
+        const suggestion = await suggestSummary({
+          note,
+          selection: {
+            scope: data.scope,
+            ...(data.start === undefined ? {} : { start: data.start }),
+            ...(data.end === undefined ? {} : { end: data.end }),
+          },
+          llm: getStructuredLlmService(),
+        });
+
+        return jsonOk({
+          kind: "summary",
+          noteId: note.id,
+          noteVersion: note.version,
+          summaryText: suggestion.summaryText,
+          sourceGraphemes: suggestion.sourceGraphemes,
+        });
+      }
+
       const suggestion = await suggestCleanup({
         note,
         blockIndex: data.blockIndex,
@@ -95,6 +162,10 @@ export const POST = createGuardedJsonRoute<
         sourceHash: resolution.sourceHash,
       });
     } catch (error) {
+      if (error instanceof SummaryError) {
+        return jsonError(error.status, error.code, error.message);
+      }
+
       if (error instanceof CleanupError) {
         return jsonError(error.status, error.code, error.message);
       }
@@ -111,11 +182,20 @@ export const POST = createGuardedJsonRoute<
         return jsonError(error.status, error.code, error.message);
       }
 
-      return jsonError(
-        503,
-        "ai_unavailable",
-        "Čištění diktátu není dostupné. Poznámky lze dál upravovat ručně.",
-      );
+      if (error instanceof UsageServiceError) {
+        return toUsageErrorResponse(error);
+      }
+
+      const unavailable =
+        data.kind === "summary"
+          ? "Shrnutí není dostupné. Poznámky lze dál upravovat ručně."
+          : "Čištění diktátu není dostupné. Poznámky lze dál upravovat ručně.";
+
+      if (error instanceof ConfigurationError) {
+        return jsonError(503, "ai_unavailable", unavailable);
+      }
+
+      return jsonError(503, "ai_unavailable", unavailable);
     }
   },
 });

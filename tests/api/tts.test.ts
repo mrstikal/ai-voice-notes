@@ -18,6 +18,7 @@ import {
   OpenRouterClient,
   type OpenRouterTransport,
 } from "../../src/lib/ai/openrouter";
+import { createReadAloudRouteHandler } from "../../src/app/api/tts/route";
 import {
   DEFAULT_TTS_RATE_LIMIT,
   TTS_ESTIMATED_MAX_COST_USD,
@@ -342,6 +343,53 @@ describe("POST /api/tts", () => {
       TTS_MAX_INPUT_CODE_UNITS,
     );
     expect(reserve).toHaveBeenCalledTimes(1);
+  });
+
+  it("serves repeated direct summary text from the P19 cache with its note owner", async () => {
+    const transport = createMockOpenRouterTransport({
+      responses: [audioResponse()],
+    });
+    const { service, reserve } = createService({ transport });
+    const store = new Map<string, Uint8Array>();
+    const cache = {
+      clear: vi.fn(async () => 0),
+      get: vi.fn(async (key: string) => store.get(key) ?? null),
+      has: vi.fn(async (key: string) => store.has(key)),
+      purgeModel: vi.fn(async () => 0),
+      purgeNote: vi.fn(async () => 0),
+      purgeVoice: vi.fn(async () => 0),
+      put: vi.fn(async (key: string, bytes: Uint8Array) => {
+        store.set(key, bytes);
+      }),
+      stats: vi.fn(async () => ({
+        bytes: 0,
+        entries: store.size,
+        maxBytes: 1,
+      })),
+    };
+    const route = createReadAloudRouteHandler({
+      cache,
+      ttsServiceFactory: () => service,
+    });
+    const body = {
+      noteId: "11111111-1111-4111-8111-111111111111",
+      text: "Zkouška shrnutí pro cache.",
+      voice: "sarah",
+    };
+
+    const first = await route(request({ body }));
+    expect(first.status).toBe(200);
+    expect(first.headers.get("x-tts-cache")).toBe("miss");
+    expect(reserve).toHaveBeenCalledTimes(1);
+    expect(transport.calls).toHaveLength(1);
+    expect(cache.put).toHaveBeenCalledTimes(1);
+
+    const second = await route(request({ body }));
+    expect(second.status).toBe(200);
+    expect(second.headers.get("x-tts-cache")).toBe("hit");
+    expect(reserve).toHaveBeenCalledTimes(1);
+    expect(transport.calls).toHaveLength(1);
+    expect(new Uint8Array(await second.arrayBuffer())).toEqual(mp3Bytes());
   });
 
   it("rejects empty text before reserving budget", async () => {

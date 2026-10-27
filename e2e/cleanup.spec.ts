@@ -264,11 +264,8 @@ test("the preserved original transcript is restorable after a later named revisi
   await page.getByLabel("Obsah (Markdown)").fill(laterContent);
   await page.getByRole("button", { name: "Uložit" }).click();
   await expect
-    .poll(async () => (await currentNote(request, noteId)).version, {
-      timeout: 15_000,
-    })
+    .poll(async () => revisionCount(noteId), { timeout: 15_000 })
     .toBe(3);
-  expect(await revisionCount(noteId)).toBe(3);
   await expect(
     page.getByTestId("revision-history").getByText("Ruční úprava"),
   ).toBeVisible();

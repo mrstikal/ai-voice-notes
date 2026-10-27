@@ -11,6 +11,7 @@ import {
   type SyntheticEvent,
 } from "react";
 
+import type { SummaryArtifact } from "@/lib/ai/summary";
 import type { NoteDetail } from "@/lib/notes/client";
 import {
   getMediaActivityServerSnapshot,
@@ -54,6 +55,7 @@ import type {
 } from "@/lib/voice/microphone";
 
 import { SpokenStopMonitor } from "./SpokenStopMonitor";
+import { SummaryPlayback } from "./SummaryPlayback";
 import { VoiceSelector } from "./VoiceSelector";
 
 type PlaybackPhase = "idle" | "loading" | "playing" | "paused";
@@ -76,6 +78,7 @@ export interface AudioPlayerProps {
   readonly fetchImpl?: typeof fetch;
   readonly audioFactory?: PlaybackAudioFactory;
   readonly playbackLocks?: MicrophoneLockManager | null;
+  readonly summary?: SummaryArtifact | null;
 }
 
 function createBrowserAudio(src: string): PlaybackAudioHandle {
@@ -126,6 +129,7 @@ export function AudioPlayer({
   fetchImpl = defaultFetch,
   audioFactory = createBrowserAudio,
   playbackLocks,
+  summary = null,
 }: AudioPlayerProps) {
   const ownerId = useId();
   const media = useSyncExternalStore(
@@ -917,6 +921,19 @@ export function AudioPlayer({
         <p className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm leading-6 text-red-900">
           {providerError}
         </p>
+      ) : null}
+
+      {summary !== null && summary.noteVersion === note.version ? (
+        <SummaryPlayback
+          artifact={summary}
+          audioFactory={audioFactory}
+          disabled={disabled}
+          fetchImpl={fetchImpl}
+          key={`${summary.noteId}:${summary.noteVersion}:${summary.summaryText}`}
+          playbackLocks={playbackLocks}
+          providerStatus={providerStatus}
+          voice={effectiveVoice}
+        />
       ) : null}
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2">

@@ -10,9 +10,12 @@ import type { TtsProviderStatus } from "@/lib/tts/provider";
 import { AiEditControls } from "../ai/AiEditControls";
 import { CleanupAction } from "../ai/CleanupAction";
 import { ManualProposalPanel } from "../ai/ManualProposalPanel";
+import { SummaryAction } from "../ai/SummaryAction";
 import { RevisionHistory } from "./RevisionHistory";
 import { AudioPlayer } from "../tts/AudioPlayer";
 import { DictationControls } from "../voice/DictationControls";
+import type { SummaryArtifact } from "@/lib/ai/summary-types";
+
 import { NoteEditor } from "./NoteEditor";
 import { NoteHeader } from "./NoteHeader";
 import { TaskVoiceControls } from "./TaskVoiceControls";
@@ -38,6 +41,8 @@ export function NoteWorkspace({
   const [externalEditRevision, setExternalEditRevision] = useState(0);
   const [taskVoiceNotice, setTaskVoiceNotice] = useState<string | null>(null);
   const [cleanupNotice, setCleanupNotice] = useState<string | null>(null);
+  const [summaryPlayback, setSummaryPlayback] =
+    useState<SummaryArtifact | null>(null);
 
   function handleNoteUpdated(updated: NoteDetail) {
     setNote(updated);
@@ -64,11 +69,25 @@ export function NoteWorkspace({
         onSaved={handleNoteUpdated}
         onDirtyChange={setEditorDirty}
       />
+      <SummaryAction
+        disabled={editorDirty}
+        key={`summary:${note.version}`}
+        llmError={llmError}
+        llmStatus={llmStatus}
+        note={note}
+        onNoteUpdated={handleExternalNoteUpdate}
+        onReadSummary={setSummaryPlayback}
+      />
       <AudioPlayer
         disabled={editorDirty}
         note={note}
         providerError={providerError}
         providerStatus={providerStatus}
+        summary={
+          summaryPlayback?.noteVersion === note.version
+            ? summaryPlayback
+            : null
+        }
       />
       <TaskVoiceControls
         disabled={editorDirty}

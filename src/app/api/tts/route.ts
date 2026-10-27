@@ -57,6 +57,7 @@ const directRequestSchema = z
   .object({
     text: z.string(),
     voice: z.string(),
+    noteId: z.string().uuid().optional(),
   })
   .strict();
 
@@ -294,10 +295,32 @@ export function createReadAloudRouteHandler(
     handler: async ({ data }) => {
       try {
         if ("text" in data) {
+          const key = ttsCacheKey({
+            text: data.text,
+            model: TTS_MODEL_ID,
+            voice: data.voice,
+          });
+
+          if (data.noteId !== undefined) {
+            const cachedAudio = await safeGet(cache, key, data.noteId);
+
+            if (cachedAudio !== null) {
+              return cachedAudioResponse(cachedAudio, data.voice, {
+                "x-tts-cache": "hit",
+              });
+            }
+          }
+
           const result = await ttsServiceFactory().synthesize({
             text: data.text,
             voice: data.voice,
           });
+
+          if (data.noteId !== undefined) {
+            await safePut(cache, key, result, data.noteId);
+
+            return audioResponse(result, { "x-tts-cache": "miss" });
+          }
 
           return audioResponse(result);
         }

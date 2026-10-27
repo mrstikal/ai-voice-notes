@@ -1,7 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { POST as suggestCleanupRoute } from "@/app/api/notes/[id]/ai-suggest/route";
+import { BudgetExceededError } from "@/lib/ai/usage";
 import type { LlmEditResponse } from "@/lib/ai/schemas";
+import { ConfigurationError } from "@/lib/config";
+import { parseNoteMarkdown } from "@/lib/notes/markdown";
 import {
   hashNoteSource,
 } from "@/lib/notes/operations";
@@ -33,6 +36,7 @@ vi.mock("@/lib/notes/service", async (importOriginal) => {
     ...actual,
     getNoteService: () => ({
       getNote: async () => ({
+        id: NOTE_ID,
         contentMd: original,
         version: 1,
       }),
@@ -119,6 +123,70 @@ describe("cleanup suggestion API", () => {
     const prompt = String(llmRequest.mock.calls[0]?.[0]?.prompt);
     expect(prompt).toContain("Janem Novákem");
     expect(prompt).not.toContain("Druhý odstavec");
+  });
+
+  it("returns a bound derived summary without writing a note", async () => {
+    const summary = "Shrnutí: včera proběhla schůzka s Janem a třemi kroky.";
+    llmRequest.mockResolvedValue({
+      kind: "operation",
+      operation: { type: "append_bounded_section", text: summary },
+    } as LlmEditResponse);
+    const plain = parseNoteMarkdown(original).plainText;
+    const secondStart = plain.indexOf("Druhý");
+
+    const response = await suggestCleanupRoute(
+      request({
+        kind: "summary",
+        scope: "range",
+        start: 0,
+        end: secondStart - 1,
+      }),
+      context(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      kind: "summary",
+      noteId: NOTE_ID,
+      noteVersion: 1,
+      summaryText: summary,
+    });
+    const prompt = String(llmRequest.mock.calls[0]?.[0]?.prompt);
+    expect(prompt).toContain("Já jsem já jsem");
+    expect(prompt).not.toContain("Druhý odstavec");
+  });
+
+  it("maps summary budget and configuration failures to summary-specific responses", async () => {
+    llmRequest.mockRejectedValueOnce(
+      new BudgetExceededError({
+        budgetUsd: "2.000000",
+        committedUsd: "2.000000",
+        requestedUsd: "0.011187",
+      }),
+    );
+    const budgetResponse = await suggestCleanupRoute(
+      request({ kind: "summary", scope: "full" }),
+      context(),
+    );
+    expect(budgetResponse.status).toBe(402);
+    expect(await budgetResponse.json()).toMatchObject({
+      error: { code: "budget_exceeded" },
+    });
+
+    llmRequest.mockRejectedValueOnce(
+      new ConfigurationError("OpenRouter není nakonfigurovaný."),
+    );
+    const configResponse = await suggestCleanupRoute(
+      request({ kind: "summary", scope: "full" }),
+      context(),
+    );
+    expect(configResponse.status).toBe(503);
+    expect(await configResponse.json()).toMatchObject({
+      error: {
+        code: "ai_unavailable",
+        message: "Shrnutí není dostupné. Poznámky lze dál upravovat ručně.",
+      },
+    });
   });
 
   it("rejects altered numbers and unknown names before any note is touched", async () => {
