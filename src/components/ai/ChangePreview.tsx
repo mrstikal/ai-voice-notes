@@ -46,13 +46,19 @@ function operationTarget(proposal: EditProposal): string {
 
 export interface ChangePreviewProps {
   readonly proposal: EditProposal;
+  readonly disabled?: boolean;
+  readonly confirming?: boolean;
   readonly rejecting?: boolean;
+  readonly onConfirm?: (proposal: EditProposal) => void;
   readonly onReject?: (proposal: EditProposal) => void;
 }
 
 export function ChangePreview({
   proposal,
+  disabled = false,
+  confirming = false,
   rejecting = false,
+  onConfirm,
   onReject,
 }: ChangePreviewProps) {
   const diff = proposal.diff;
@@ -103,18 +109,32 @@ export function ChangePreview({
         {diff.suffix}
       </pre>
 
-      {proposal.status === "pending" && onReject ? (
+      {proposal.status === "pending" && (onConfirm || onReject) ? (
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          <button
-            className="rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-800 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-stone-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700"
-            disabled={rejecting}
-            onClick={() => onReject(proposal)}
-            type="button"
-          >
-            {rejecting ? "Zamítám…" : "Zamítnout návrh"}
-          </button>
+          {onConfirm ? (
+            <button
+              className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900 disabled:cursor-not-allowed disabled:bg-stone-300 disabled:text-stone-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+              disabled={disabled || confirming || rejecting}
+              onClick={() => onConfirm(proposal)}
+              type="button"
+            >
+              {confirming ? "Ukládám…" : "Potvrdit"}
+            </button>
+          ) : null}
+          {onReject ? (
+            <button
+              className="rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-800 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-stone-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700"
+              disabled={disabled || confirming || rejecting}
+              onClick={() => onReject(proposal)}
+              type="button"
+            >
+              {rejecting ? "Zamítám…" : "Zamítnout návrh"}
+            </button>
+          ) : null}
           <span className="text-xs leading-5 text-stone-500">
-            Zamítnutí pouze změní stav návrhu. Obsah poznámky zůstane stejný.
+            Potvrzení zapíše jednu revizi <code>ai</code> a spotřebuje
+            jednorázové potvrzení. Zamítnutí pouze změní stav návrhu; obsah
+            poznámky zůstane stejný.
           </span>
         </div>
       ) : null}

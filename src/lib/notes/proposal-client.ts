@@ -1,4 +1,5 @@
 import type { LlmOperation } from "../ai/schemas";
+import type { NoteDetail } from "./client";
 import type { OperationCandidate } from "./operations";
 
 export type EditProposalStatus =
@@ -35,6 +36,16 @@ export interface EditProposal {
 
 export interface CreatedEditProposal extends EditProposal {
   readonly confirmationNonce: string;
+}
+
+export interface ConfirmEditProposalRequest {
+  readonly confirmationNonce: string;
+  readonly expectedVersion: number;
+}
+
+export interface ConfirmedEditProposal {
+  readonly proposal: EditProposal;
+  readonly note: NoteDetail;
 }
 
 export interface CreateEditProposalRequest {
@@ -142,6 +153,20 @@ export async function fetchEditProposal(
   return requestJson<EditProposal>(
     `/api/notes/${noteId}/proposals/${proposalId}`,
     { method: "GET" },
+  );
+}
+
+export async function confirmEditProposal(
+  noteId: string,
+  proposalId: string,
+  input: ConfirmEditProposalRequest,
+): Promise<ConfirmedEditProposal> {
+  return requestJson<ConfirmedEditProposal>(
+    `/api/notes/${noteId}/proposals/${proposalId}/confirm`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
   );
 }
 

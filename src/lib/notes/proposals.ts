@@ -1,6 +1,10 @@
-import { createHash, randomBytes } from "node:crypto";
+import {
+  createHash,
+  randomBytes,
+  timingSafeEqual,
+} from "node:crypto";
 
-import { and, eq, lte } from "drizzle-orm";
+import { and, eq, isNull, lte } from "drizzle-orm";
 import { z } from "zod";
 
 import {
@@ -9,18 +13,34 @@ import {
 } from "../ai/schemas.ts";
 import { getDb, type AppDatabase } from "../db/client.ts";
 import { editProposals } from "../db/schema.ts";
+import { loadConfig } from "../config.ts";
 import { jsonError } from "../security/http.ts";
+import {
+  getTtsCache,
+  purgeNoteTtsCacheBestEffort,
+  type TtsCache,
+} from "../tts/cache.ts";
+import * as repository from "./repository.ts";
 import {
   NoteServiceError,
   assertNoteId,
   getNoteService,
+  prepareNoteContent,
   toNoteErrorResponse,
+  type NoteDetailDto,
   type NoteService,
 } from "./service.ts";
 import {
+  DEFAULT_NOTE_GRAPHEME_LIMITS as DEFAULT_PROPOSAL_LIMITS,
+  TITLE_MAX_GRAPHEMES,
+  type NoteGraphemeLimits,
+} from "./limits.ts";
+import {
+  hashNoteSource,
   resolveOperation,
   type OperationCandidate,
 } from "./operations.ts";
+
 
 export const PROPOSAL_EXPIRY_MS = 5 * 60_000;
 export const PROPOSAL_TEXT_MAX_BYTES = 32 * 1024;
@@ -59,6 +79,17 @@ export type CreateEditProposalInput = z.infer<
   typeof createEditProposalInputSchema
 >;
 
+export const confirmEditProposalInputSchema = z
+  .object({
+    confirmationNonce: z.string().min(16).max(200),
+    expectedVersion: expectedVersionSchema,
+  })
+  .strict();
+
+export type ConfirmEditProposalInput = z.infer<
+  typeof confirmEditProposalInputSchema
+>;
+
 export type EditProposalStatus =
   | "pending"
   | "rejected"
@@ -89,6 +120,11 @@ export interface EditProposalDto {
   readonly createdAt: Date;
   readonly updatedAt: Date;
   readonly diff: EditProposalDiff;
+}
+
+export interface ConfirmedEditProposalDto {
+  readonly proposal: EditProposalDto;
+  readonly note: NoteDetailDto;
 }
 
 export interface CreatedEditProposalDto extends EditProposalDto {
@@ -185,6 +221,61 @@ export class EditProposalNoMatchError extends EditProposalError {
   }
 }
 
+export class EditProposalNonceError extends EditProposalError {
+  constructor() {
+    super(
+      403,
+      "proposal_invalid_nonce",
+      "Potvrzovací nonce není platný. Návrh nebyl aplikován.",
+    );
+    this.name = "EditProposalNonceError";
+  }
+}
+
+export class EditProposalExpiredError extends EditProposalError {
+  constructor() {
+    super(
+      409,
+      "proposal_expired",
+      "Návrh vypršel. Vytvořte nový návrh.",
+    );
+    this.name = "EditProposalExpiredError";
+  }
+}
+
+export class EditProposalAlreadyAppliedError extends EditProposalError {
+  constructor() {
+    super(
+      409,
+      "proposal_already_applied",
+      "Návrh už byl aplikován. Poznámka se znovu nezmění.",
+    );
+    this.name = "EditProposalAlreadyAppliedError";
+  }
+}
+
+export class EditProposalDiffMismatchError extends EditProposalError {
+  constructor() {
+    super(
+      409,
+      "proposal_diff_mismatch",
+      "Přepočítaný diff neodpovídá uloženému návrhu. Návrh nebyl aplikován.",
+    );
+    this.name = "EditProposalDiffMismatchError";
+  }
+}
+
+export class EditProposalNoChangeError extends EditProposalError {
+  constructor() {
+    super(
+      409,
+      "proposal_no_change",
+      "Návrh neobsahuje žádnou změnu, kterou by šlo aplikovat.",
+    );
+    this.name = "EditProposalNoChangeError";
+  }
+}
+
 export class EditProposalConflictError extends EditProposalError {
   constructor(message = "Návrh už nelze změnit.") {
     super(409, "proposal_conflict", message);
@@ -198,6 +289,8 @@ export interface EditProposalServiceOptions {
   readonly now?: () => Date;
   readonly nonceFactory?: () => string;
   readonly expiryMs?: number;
+  readonly limits?: NoteGraphemeLimits;
+  readonly ttsCache?: Pick<TtsCache, "purgeNote"> | null;
 }
 
 export interface EditProposalService {
@@ -207,6 +300,11 @@ export interface EditProposalService {
   ): Promise<CreatedEditProposalDto>;
   get(noteId: string, proposalId: string): Promise<EditProposalDto>;
   reject(noteId: string, proposalId: string): Promise<EditProposalDto>;
+  confirm(
+    noteId: string,
+    proposalId: string,
+    input: ConfirmEditProposalInput,
+  ): Promise<ConfirmedEditProposalDto>;
 }
 
 const PROPOSAL_UUID_PATTERN =
@@ -317,6 +415,39 @@ function resolveFailureToProposalError(
   }
 }
 
+function nonceHashMatches(actualHex: string, expectedHex: string): boolean {
+  try {
+    const actual = Buffer.from(actualHex, "hex");
+    const expected = Buffer.from(expectedHex, "hex");
+
+    return (
+      actual.length === expected.length &&
+      actual.length > 0 &&
+      timingSafeEqual(actual, expected)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function toNoteDetail(
+  row: repository.NoteRow,
+  tags: string[],
+): NoteDetailDto {
+  return {
+    id: row.id,
+    title: row.title,
+    category: row.category,
+    version: row.version,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    deletedAt: row.deletedAt,
+    contentMd: row.contentMd,
+    contentPlain: row.contentPlain,
+    tags,
+  };
+}
+
 export function createEditProposalService(
   options: EditProposalServiceOptions,
 ): EditProposalService {
@@ -325,6 +456,7 @@ export function createEditProposalService(
   const nonceFactory =
     options.nonceFactory ?? (() => randomBytes(32).toString("base64url"));
   const expiryMs = options.expiryMs ?? PROPOSAL_EXPIRY_MS;
+  const limits = options.limits ?? DEFAULT_PROPOSAL_LIMITS;
 
   return {
     async create(noteId, input) {
@@ -464,15 +596,213 @@ export function createEditProposalService(
         throw new EditProposalNotFoundError();
       }
 
+      if (refreshed[0].status === "applied") {
+        throw new EditProposalConflictError(
+          "Aplikovaný návrh už nelze zamítnout.",
+        );
+      }
+
       return toDto(refreshed[0]);
+    },
+
+    async confirm(noteId, proposalId, input) {
+      assertNoteId(noteId);
+      assertProposalId(proposalId);
+
+      const outcome = await db.transaction(async (tx) => {
+        const proposalRows = await tx
+          .select()
+          .from(editProposals)
+          .where(
+            and(
+              eq(editProposals.id, proposalId),
+              eq(editProposals.noteId, noteId),
+            ),
+          )
+          .limit(1)
+          .for("update");
+        const proposal = proposalRows[0];
+
+        if (!proposal) {
+          throw new EditProposalNotFoundError();
+        }
+
+        if (
+          proposal.status === "applied" ||
+          proposal.confirmationNonceUsedAt !== null
+        ) {
+          throw new EditProposalAlreadyAppliedError();
+        }
+
+        if (proposal.status === "expired") {
+          throw new EditProposalExpiredError();
+        }
+
+        if (proposal.status === "rejected") {
+          throw new EditProposalConflictError(
+            "Zamítnutý návrh už nelze aplikovat.",
+          );
+        }
+
+        const changedAt = now();
+
+        if (proposal.expiresAt.getTime() <= changedAt.getTime()) {
+          await tx
+            .update(editProposals)
+            .set({ status: "expired", updatedAt: changedAt })
+            .where(
+              and(
+                eq(editProposals.id, proposalId),
+                eq(editProposals.status, "pending"),
+              ),
+            );
+
+          return { kind: "expired" as const };
+        }
+
+        if (input.expectedVersion !== proposal.expectedVersion) {
+          throw new EditProposalStaleError("version_mismatch");
+        }
+
+        if (
+          !nonceHashMatches(
+            hashConfirmationNonce(input.confirmationNonce),
+            proposal.confirmationNonceHash,
+          )
+        ) {
+          throw new EditProposalNonceError();
+        }
+
+        const current = await repository.findNoteByIdForUpdate(tx, noteId);
+
+        if (!current || current.deletedAt) {
+          throw new EditProposalConflictError(
+            "Poznámka byla mezitím smazána. Návrh nelze aplikovat.",
+          );
+        }
+
+        if (current.version !== proposal.expectedVersion) {
+          throw new EditProposalStaleError("version_mismatch");
+        }
+
+        if (hashNoteSource(current.contentMd) !== proposal.originalHash) {
+          throw new EditProposalStaleError("source_mismatch");
+        }
+
+        const resolution = resolveOperation({
+          contentMd: current.contentMd,
+          operation: proposal.operation,
+          noteVersion: current.version,
+          expectedVersion: proposal.expectedVersion,
+          expectedSourceHash: proposal.originalHash,
+          candidateId: proposal.selectedCandidate?.id,
+        });
+
+        if (resolution.status !== "resolved") {
+          throw resolveFailureToProposalError(resolution);
+        }
+
+        if (
+          resolution.beforeMd !== proposal.beforeMd ||
+          resolution.afterMd !== proposal.afterMd
+        ) {
+          throw new EditProposalDiffMismatchError();
+        }
+
+        if (!resolution.changed) {
+          throw new EditProposalNoChangeError();
+        }
+
+        const prepared = prepareNoteContent(
+          current.title,
+          proposal.afterMd,
+          limits,
+        );
+        const tags = await repository.getNoteTags(tx, noteId);
+        const updated = await repository.updateNoteCas(tx, {
+          id: noteId,
+          expectedVersion: current.version,
+          title: current.title,
+          contentMd: proposal.afterMd,
+          contentPlain: prepared.contentPlain,
+        });
+
+        if (!updated) {
+          throw new EditProposalConflictError();
+        }
+
+        await repository.insertRevision(tx, {
+          noteId,
+          noteVersion: updated.version,
+          reason: "ai",
+          beforeSnapshot: {
+            title: current.title,
+            contentMd: current.contentMd,
+            category: current.category,
+            tags,
+          },
+          afterSnapshot: {
+            title: updated.title,
+            contentMd: updated.contentMd,
+            category: updated.category,
+            tags,
+          },
+        });
+
+        const updatedProposalRows = await tx
+          .update(editProposals)
+          .set({
+            status: "applied",
+            confirmationNonceUsedAt: changedAt,
+            updatedAt: changedAt,
+          })
+          .where(
+            and(
+              eq(editProposals.id, proposalId),
+              eq(editProposals.status, "pending"),
+              isNull(editProposals.confirmationNonceUsedAt),
+            ),
+          )
+          .returning();
+        const updatedProposal = updatedProposalRows[0];
+
+        if (!updatedProposal) {
+          throw new EditProposalConflictError();
+        }
+
+        return {
+          kind: "applied" as const,
+          proposal: updatedProposal,
+          note: updated,
+          tags,
+        };
+      });
+
+      if (outcome.kind === "expired") {
+        throw new EditProposalExpiredError();
+      }
+
+      await purgeNoteTtsCacheBestEffort(options.ttsCache, noteId);
+
+      return {
+        proposal: toDto(outcome.proposal),
+        note: toNoteDetail(outcome.note, outcome.tags),
+      };
     },
   };
 }
 
 export function getEditProposalService(): EditProposalService {
+  const config = loadConfig();
+
   return createEditProposalService({
     db: getDb(),
     noteService: getNoteService(),
+    limits: {
+      title: TITLE_MAX_GRAPHEMES,
+      content: config.noteMaxCharacters,
+    },
+    ttsCache: getTtsCache(),
   });
 }
 

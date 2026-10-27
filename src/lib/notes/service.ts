@@ -211,7 +211,7 @@ export function assertNoteId(id: string): void {
   }
 }
 
-function prepareNote(
+export function prepareNoteContent(
   title: string,
   contentMd: string,
   limits: NoteGraphemeLimits,
@@ -339,7 +339,7 @@ export async function createSeededNoteInTransaction(
   input: SeedNoteCreateInput,
   limits: NoteGraphemeLimits = DEFAULT_NOTE_GRAPHEME_LIMITS,
 ): Promise<NoteDetailDto> {
-  const prepared = prepareNote(input.title, input.contentMd, limits);
+  const prepared = prepareNoteContent(input.title, input.contentMd, limits);
   const note = await repository.insertNote(db, {
     seedKey: input.seedKey,
     title: input.title,
@@ -410,7 +410,7 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
     },
 
     async createNote(input) {
-      const prepared = prepareNote(input.title, input.contentMd, limits);
+      const prepared = prepareNoteContent(input.title, input.contentMd, limits);
 
       return db.transaction(async (tx) => {
         const note = await repository.insertNote(tx, {
@@ -434,7 +434,7 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
 
     async updateNote(id, input) {
       assertNoteId(id);
-      const prepared = prepareNote(input.title, input.contentMd, limits);
+      const prepared = prepareNoteContent(input.title, input.contentMd, limits);
       let contentChanged = false;
 
       const result = await db.transaction(async (tx) => {
@@ -510,7 +510,7 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
           return toDetail(current, tags);
         }
 
-        const prepared = prepareNote(input.title, current.contentMd, limits);
+        const prepared = prepareNoteContent(input.title, current.contentMd, limits);
         const updated = await repository.updateNoteCas(tx, {
           id,
           expectedVersion: input.expectedVersion,

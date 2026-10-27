@@ -107,6 +107,30 @@ test("manual proposal shows an escaped diff, rejects without changing the note a
   await expect(page.getByLabel("Obsah (Markdown)")).toHaveValue(content);
 });
 
+test("confirming a proposal writes the persisted result exactly once and updates the editor", async ({
+  page,
+}) => {
+  const title = `Confirm E2E ${Date.now()}`;
+  const content = "První věta. Druhá věta.";
+  await createNote(page, title, content);
+
+  await fillReplaceSentence(page, "První", "věta", "Nová věta.");
+  await page.getByRole("button", {
+    name: "Vytvořit návrh a zobrazit diff",
+  }).click();
+  await expect(page.getByTestId("proposal-preview")).toBeVisible();
+  await expect(page.getByLabel("Obsah (Markdown)")).toHaveValue(content);
+
+  await page.getByRole("button", { name: "Potvrdit" }).click();
+
+  await expect(page.getByLabel("Obsah (Markdown)")).toHaveValue(
+    "Nová věta. Druhá věta.",
+  );
+  await expect(page.getByText(/Verze 2/)).toBeVisible();
+  await expect(page.getByTestId("proposal-preview")).toHaveCount(0);
+  await expect(page.getByLabel("Obsah (Markdown)")).not.toHaveValue(content);
+});
+
 test("ambiguous manual target offers numbered candidates and applies neither to the note", async ({
   page,
 }) => {

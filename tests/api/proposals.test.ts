@@ -3,16 +3,20 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { POST as createProposal } from "@/app/api/notes/[id]/proposals/route";
 import { GET as getProposal } from "@/app/api/notes/[id]/proposals/[proposalId]/route";
 import { POST as rejectProposal } from "@/app/api/notes/[id]/proposals/[proposalId]/reject/route";
+import { POST as confirmProposal } from "@/app/api/notes/[id]/proposals/[proposalId]/confirm/route";
 import {
+  EditProposalNonceError,
   EditProposalNotFoundError,
   type CreatedEditProposalDto,
   type EditProposalDto,
 } from "@/lib/notes/proposals";
+import type { NoteDetailDto } from "@/lib/notes/service";
 
 const service = vi.hoisted(() => ({
   create: vi.fn(),
   get: vi.fn(),
   reject: vi.fn(),
+  confirm: vi.fn(),
 }));
 
 vi.mock("@/lib/notes/proposals", async (importOriginal) => {
@@ -70,6 +74,21 @@ function createdDto(
     ...proposalDto(),
     confirmationNonce: "raw-ui-nonce",
     ...overrides,
+  };
+}
+
+function noteDto(): NoteDetailDto {
+  return {
+    id: NOTE_ID,
+    title: "Testovací poznámka",
+    contentMd: "Nová věta. Druhá věta.",
+    contentPlain: "Nová věta. Druhá věta.",
+    category: null,
+    tags: [],
+    version: 2,
+    createdAt: new Date("2026-10-27T10:00:00.000Z"),
+    updatedAt: new Date("2026-10-27T10:01:00.000Z"),
+    deletedAt: null,
   };
 }
 
@@ -188,6 +207,62 @@ describe("proposal API", () => {
     const rejectBody = (await reject.json()) as Record<string, unknown>;
     expect(rejectBody).toMatchObject({ status: "rejected" });
     expect(rejectBody).not.toHaveProperty("confirmationNonce");
+  });
+
+  it("confirms once through the same-origin route and returns the persisted note without a nonce", async () => {
+    service.confirm.mockResolvedValue({
+      proposal: proposalDto({ status: "applied" }),
+      note: noteDto(),
+    });
+
+    const response = await confirmProposal(
+      request(`/api/notes/${NOTE_ID}/proposals/${PROPOSAL_ID}/confirm`, {
+        method: "POST",
+        body: {
+          confirmationNonce: "raw-ui-nonce-0123456789",
+          expectedVersion: 1,
+        },
+      }),
+      proposalContext(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(service.confirm).toHaveBeenCalledWith(NOTE_ID, PROPOSAL_ID, {
+      confirmationNonce: "raw-ui-nonce-0123456789",
+      expectedVersion: 1,
+    });
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      proposal: { status: "applied" },
+      note: { id: NOTE_ID, version: 2 },
+    });
+    expect(body).not.toHaveProperty("confirmationNonce");
+  });
+
+  it("maps an invalid nonce and a missing confirmation field without applying", async () => {
+    service.confirm.mockRejectedValue(new EditProposalNonceError());
+    const invalidNonce = await confirmProposal(
+      request(`/api/notes/${NOTE_ID}/proposals/${PROPOSAL_ID}/confirm`, {
+        method: "POST",
+        body: {
+          confirmationNonce: "wrong-nonce-0123456789",
+          expectedVersion: 1,
+        },
+      }),
+      proposalContext(),
+    );
+    expect(invalidNonce.status).toBe(403);
+    expect(await errorCode(invalidNonce)).toBe("proposal_invalid_nonce");
+
+    const missing = await confirmProposal(
+      request(`/api/notes/${NOTE_ID}/proposals/${PROPOSAL_ID}/confirm`, {
+        method: "POST",
+        body: { expectedVersion: 1 },
+      }),
+      proposalContext(),
+    );
+    expect(missing.status).toBe(400);
+    expect(await errorCode(missing)).toBe("invalid_shape");
   });
 
   it("maps a missing proposal to 404 without mutating anything", async () => {

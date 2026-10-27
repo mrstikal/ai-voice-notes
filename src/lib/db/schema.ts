@@ -240,6 +240,10 @@ export const editProposals = pgTable(
     selectedCandidate: jsonb("selected_candidate").$type<OperationCandidate | null>(),
     status: text("status").notNull().default("pending"),
     confirmationNonceHash: text("confirmation_nonce_hash").notNull(),
+    confirmationNonceUsedAt: timestamp("confirmation_nonce_used_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
     expiresAt: timestamp("expires_at", {
       withTimezone: true,
       mode: "date",

@@ -77,6 +77,25 @@ describe("ChangePreview", () => {
     expect(screen.queryByTestId("injected")).toBeNull();
   });
 
+  it("disables confirm and reject while the surrounding editor is dirty", () => {
+    render(
+      <ChangePreview
+        disabled
+        onConfirm={vi.fn()}
+        onReject={vi.fn()}
+        proposal={proposal()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Potvrdit" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(
+      screen.getByRole("button", { name: "Zamítnout návrh" }),
+    ).toHaveProperty("disabled", true);
+  });
+
   it("offers reject only for a pending proposal and never renders a nonce", () => {
     const onReject = vi.fn();
     const { container, rerender } = render(

@@ -1,0 +1,1 @@
+ALTER TABLE "edit_proposals" ADD COLUMN "confirmation_nonce_used_at" timestamp with time zone;

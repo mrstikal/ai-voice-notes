@@ -2,10 +2,12 @@
 
 import { useRef, useState } from "react";
 
+import type { NoteDetail } from "@/lib/notes/client";
 import type { LlmOperation } from "@/lib/ai/schemas";
 import type { OperationCandidate } from "@/lib/notes/operations";
 import {
   ProposalApiError,
+  confirmEditProposal,
   createEditProposal,
   rejectEditProposal,
   type EditProposal,
@@ -61,6 +63,7 @@ export interface ManualProposalPanelProps {
   readonly noteTitle: string;
   readonly noteVersion: number;
   readonly disabled?: boolean;
+  readonly onNoteUpdated: (note: NoteDetail) => void;
 }
 
 export function ManualProposalPanel({
@@ -68,6 +71,7 @@ export function ManualProposalPanel({
   noteTitle,
   noteVersion,
   disabled = false,
+  onNoteUpdated,
 }: ManualProposalPanelProps) {
   const [operationType, setOperationType] =
     useState<OperationType>("replace_sentence");
@@ -78,6 +82,7 @@ export function ManualProposalPanel({
   const [taskText, setTaskText] = useState("");
   const [checked, setChecked] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [proposal, setProposal] = useState<EditProposal | null>(null);
@@ -214,6 +219,39 @@ export function ManualProposalPanel({
       );
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleConfirm(current: EditProposal) {
+    const nonce = confirmationNonceRef.current;
+
+    if (nonce === null) {
+      setError(
+        "Potvrzovací nonce není v této stránce k dispozici. Vytvořte návrh znovu.",
+      );
+      return;
+    }
+
+    setConfirming(true);
+    setError(null);
+
+    try {
+      const confirmed = await confirmEditProposal(noteId, current.id, {
+        confirmationNonce: nonce,
+        expectedVersion: current.expectedVersion,
+      });
+
+      confirmationNonceRef.current = null;
+      setProposal(confirmed.proposal);
+      onNoteUpdated(confirmed.note);
+    } catch (confirmError) {
+      setError(
+        confirmError instanceof Error
+          ? confirmError.message
+          : "Návrh se nepodařilo potvrdit.",
+      );
+    } finally {
+      setConfirming(false);
     }
   }
 
@@ -408,6 +446,9 @@ export function ManualProposalPanel({
 
       {proposal ? (
         <ChangePreview
+          confirming={confirming}
+          disabled={disabled}
+          onConfirm={(current) => void handleConfirm(current)}
           onReject={(current) => void handleReject(current)}
           proposal={proposal}
           rejecting={rejecting}

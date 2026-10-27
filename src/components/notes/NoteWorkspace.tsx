@@ -26,9 +26,16 @@ export function NoteWorkspace({
   const router = useRouter();
   const [note, setNote] = useState(initialNote);
   const [editorDirty, setEditorDirty] = useState(false);
+  const [externalEditRevision, setExternalEditRevision] = useState(0);
 
   function handleNoteUpdated(updated: NoteDetail) {
     setNote(updated);
+    router.refresh();
+  }
+
+  function handleProposalApplied(updated: NoteDetail) {
+    setNote(updated);
+    setExternalEditRevision((current) => current + 1);
     router.refresh();
   }
 
@@ -41,6 +48,7 @@ export function NoteWorkspace({
         disabled={editorDirty}
       />
       <NoteEditor
+        key={`${note.id}:${externalEditRevision}`}
         note={note}
         onSaved={handleNoteUpdated}
         onDirtyChange={setEditorDirty}
@@ -57,6 +65,7 @@ export function NoteWorkspace({
         noteId={note.id}
         noteTitle={note.title}
         noteVersion={note.version}
+        onNoteUpdated={handleProposalApplied}
       />
     </>
   );
