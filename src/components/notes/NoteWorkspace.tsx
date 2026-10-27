@@ -8,6 +8,7 @@ import type { LlmProviderStatus } from "@/lib/ai/structured";
 import type { TtsProviderStatus } from "@/lib/tts/provider";
 
 import { AiEditControls } from "../ai/AiEditControls";
+import { CleanupAction } from "../ai/CleanupAction";
 import { ManualProposalPanel } from "../ai/ManualProposalPanel";
 import { RevisionHistory } from "./RevisionHistory";
 import { AudioPlayer } from "../tts/AudioPlayer";
@@ -36,6 +37,7 @@ export function NoteWorkspace({
   const [editorDirty, setEditorDirty] = useState(false);
   const [externalEditRevision, setExternalEditRevision] = useState(0);
   const [taskVoiceNotice, setTaskVoiceNotice] = useState<string | null>(null);
+  const [cleanupNotice, setCleanupNotice] = useState<string | null>(null);
 
   function handleNoteUpdated(updated: NoteDetail) {
     setNote(updated);
@@ -82,6 +84,24 @@ export function NoteWorkspace({
           data-testid="task-voice-applied"
         >
           {taskVoiceNotice}
+        </p>
+      ) : null}
+      <CleanupAction
+        disabled={editorDirty}
+        key={`cleanup:${note.version}`}
+        llmError={llmError}
+        llmStatus={llmStatus}
+        note={note}
+        onApplied={setCleanupNotice}
+        onNoteUpdated={handleExternalNoteUpdate}
+      />
+      {cleanupNotice ? (
+        <p
+          aria-live="polite"
+          className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-medium text-emerald-950"
+          data-testid="cleanup-applied"
+        >
+          {cleanupNotice}
         </p>
       ) : null}
       <AiEditControls

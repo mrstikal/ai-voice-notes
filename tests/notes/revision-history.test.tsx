@@ -32,6 +32,7 @@ vi.mock("@/lib/notes/revision-client", async (importOriginal) => {
 const NOTE_ID = "11111111-1111-4111-8111-111111111111";
 const MANUAL_ID = "22222222-2222-4222-8222-222222222222";
 const INITIAL_ID = "33333333-3333-4333-8333-333333333333";
+const AI_ID = "44444444-4444-4444-8444-444444444444";
 
 function history(): RevisionHistoryData {
   return {
@@ -146,6 +147,113 @@ describe("RevisionHistory", () => {
     expect(screen.getAllByText("Vrátit poslední změnu")).toHaveLength(1);
     expect(screen.getByText("Druhá")).toBeDefined();
     expect(screen.queryByText("<script>")).toBeNull();
+  });
+
+  it("shows and restores the original transcript only for an AI revision", async () => {
+    const onNoteUpdated = vi.fn();
+    const data: RevisionHistoryData = {
+      currentVersion: 2,
+      currentSnapshot: {
+        title: "Historie",
+        contentMd: "Druhá verze.",
+        category: null,
+        tags: [],
+      },
+      undoRevisionId: null,
+      canUndo: false,
+      revisions: [
+        {
+          id: AI_ID,
+          noteVersion: 2,
+          reason: "ai",
+          createdAt: "2026-10-27T10:01:00.000Z",
+          beforeSnapshot: {
+            title: "Historie",
+            contentMd: "Původní přepis.",
+            category: null,
+            tags: [],
+          },
+          afterSnapshot: {
+            title: "Historie",
+            contentMd: "Druhá verze.",
+            category: null,
+            tags: [],
+          },
+          diff: {
+            start: 0,
+            end: 15,
+            prefix: "",
+            removed: "Původní přepis.",
+            inserted: "Druhá verze.",
+            suffix: "",
+          },
+        },
+        history().revisions[1]!,
+      ],
+    };
+    client.fetchRevisions.mockResolvedValue(data);
+    client.restoreRevision.mockResolvedValue(note());
+
+    render(
+      <RevisionHistory
+        noteId={NOTE_ID}
+        noteVersion={2}
+        onNoteUpdated={onNoteUpdated}
+      />,
+    );
+
+    await screen.findByTestId("revision-history");
+    expect(
+      screen.queryByTestId("revision-before-toggle-1"),
+    ).toBeNull();
+
+    const aiItem = screen.getByTestId("revision-2");
+    fireEvent.click(
+      within(aiItem).getByRole("button", {
+        name: "Zobrazit původní přepis",
+      }),
+    );
+    expect(screen.getByTestId("revision-before-2").textContent).toContain(
+      "Původní přepis.",
+    );
+
+    fireEvent.click(
+      within(aiItem).getByRole("button", {
+        name: "Obnovit původní přepis",
+      }),
+    );
+    expect(
+      screen.getByTestId("revision-restore-preview").textContent,
+    ).toContain("Obnovit původní přepis před verzí 2");
+
+    fireEvent.click(
+      within(aiItem).getByRole("button", {
+        name: "Skrýt původní přepis",
+      }),
+    );
+    expect(screen.queryByTestId("revision-restore-preview")).toBeNull();
+
+    fireEvent.click(
+      within(aiItem).getByRole("button", {
+        name: "Zobrazit původní přepis",
+      }),
+    );
+    fireEvent.click(
+      within(aiItem).getByRole("button", {
+        name: "Obnovit původní přepis",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Potvrdit obnovení" }),
+    );
+
+    await waitFor(() => {
+      expect(client.restoreRevision).toHaveBeenCalledWith(NOTE_ID, AI_ID, {
+        mode: "restore_before",
+        expectedVersion: 2,
+      });
+    });
+    expect(onNoteUpdated).toHaveBeenCalledWith(note());
   });
 
   it("calls undo with the version and mode and accepts persisted note", async () => {

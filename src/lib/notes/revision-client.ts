@@ -45,7 +45,7 @@ export interface RevisionHistory {
 }
 
 export interface RestoreRevisionRequest {
-  readonly mode: "undo" | "restore";
+  readonly mode: "undo" | "restore" | "restore_before";
   readonly expectedVersion: number;
 }
 

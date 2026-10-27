@@ -76,6 +76,10 @@ export function RevisionHistory({
   const [error, setError] = useState<string | null>(null);
   const [acting, setActing] = useState(false);
   const [preview, setPreview] = useState<NoteRevision | null>(null);
+  const [previewTarget, setPreviewTarget] = useState<"after" | "before">(
+    "after",
+  );
+  const [beforeRevisionId, setBeforeRevisionId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -108,7 +112,7 @@ export function RevisionHistory({
 
   async function applyRestore(
     revision: NoteRevision,
-    mode: "undo" | "restore",
+    mode: "undo" | "restore" | "restore_before",
   ) {
     if (!history) {
       return;
@@ -165,12 +169,18 @@ export function RevisionHistory({
     );
   }
 
-  const previewDiff =
+  const previewSnapshot =
     preview === null
+      ? null
+      : previewTarget === "before"
+        ? preview.beforeSnapshot
+        : preview.afterSnapshot;
+  const previewDiff =
+    previewSnapshot === null
       ? null
       : computeRevisionDiff(
           history.currentSnapshot.contentMd,
-          preview.afterSnapshot.contentMd,
+          previewSnapshot.contentMd,
         );
 
   return (
@@ -245,11 +255,32 @@ export function RevisionHistory({
                       Vrátit poslední změnu
                     </button>
                   ) : null}
+                  {revision.reason === "ai" ? (
+                    <button
+                      className="rounded-lg border border-stone-300 px-3 py-1.5 text-xs font-semibold text-stone-800 hover:bg-stone-100 disabled:cursor-not-allowed disabled:text-stone-400"
+                      data-testid={`revision-before-toggle-${revision.noteVersion}`}
+                      disabled={disabled || acting}
+                      onClick={() => {
+                        setBeforeRevisionId((current) =>
+                          current === revision.id ? null : revision.id,
+                        );
+                        setPreview(null);
+                        setPreviewTarget("after");
+                        setError(null);
+                      }}
+                      type="button"
+                    >
+                      {beforeRevisionId === revision.id
+                        ? "Skrýt původní přepis"
+                        : "Zobrazit původní přepis"}
+                    </button>
+                  ) : null}
                   {!afterCurrent ? (
                     <button
                       className="rounded-lg border border-stone-300 px-3 py-1.5 text-xs font-semibold text-stone-800 hover:bg-stone-100 disabled:cursor-not-allowed disabled:text-stone-400"
                       disabled={disabled || acting}
                       onClick={() => {
+                        setPreviewTarget("after");
                         setPreview(revision);
                         setError(null);
                       }}
@@ -262,25 +293,53 @@ export function RevisionHistory({
               </div>
 
               <DiffView diff={revision.diff} />
+
+              {revision.reason === "ai" &&
+              beforeRevisionId === revision.id ? (
+                <div data-testid={`revision-before-${revision.noteVersion}`}>
+                  <p className="mt-3 text-xs font-semibold text-stone-700">
+                    Původní přepis před touto změnou
+                  </p>
+                  <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-stone-200 bg-white p-3 font-mono text-xs leading-5 text-stone-800">
+                    {revision.beforeSnapshot.contentMd}
+                  </pre>
+                  <button
+                    className="mt-2 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-950 hover:bg-amber-100 disabled:cursor-not-allowed disabled:text-stone-400"
+                    disabled={disabled || acting}
+                    onClick={() => {
+                      setPreviewTarget("before");
+                      setPreview(revision);
+                      setError(null);
+                    }}
+                    type="button"
+                  >
+                    Obnovit původní přepis
+                  </button>
+                </div>
+              ) : null}
             </li>
           );
         })}
       </ol>
 
-      {preview && previewDiff ? (
+      {preview && previewDiff && previewSnapshot ? (
         <div
           className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4"
           data-testid="revision-restore-preview"
         >
           <p className="text-sm font-semibold text-amber-950">
-            Obnovit verzi {preview.noteVersion} jako novou revizi?
+            {previewTarget === "before"
+              ? `Obnovit původní přepis před verzí ${preview.noteVersion} jako novou revizi?`
+              : `Obnovit verzi ${preview.noteVersion} jako novou revizi?`}
           </p>
           <p className="mt-1 text-xs leading-5 text-amber-950">
-            Aktuální obsah se nahradí snapshotem „{reasonLabels[preview.reason]}“
-            z verze {preview.noteVersion}. Vznikne nová revize s důvodem
-            Obnovení verze; stará historie zůstane zachovaná.
+            {previewTarget === "before"
+              ? `Aktuální obsah se nahradí původním přepisem před změnou „${reasonLabels[preview.reason]}“ z verze ${preview.noteVersion}.`
+              : `Aktuální obsah se nahradí snapshotem „${reasonLabels[preview.reason]}“ z verze ${preview.noteVersion}.`}{" "}
+            Vznikne nová revize s důvodem Obnovení verze; stará historie
+            zůstane zachovaná.
           </p>
-          {changedSnapshotFields(history.currentSnapshot, preview.afterSnapshot).map(
+          {changedSnapshotFields(history.currentSnapshot, previewSnapshot).map(
             (field) => (
               <p className="mt-1 text-sm text-amber-950" key={field}>
                 {field}
@@ -292,7 +351,12 @@ export function RevisionHistory({
             <button
               className="rounded-lg bg-amber-800 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-900 disabled:cursor-not-allowed disabled:bg-stone-300"
               disabled={disabled || acting}
-              onClick={() => void applyRestore(preview, "restore")}
+              onClick={() =>
+                void applyRestore(
+                  preview,
+                  previewTarget === "before" ? "restore_before" : "restore",
+                )
+              }
               type="button"
             >
               {acting ? "Obnovuji…" : "Potvrdit obnovení"}

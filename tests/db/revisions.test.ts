@@ -147,6 +147,62 @@ describe.skipIf(!hasTestDatabase)("P25 persistent revisions", () => {
     expect(finalList.currentSnapshot.contentMd).toBe("Druhá verze.");
   });
 
+  it("restores the original transcript from an AI revision after later named changes", async () => {
+    const note = await createNote("Původní přepis.");
+    const operation: LlmOperation = {
+      type: "replace_sentence",
+      target: { startPhrase: "Původní", endPhrase: "přepis" },
+      text: "Vyčištěný text.",
+    };
+    const proposal = await proposals.create(note.id, {
+      operation,
+      expectedVersion: 1,
+    });
+    const cleaned = await proposals.confirm(note.id, proposal.id, {
+      confirmationNonce: proposal.confirmationNonce,
+      expectedVersion: 1,
+    });
+    expect(cleaned.note.contentMd).toBe("Vyčištěný text.");
+
+    const later = await manualChange(note.id, "Pozdější změna.", 2);
+    const list = await revisions.list(note.id);
+    const aiRevision = list.revisions.find(
+      (revision) => revision.reason === "ai",
+    )!;
+
+    expect(list.undoRevisionId).not.toBe(aiRevision.id);
+
+    const restored = await revisions.restore(note.id, aiRevision.id, {
+      mode: "restore_before",
+      expectedVersion: later.version,
+    });
+
+    expect(restored.version).toBe(4);
+    expect(restored.contentMd).toBe("Původní přepis.");
+    expect(
+      (await revisions.list(note.id)).revisions.map(
+        (revision) => revision.reason,
+      ),
+    ).toEqual(["restore", "manual", "ai", "initial"]);
+  });
+
+  it("refuses restore_before outside AI revisions and for an empty original", async () => {
+    const note = await createNote();
+    const list = await revisions.list(note.id);
+    const initial = list.revisions.find(
+      (revision) => revision.reason === "initial",
+    )!;
+
+    await expect(
+      revisions.restore(note.id, initial.id, {
+        mode: "restore_before",
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({
+      message: "Obnovit původní přepis lze pouze z AI revize.",
+    });
+  });
+
   it("refuses one-click undo when a draft/autosave moved the note past the AI revision", async () => {
     const note = await createNote();
     const manual = await manualChange(note.id, "Draft verze.", 1);

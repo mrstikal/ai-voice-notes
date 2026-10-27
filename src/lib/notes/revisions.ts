@@ -36,7 +36,7 @@ export type RevisionReason =
 
 export const revisionRestoreInputSchema = z
   .object({
-    mode: z.enum(["undo", "restore"]),
+    mode: z.enum(["undo", "restore", "restore_before"]),
     expectedVersion: z.number().int().positive().max(2_147_483_647),
   })
   .strict();
@@ -343,6 +343,20 @@ export function createRevisionService(
 
           if (current.version !== revision.noteVersion) {
             throw new NoteConflictError(current.version);
+          }
+
+          target = revision.beforeSnapshot;
+        } else if (input.mode === "restore_before") {
+          if (revision.reason !== "ai") {
+            throw new RevisionConflictError(
+              "Obnovit původní přepis lze pouze z AI revize.",
+            );
+          }
+
+          if (revision.beforeSnapshot.contentMd.trim() === "") {
+            throw new RevisionConflictError(
+              "Původní přepis před zvolenou revizí je prázdný.",
+            );
           }
 
           target = revision.beforeSnapshot;
