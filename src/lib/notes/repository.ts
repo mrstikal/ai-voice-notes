@@ -119,6 +119,53 @@ export async function updateNoteCas(
   return rows[0];
 }
 
+export async function updateNoteSnapshotCas(
+  db: NotesExecutor,
+  input: {
+    id: string;
+    expectedVersion: number;
+    title: string;
+    contentMd: string;
+    contentPlain: string;
+    category: string | null;
+  },
+): Promise<NoteRow | undefined> {
+  const rows = await db
+    .update(notes)
+    .set({
+      title: input.title,
+      contentMd: input.contentMd,
+      contentPlain: input.contentPlain,
+      category: input.category,
+      version: sql`${notes.version} + 1`,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(notes.id, input.id),
+        eq(notes.version, input.expectedVersion),
+        isNull(notes.deletedAt),
+      ),
+    )
+    .returning();
+
+  return rows[0];
+}
+
+export async function replaceNoteTags(
+  db: NotesExecutor,
+  noteId: string,
+  tags: readonly string[],
+): Promise<void> {
+  await db.delete(noteTags).where(eq(noteTags.noteId, noteId));
+
+  if (tags.length > 0) {
+    await db.insert(noteTags).values(
+      tags.map((tag) => ({ noteId, tag })),
+    );
+  }
+}
+
 export async function softDeleteNoteCas(
   db: NotesExecutor,
   id: string,

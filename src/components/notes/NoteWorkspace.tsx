@@ -7,6 +7,7 @@ import type { NoteDetail } from "@/lib/notes/client";
 import type { TtsProviderStatus } from "@/lib/tts/provider";
 
 import { ManualProposalPanel } from "../ai/ManualProposalPanel";
+import { RevisionHistory } from "./RevisionHistory";
 import { AudioPlayer } from "../tts/AudioPlayer";
 import { DictationControls } from "../voice/DictationControls";
 import { NoteEditor } from "./NoteEditor";
@@ -33,7 +34,7 @@ export function NoteWorkspace({
     router.refresh();
   }
 
-  function handleProposalApplied(updated: NoteDetail) {
+  function handleExternalNoteUpdate(updated: NoteDetail) {
     setNote(updated);
     setExternalEditRevision((current) => current + 1);
     router.refresh();
@@ -65,7 +66,14 @@ export function NoteWorkspace({
         noteId={note.id}
         noteTitle={note.title}
         noteVersion={note.version}
-        onNoteUpdated={handleProposalApplied}
+        onNoteUpdated={handleExternalNoteUpdate}
+      />
+      <RevisionHistory
+        disabled={editorDirty}
+        key={`history:${note.version}`}
+        noteId={note.id}
+        noteVersion={note.version}
+        onNoteUpdated={handleExternalNoteUpdate}
       />
     </>
   );
