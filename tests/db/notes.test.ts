@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   assertTestDatabaseTargets,
@@ -506,6 +506,30 @@ describe.skipIf(!hasTestDatabase)("note service", () => {
     await expect(
       service.createNote({ title: "Velká", contentMd }),
     ).rejects.toBeInstanceOf(NoteTooLargeError);
+  });
+
+  it("keeps a successful note edit when the TTS cache purge fails", async () => {
+    const failingCache = {
+      purgeNote: vi.fn().mockRejectedValue(new Error("cache unavailable")),
+    };
+    const serviceWithCache = createNoteService({
+      db: connection.db,
+      ttsCache: failingCache,
+    });
+    const note = await serviceWithCache.createNote({
+      title: "Cache purge",
+      contentMd: "Původní text",
+    });
+
+    const updated = await serviceWithCache.updateNote(note.id, {
+      title: note.title,
+      contentMd: "Nový text",
+      expectedVersion: note.version,
+    });
+
+    expect(updated.contentMd).toBe("Nový text");
+    expect(updated.version).toBe(2);
+    expect(failingCache.purgeNote).toHaveBeenCalledWith(note.id);
   });
 
   it("rejects invalid UUIDs for every note operation", async () => {

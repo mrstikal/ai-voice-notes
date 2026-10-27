@@ -147,7 +147,7 @@ Live evidence: see [Live evidence (2026-10-26)](#live-evidence-2026-10-26).
 | Pinned model | `elevenlabs/eleven-v4-turbo`; the route rejects a client-supplied `model` field |
 | Voices | `sarah` and `george` from the published `supported_voices` list; both returned HTTP 200 with valid audio in the 2026-10-27 live check; no invented or substituted IDs |
 | Response format | `response_format: "mp3"` is sent explicitly because the documented default is raw PCM; no `speed` field is sent |
-| Request bound | At most 3,500 UTF-16 code units per request, below the model's published 10,000-character cap; the billable route is limited to 5 requests per 60 s and the 60 s request deadline covers both response headers and body streaming |
+| Request bound | At most 3,500 UTF-16 code units per request, below the model's published 10,000-character cap; the 60 s request deadline covers both response headers and body streaming. The P18 unit-test handler uses 5 requests/60 s; the production P19 read-aloud route raises the shared billable route to 30 requests/60 s for sequential chunk playback. |
 | Response validation | `Content-Type` must be `audio/mpeg`; the body is capped at 8 MiB and checked for an MP3 header before it is returned. JSON error bodies are never treated as audio. |
 | P12 admission | Operation `openrouter_tts`, provider `openrouter`, model `elevenlabs/eleven-v4-turbo`; each request reserves at most $0.14 before the outbound call. Provider-reported cost is not returned, so the ledger records `unknown`, never free. |
 | Pricing checked | 2026-10-27 models API reported `pricing.prompt = 0.00004` for `elevenlabs/eleven-v4-turbo`; 3,500 input units x $0.00004 = $0.14 app-side upper estimate, not a provider spending cap. |
@@ -239,6 +239,19 @@ service. It verifies:
 - **Agent limitation:** the automated agent verified decodable, non-silent audio
   and account entitlement, but the subjective quality confirmation above came
   from the user, not from the agent.
+
+## P19 read-aloud cache
+
+- The server cache lives under gitignored `.data/tts`, stores only validated
+  MP3 bytes, and keeps a note-owner manifest. The content key covers text,
+  model, voice and a settings hash; the cap is 200 MiB with LRU pruning that
+  deletes only manifest-listed files.
+- A successful note content edit triggers a best-effort purge of that note's
+  cache ownership after the save; a purge failure cannot fail the note save.
+- `POST /api/tts/cache` supports `clear`, `purge` by voice, `purge` by model and
+  `purge` by note. P19B's persisted voice selector must call the voice purge
+  when the choice changes. Until P19B, the Settings panel offers only the
+  explicit manual clear.
 
 ## Live evidence (2026-10-26)
 

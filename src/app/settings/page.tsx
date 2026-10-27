@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { TtsCacheSettings } from "@/components/settings/TtsCacheSettings";
 import { TtsSettings } from "@/components/settings/TtsSettings";
 import { UsageSettings } from "@/components/settings/UsageSettings";
 import { VoiceSettings } from "@/components/settings/VoiceSettings";
@@ -49,6 +50,9 @@ export default async function SettingsPage() {
       </div>
       <div className="mt-6">
         <TtsSettings error={ttsError} status={ttsStatus} />
+      </div>
+      <div className="mt-6">
+        <TtsCacheSettings />
       </div>
     </div>
   );

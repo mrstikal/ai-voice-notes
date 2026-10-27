@@ -15,6 +15,11 @@ import {
   validateNoteGraphemeLimits,
   type NoteGraphemeLimits,
 } from "./limits.ts";
+import {
+  getTtsCache,
+  purgeNoteTtsCacheBestEffort,
+  type TtsCache,
+} from "../tts/cache.ts";
 import { parseNoteMarkdown } from "./markdown.ts";
 import * as repository from "./repository.ts";
 
@@ -82,6 +87,7 @@ export interface NotePageDto {
 export interface NoteServiceOptions {
   readonly db: AppDatabase;
   readonly limits?: NoteGraphemeLimits;
+  readonly ttsCache?: Pick<TtsCache, "purgeNote">;
 }
 
 export interface NoteService {
@@ -429,8 +435,9 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
     async updateNote(id, input) {
       assertNoteId(id);
       const prepared = prepareNote(input.title, input.contentMd, limits);
+      let contentChanged = false;
 
-      return db.transaction(async (tx) => {
+      const result = await db.transaction(async (tx) => {
         const current = await repository.findNoteByIdForUpdate(tx, id);
         if (!current || current.deletedAt) {
           throw new NoteNotFoundError();
@@ -445,6 +452,7 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
         const unchanged =
           current.title === input.title &&
           current.contentMd === input.contentMd;
+        contentChanged = current.contentMd !== input.contentMd;
 
         if (unchanged && draft) {
           return toDetail(current, tags);
@@ -475,6 +483,12 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
 
         return toDetail(updated, tags);
       });
+
+      if (contentChanged) {
+        await purgeNoteTtsCacheBestEffort(options.ttsCache, id);
+      }
+
+      return result;
     },
 
     async updateNoteTitle(id, input) {
@@ -599,5 +613,6 @@ export function getNoteService(): NoteService {
       title: TITLE_MAX_GRAPHEMES,
       content: config.noteMaxCharacters,
     },
+    ttsCache: getTtsCache(),
   });
 }

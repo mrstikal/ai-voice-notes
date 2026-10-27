@@ -168,7 +168,9 @@ export function parseMarkdown(source: string): Root {
   return markdownProcessor.parse(source);
 }
 
-function collectSourceOnlyReasons(root: Root): SourceOnlyReason[] {
+export function collectMarkdownReasons(
+  root: Root | RootContent,
+): SourceOnlyReason[] {
   const reasons: SourceOnlyReason[] = [];
 
   visit(root, (node) => {
@@ -203,7 +205,9 @@ function collectSourceOnlyReasons(root: Root): SourceOnlyReason[] {
   return reasons;
 }
 
-function renderInline(nodes: readonly PhrasingContent[]): string {
+export function renderMarkdownInline(
+  nodes: readonly PhrasingContent[],
+): string {
   return nodes.map(renderInlineNode).join("");
 }
 
@@ -214,7 +218,7 @@ function renderInlineNode(node: PhrasingContent): string {
     case "strong":
     case "emphasis":
     case "link":
-      return renderInline(node.children);
+      return renderMarkdownInline(node.children);
     case "inlineCode":
       return node.value;
     case "break":
@@ -226,7 +230,7 @@ function renderInlineNode(node: PhrasingContent): string {
 
 function renderListItem(item: ListItem): string {
   return item.children
-    .map(renderBlock)
+    .map(renderMarkdownBlock)
     .filter((block) => block.length > 0)
     .join("\n");
 }
@@ -238,11 +242,11 @@ function renderList(node: List): string {
     .join("\n");
 }
 
-function renderBlock(node: RootContent): string {
+export function renderMarkdownBlock(node: RootContent): string {
   switch (node.type) {
     case "heading":
     case "paragraph":
-      return renderInline(node.children);
+      return renderMarkdownInline(node.children);
     case "blockquote":
       return renderBlocks(node.children);
     case "list":
@@ -256,7 +260,7 @@ function renderBlock(node: RootContent): string {
 
 function renderBlocks(nodes: readonly RootContent[]): string {
   return nodes
-    .map(renderBlock)
+    .map(renderMarkdownBlock)
     .filter((block) => block.length > 0)
     .join("\n\n");
 }
@@ -266,7 +270,7 @@ function collectSafeLinks(root: Root): SafeMarkdownLink[] {
 
   visit(root, "link", (node) => {
     if (isSafeLinkDestination(node.url)) {
-      links.push({ url: node.url, text: renderInline(node.children) });
+      links.push({ url: node.url, text: renderMarkdownInline(node.children) });
     }
   });
 
@@ -275,7 +279,7 @@ function collectSafeLinks(root: Root): SafeMarkdownLink[] {
 
 export function parseNoteMarkdown(source: string): ParsedNoteMarkdown {
   const ast = parseMarkdown(source);
-  const sourceOnlyReasons = collectSourceOnlyReasons(ast);
+  const sourceOnlyReasons = collectMarkdownReasons(ast);
   const sourceOnly = sourceOnlyReasons.length > 0;
   const plainText = sourceOnly ? source : renderBlocks(ast.children);
   const searchText = sourceOnly ? source : plainText;
