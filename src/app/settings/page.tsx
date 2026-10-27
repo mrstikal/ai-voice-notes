@@ -1,10 +1,15 @@
 import type { Metadata } from "next";
 
+import { LlmSettings } from "@/components/settings/LlmSettings";
 import { SpokenStopSettings } from "@/components/settings/SpokenStopSettings";
 import { TtsCacheSettings } from "@/components/settings/TtsCacheSettings";
 import { TtsSettings } from "@/components/settings/TtsSettings";
 import { UsageSettings } from "@/components/settings/UsageSettings";
 import { VoiceSettings } from "@/components/settings/VoiceSettings";
+import {
+  getLlmProviderStatus,
+  type LlmProviderStatus,
+} from "@/lib/ai/structured";
 import { getUsageService, type UsageSummaryDto } from "@/lib/ai/usage";
 import {
   getTtsProviderStatus,
@@ -22,6 +27,8 @@ export default async function SettingsPage() {
   let error: string | null = null;
   let ttsStatus: TtsProviderStatus | null = null;
   let ttsError: string | null = null;
+  let llmStatus: LlmProviderStatus | null = null;
+  let llmError: string | null = null;
 
   try {
     summary = await getUsageService().getSummary();
@@ -35,6 +42,13 @@ export default async function SettingsPage() {
   } catch {
     ttsError =
       "Stav čtení nahlas se nepodařilo načíst. Zkontrolujte konfiguraci aplikace.";
+  }
+
+  try {
+    llmStatus = getLlmProviderStatus();
+  } catch {
+    llmError =
+      "Stav strukturovaných AI úprav se nepodařilo načíst. Zkontrolujte konfiguraci aplikace.";
   }
 
   return (
@@ -51,6 +65,9 @@ export default async function SettingsPage() {
       </div>
       <div className="mt-6">
         <TtsSettings error={ttsError} status={ttsStatus} />
+      </div>
+      <div className="mt-6">
+        <LlmSettings error={llmError} status={llmStatus} />
       </div>
       <div className="mt-6">
         <SpokenStopSettings />

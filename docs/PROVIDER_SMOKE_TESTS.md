@@ -318,6 +318,58 @@ false positives/negatives.
 Label the result experimental; it is not a guarantee. Acceptance was based on
 the user's headset verification, not on a recorded ten-trial aggregate.
 
+## P21 structured OpenRouter LLM
+
+- **Frozen candidate:** `deepseek/deepseek-v4.1-flash-1017`, also the default
+  `OPENROUTER_LLM_MODEL` and the only model the structured path accepts. A
+  different env value blocks structured AI with a Czech configuration error
+  instead of falling back to free text or another model. Changing it requires
+  a fresh capability/account preflight and explicit user approval.
+- **Free preflight evidence (2026-10-27):** `GET /api/v1/models` returned
+  `200`; the candidate advertised `structured_outputs` and `response_format`,
+  text output, context `1,048,576`, and top-provider max completion
+  `393,216`. Base prices were `0.00000015` prompt / `0.0000006` completion USD
+  per token; weekday overrides reach `0.0000003` / `0.0000012`, which are the
+  frozen worst-case values. `GET /api/v1/key` returned `200`, not a free tier,
+  with no configured spend limit. The free checks made no billable model
+  request.
+- **Enforced bounds:** input `12,000` UTF-16 code units, output `1,200` tokens
+  (`max_completion_tokens`), timeout `20 s`, response body `64 KiB`, and a
+  worst-case estimate of `$0.011187` per maximum request with a hard local
+  cap of `$0.02`. The estimate includes the serialized 3,605-character schema
+  and uses a conservative `2 × (request code units) + 256` upper-bound
+  heuristic, not a tokenizer.
+- **Strict contract:** `response_format` is `json_schema`, schema name
+  `note_edit_proposal`, `strict: true`, `provider.require_parameters: true`.
+  The provider schema is a closed root object with required `kind`,
+  `operation` and `clarification`; `operation` is an `anyOf` of the P22
+  operations, `clarification`/`operation` are null in the inactive branch.
+  The server validates this wrapper, normalizes it to
+  `{kind:"operation", operation}` or `{kind:"unclear", clarification}`, and
+  revalidates the normalized union. Extra keys and unsafe actions are rejected
+  even when the provider returns valid-looking JSON. There is no root `oneOf`
+  or root `additionalProperties` ambiguity. The client never retries
+  429/timeouts/denials.
+- **Privacy/usage:** the reservation records only request kind, schema name,
+  input code units, token bounds, model-profile date and HTTP metadata. Raw
+  prompt, response, API key and transcript never enter logs or `ai_usage`.
+  A success is marked `unknown` cost (no provider cost field is trusted as
+  zero); settlement failure blocks acceptance.
+- **Compatibility:** live **verified** for this candidate. One separately
+  authorized short structured request on 2026-10-27 returned a valid
+  `append_bounded_section` operation through the real OpenRouter path. P12
+  budget before the request: remaining `0.646000 USD`, no active operations;
+  after settlement the ledger showed `1.358170 USD` committed, 21 unknown
+  operations and 0 active. The request reserved `0.011187 USD`; the actual
+  provider charge remains `unknown`, never zero. No prompt/response was logged
+  and no note was changed. P21 still only returns
+  `{kind:"operation", operation}` or `{kind:"unclear", clarification}`.
+- **Deterministic evidence:** `pnpm exec vitest run tests/ai/structured.test.ts`
+  covers valid operation/unclear, extra keys, unsafe actions, malformed JSON,
+  truncation, refusal, 429, timeout, 403 provider denial, budget denial,
+  unknown-usage settlement failure, oversized input, cost cap and preflight
+  capability failures, with no note mutation path.
+
 ## Live evidence (2026-10-26)
 
 - **Authorization:** the user explicitly requested the live microphone/provider

@@ -6,6 +6,8 @@ export const DEFAULT_NOTE_MAX_CHARACTERS = CONTENT_MAX_GRAPHEMES;
 export const DEFAULT_MEETING_MAX_MINUTES = 15;
 export const DEFAULT_AI_REQUEST_BUDGET_USD = 2.0;
 export const DEFAULT_ELEVENLABS_API_BASE_URL = "https://api.elevenlabs.io";
+export const DEFAULT_OPENROUTER_LLM_MODEL =
+  "deepseek/deepseek-v4.1-flash-1017";
 
 export const TEST_MODE_PROVIDER_KEYS = {
   ELEVENLABS_API_KEY: "test-only-elevenlabs",
@@ -36,6 +38,7 @@ export interface AppConfig {
   elevenLabsApiKey: string | null;
   elevenLabsApiBaseUrl: string;
   openRouterApiKey: string | null;
+  openRouterLlmModel: string;
   openAiApiKey: string | null;
   geminiApiKey: string | null;
   noteMaxCharacters: number;
@@ -370,6 +373,29 @@ function assertAiTestModeEnvironment(options: {
   }
 }
 
+function parseOptionalModelId(
+  env: Environment,
+  name: "OPENROUTER_LLM_MODEL",
+  fallback: string,
+): string {
+  const rawValue = env[name]?.trim();
+
+  if (!rawValue) {
+    return fallback;
+  }
+
+  if (
+    !/^[a-z0-9][a-z0-9._:/-]{0,199}$/iu.test(rawValue) ||
+    rawValue.includes("..")
+  ) {
+    throw new ConfigurationError(
+      `${name} musí být platné ID modelu OpenRouter.`,
+    );
+  }
+
+  return rawValue;
+}
+
 function parsePositiveInteger(
   env: Environment,
   name: "NOTE_MAX_CHARACTERS" | "MEETING_MAX_MINUTES",
@@ -469,6 +495,11 @@ export function loadConfig(
   );
   const elevenLabsApiKey = parseOptionalSecret(env, "ELEVENLABS_API_KEY");
   const openRouterApiKey = parseOptionalSecret(env, "OPENROUTER_API_KEY");
+  const openRouterLlmModel = parseOptionalModelId(
+    env,
+    "OPENROUTER_LLM_MODEL",
+    DEFAULT_OPENROUTER_LLM_MODEL,
+  );
   const openAiApiKey = parseOptionalSecret(env, "OPENAI_API_KEY");
   const geminiApiKey = parseOptionalSecret(env, "GEMINI_API_KEY");
   const elevenLabsApiBaseUrl = parseElevenLabsApiBaseUrl(env, aiTestMode);
@@ -503,6 +534,7 @@ export function loadConfig(
     elevenLabsApiKey,
     elevenLabsApiBaseUrl,
     openRouterApiKey,
+    openRouterLlmModel,
     openAiApiKey,
     geminiApiKey,
     noteMaxCharacters,

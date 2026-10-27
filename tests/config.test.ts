@@ -50,12 +50,24 @@ describe("loadConfig", () => {
       elevenLabsApiKey: null,
       elevenLabsApiBaseUrl: DEFAULT_ELEVENLABS_API_BASE_URL,
       openRouterApiKey: null,
+      openRouterLlmModel: "deepseek/deepseek-v4.1-flash-1017",
       openAiApiKey: null,
       geminiApiKey: null,
       noteMaxCharacters: DEFAULT_NOTE_MAX_CHARACTERS,
       meetingMaxMinutes: DEFAULT_MEETING_MAX_MINUTES,
       aiRequestBudgetUsd: DEFAULT_AI_REQUEST_BUDGET_USD,
     });
+  });
+
+  it("accepts an explicitly preflighted LLM model id and rejects a malformed one", () => {
+    expect(
+      configWith({
+        OPENROUTER_LLM_MODEL: "deepseek/deepseek-v4.1-flash-1017",
+      }).openRouterLlmModel,
+    ).toBe("deepseek/deepseek-v4.1-flash-1017");
+    expect(() =>
+      configWith({ OPENROUTER_LLM_MODEL: "bad model id" }),
+    ).toThrow(ConfigurationError);
   });
 
   it("accepts a loopback origin override with an explicit port", () => {

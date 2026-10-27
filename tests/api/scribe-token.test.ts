@@ -49,6 +49,7 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     elevenLabsApiKey: "test-only-elevenlabs",
     elevenLabsApiBaseUrl: "https://api.elevenlabs.io",
     openRouterApiKey: null,
+    openRouterLlmModel: "deepseek/deepseek-v4.1-flash-1017",
     openAiApiKey: null,
     geminiApiKey: null,
     noteMaxCharacters: 20_000,
