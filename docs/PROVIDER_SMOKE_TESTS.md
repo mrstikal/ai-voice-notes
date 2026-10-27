@@ -138,6 +138,108 @@ Live evidence: see [Live evidence (2026-10-26)](#live-evidence-2026-10-26).
 | Live call authorized / performed | No / No (P15 uses a mocked WebSocket; the underlying P13B Scribe realtime path is live verified with synthetic Czech audio) |
 | Status | Mock verified / live unverified for body dictation integration |
 
+## OpenRouter speech / ElevenLabs Eleven v4 Turbo (P18)
+
+| Item | Value |
+|---|---|
+| Provider path | `POST https://openrouter.ai/api/v1/audio/speech` through the server-only `OpenRouterClient`; the API key never reaches the browser |
+| Official documentation checked | 2026-10-27: <https://openrouter.ai/docs/guides/overview/multimodal/tts>, <https://openrouter.ai/docs/api/api-reference/tts/create-speech>, <https://openrouter.ai/elevenlabs/eleven-v4-turbo>, <https://openrouter.ai/api/v1/models?output_modalities=speech> |
+| Pinned model | `elevenlabs/eleven-v4-turbo`; the route rejects a client-supplied `model` field |
+| Voices | `sarah` and `george` from the published `supported_voices` list; both returned HTTP 200 with valid audio in the 2026-10-27 live check; no invented or substituted IDs |
+| Response format | `response_format: "mp3"` is sent explicitly because the documented default is raw PCM; no `speed` field is sent |
+| Request bound | At most 3,500 UTF-16 code units per request, below the model's published 10,000-character cap; the billable route is limited to 5 requests per 60 s and the 60 s request deadline covers both response headers and body streaming |
+| Response validation | `Content-Type` must be `audio/mpeg`; the body is capped at 8 MiB and checked for an MP3 header before it is returned. JSON error bodies are never treated as audio. |
+| P12 admission | Operation `openrouter_tts`, provider `openrouter`, model `elevenlabs/eleven-v4-turbo`; each request reserves at most $0.14 before the outbound call. Provider-reported cost is not returned, so the ledger records `unknown`, never free. |
+| Pricing checked | 2026-10-27 models API reported `pricing.prompt = 0.00004` for `elevenlabs/eleven-v4-turbo`; 3,500 input units x $0.00004 = $0.14 app-side upper estimate, not a provider spending cap. |
+| Account entitlement | Both `sarah` and `george` returned HTTP 200 with valid audio on 2026-10-27; no entitlement error. The existing ElevenLabs key's missing `text_to_speech` permission does not apply to this OpenRouter path. |
+| Live call authorized / performed | Yes / Yes (2026-10-27; one Czech sentence in each voice, two requests) |
+| Status | Mock verified / live verified for both voices on 2026-10-27; technical audio validation and human listening both confirmed Sarah and George are OK |
+
+### Local mock verification
+
+`tests/api/tts.test.ts` injects a mock OpenRouter transport and fake P12 usage
+service. It verifies:
+
+- exact outbound `model`, `input`, `voice`, and explicit `response_format: "mp3"`
+  fields for both `sarah` and `george`, with no `speed`,
+- the endpoint, bearer key handling on the server, `Accept: audio/mpeg`, and the
+  P12 reservation before the provider call,
+- rejection of an invalid voice and of a voice marked unavailable for the
+  account before any reservation or outbound request,
+- the 3,500 UTF-16 code-unit bound at the boundary and one unit above it,
+- JSON error bodies, 401, 429, header-phase timeout, stalling-body timeout,
+  wrong content type, byte cap, invalid MP3 bytes, missing key, unmocked
+  provider call, budget denial, and the route rate limit,
+- no provider message, API key, or dictated text in the error response or the
+  P12 usage payload,
+- route guards for missing Origin, wrong Host, non-POST methods, and extra
+  fields such as a client-supplied model,
+- the provider status marks both voices `live unverified` until an explicit
+  live check; a disabled voice is `unavailable` and keeps two-voice acceptance
+  unverified.
+
+### Live smoke procedure (requires separate authorization)
+
+1. Set `OPENROUTER_API_KEY` in the gitignored `.env.local`; do not pass secrets
+   in command-line arguments.
+2. Start the local app and send one short Czech sentence to `POST /api/tts`
+   with `voice: "sarah"`; save the returned MP3 and listen to it. Repeat with
+   `voice: "george"`. The P18 adapter has no player UI; P19B adds the explicit
+   read-aloud flow.
+3. Confirm the request used `elevenlabs/eleven-v4-turbo`,
+   `response_format: "mp3"`, no `speed`, and the 3,500-code-unit bound. Confirm
+   the response is `audio/mpeg` and the ledger row is `unknown` with the
+   reserved $0.14.
+4. If either voice is unavailable to the account, add its ID to
+   `TTS_UNAVAILABLE_VOICES` in `src/lib/tts/provider.ts`, keep
+   `TTS_LIVE_VERIFIED = false`, and keep two-voice acceptance
+   `live unverified`. Never substitute an invented voice ID.
+5. Only after both voices have been heard, set `TTS_LIVE_VERIFIED = true` and
+   record the date, observed fields, entitlement, cost/unknown result, and the
+   listening evidence below.
+
+### Live evidence (2026-10-27)
+
+- **Authorization:** the user explicitly requested the live OpenRouter TTS test
+  on 2026-10-27.
+- **Environment:** existing `pnpm dev` server at `http://127.0.0.1:3000` with
+  the real gitignored `.env.local`, no `AI_TEST_MODE`; the development
+  PostgreSQL database was reachable and the app-side budget row was
+  `2.000000`.
+- **Requests:** `POST /api/tts` with the exact loopback `Host` and `Origin` and
+  `{"text":"Dobrý den, toto je krátká česká zkouška čtení nahlas.","voice":"sarah"}`,
+  then the same text with `"george"`. The text was 53 UTF-16 code units, below
+  the 3,500 bound.
+- **Responses:** both returned `200 OK` with `Content-Type: audio/mpeg`,
+  `X-TTS-Model: elevenlabs/eleven-v4-turbo`, the requested
+  `X-TTS-Voice`, and generation IDs
+  `gen-tts-1793105790-aNH2GGll4ipZDy5v9v6C` (Sarah) and
+  `gen-tts-1793105796-ZRwo4zhC8kRGnEpKBctx` (George). Byte lengths were
+  71,514 and 69,006.
+- **Technical audio validation:** `file` identified both as ID3v2.4 MPEG ADTS
+  layer III, 128 kbps, 44.1 kHz mono. MP3 frame parsing found 171/165 frames and
+  4.467/4.310 seconds; headless Chromium Web Audio decoded them to 4.40/4.24
+  seconds with peak 0.949/0.754, RMS 0.131/0.084 and non-zero sample ratios
+  95.6%/90.3%, so neither file is silent. The SHA-256 prefixes differ, confirming
+  distinct audio for the two voices.
+- **Artifacts:** `/tmp/kilo/tts-live/sarah.mp3` and
+  `/tmp/kilo/tts-live/george.mp3` (local test artifacts, not application data).
+- **Ledger:** two `openrouter_tts` / `openrouter` /
+  `elevenlabs/eleven-v4-turbo` rows, both status `unknown`, reserved
+  `0.140000`, no reported cost. Provider usage contained only model, voice,
+  inputCodeUnits, responseFormat, httpStatus, contentType, byteLength,
+  generationId and chargeReason; no text, API key or audio. The two TTS
+  reservations total `0.280000`; the ledger's total committed amount is
+  `0.338500` including earlier operations, while the configured budget row
+  remains `2.000000`.
+- **Human listening:** the user listened to both artifacts on 2026-10-27 and
+  confirmed that Sarah and George are OK. `TTS_LIVE_VERIFIED` is now `true`, so
+  the settings page marks both voices available and the two-voice audio quality
+  as live verified.
+- **Agent limitation:** the automated agent verified decodable, non-silent audio
+  and account entitlement, but the subjective quality confirmation above came
+  from the user, not from the agent.
+
 ## Live evidence (2026-10-26)
 
 - **Authorization:** the user explicitly requested the live microphone/provider

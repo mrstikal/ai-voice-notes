@@ -1,4 +1,9 @@
 import {
+  setOpenRouterTransportForTests,
+  type OpenRouterTransport,
+  type OpenRouterTransportRequest,
+} from "../../src/lib/ai/openrouter";
+import {
   setElevenLabsTransportForTests,
   type ElevenLabsTransport,
   type ScribeTokenTransportRequest,
@@ -65,10 +70,68 @@ export function installUnmockedProviderGuard(): void {
       throw new UnmockedProviderCallError();
     },
   });
+  setOpenRouterTransportForTests({
+    async fetch() {
+      throw new UnmockedProviderCallError();
+    },
+  });
 }
 
 export function resetProviderMocks(): void {
   setElevenLabsTransportForTests(null);
+  setOpenRouterTransportForTests(null);
+}
+
+export interface MockOpenRouterTransport extends OpenRouterTransport {
+  readonly calls: OpenRouterTransportRequest[];
+}
+
+type OpenRouterResponseFactory = (
+  request: OpenRouterTransportRequest,
+  callIndex: number,
+) => Response | Promise<Response>;
+
+export interface MockOpenRouterTransportOptions {
+  readonly responses?:
+    | readonly (Response | OpenRouterResponseFactory)[]
+    | OpenRouterResponseFactory;
+  readonly error?: unknown;
+}
+
+export function createMockOpenRouterTransport(
+  options: MockOpenRouterTransportOptions = {},
+): MockOpenRouterTransport {
+  const calls: OpenRouterTransportRequest[] = [];
+  let callIndex = 0;
+
+  return {
+    calls,
+    async fetch(request) {
+      calls.push(request);
+      const index = callIndex;
+      callIndex += 1;
+
+      if (options.error !== undefined) {
+        throw options.error;
+      }
+
+      const entry = options.responses
+        ? typeof options.responses === "function"
+          ? await options.responses(request, index)
+          : options.responses[index]
+        : undefined;
+      const response =
+        typeof entry === "function"
+          ? await entry(request, index)
+          : entry;
+
+      if (!response) {
+        throw new UnmockedProviderCallError();
+      }
+
+      return response.clone();
+    },
+  };
 }
 
 export interface FakeLockManager extends MicrophoneLockManager {
