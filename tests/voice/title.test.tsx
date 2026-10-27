@@ -28,6 +28,7 @@ import {
 import { DictationControls } from "../../src/components/voice/DictationControls";
 import type { NoteDetail } from "../../src/lib/notes/client";
 import { TITLE_MAX_GRAPHEMES } from "../../src/lib/notes/limits";
+import { writeVadSilencePreference } from "../../src/lib/voice/preferences";
 import { createFakeLockManager } from "../helpers/provider-mocks";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -242,6 +243,7 @@ const originalLocksDescriptor = Object.getOwnPropertyDescriptor(
 
 beforeEach(() => {
   scribeInstances.length = 0;
+  window.localStorage.clear();
   tokenCalls = 0;
   patchCalls = [];
   onNoteUpdated = vi.fn<(note: NoteDetail) => void>();
@@ -325,6 +327,16 @@ async function startDictation(container: HTMLElement) {
 }
 
 describe("DictationControls title capture", () => {
+  it("uses the stored VAD threshold for the title session", async () => {
+    writeVadSilencePreference(1.5);
+    const { container } = renderControls();
+    await startDictation(container);
+
+    expect(scribeInstances[0]?.connect).toHaveBeenCalledWith(
+      expect.objectContaining({ vadSilenceThresholdSecs: 1.5 }),
+    );
+  });
+
   it("does not mutate the title from partial text or an aborted capture", async () => {
     const { container } = renderControls();
     await startDictation(container);

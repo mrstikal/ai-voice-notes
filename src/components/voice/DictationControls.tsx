@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import {
   NoteApiError,
@@ -8,13 +15,36 @@ import {
   type NoteDetail,
 } from "@/lib/notes/client";
 import {
+  CONTENT_MAX_GRAPHEMES,
   TITLE_MAX_GRAPHEMES,
   countGraphemes,
 } from "@/lib/notes/limits";
 import {
+  getVoiceDiagnosticsServerSnapshot,
+  getVoiceDiagnosticsSnapshot,
+  subscribeVoiceDiagnostics,
+} from "@/lib/voice/diagnostics";
+import {
+  INITIAL_VOICE_FORMAT_STATE,
+  type VoiceFormatState,
+} from "@/lib/voice/format-state";
+import {
   MICROPHONE_SESSION_MAX_MS,
   type MicrophoneSessionStatus,
 } from "@/lib/voice/microphone";
+import {
+  VAD_SILENCE_OPTIONS,
+  formatVadSilence,
+  getVadSilencePreferenceServerSnapshot,
+  getVadSilencePreferenceSnapshot,
+  isVadSilenceSecs,
+  subscribeVadSilencePreference,
+  writeVadSilencePreference,
+} from "@/lib/voice/preferences";
+import {
+  VoiceFormattingSession,
+  type VoiceFormattingBatch,
+} from "@/lib/voice/transcript-session";
 
 import { useScribeDictation } from "./useScribeDictation";
 
@@ -63,9 +93,16 @@ export function DictationControls({
     noteRef.current = note;
   }, [note]);
 
+  const vadSilence = useSyncExternalStore(
+    subscribeVadSilencePreference,
+    getVadSilencePreferenceSnapshot,
+    getVadSilencePreferenceServerSnapshot,
+  );
+
   const dictation = useScribeDictation({
     stopAfterFirstCommit: true,
     flushOnStop: false,
+    vadSilenceThresholdSecs: vadSilence,
     onCommit: (segment) => {
       const text = segment.text.replace(/\s+/gu, " ").trim();
 
@@ -340,24 +377,147 @@ export function DictationControls({
 
 export type BodyInsertMode = "cursor" | "end";
 
+export interface VoiceApplyResult {
+  readonly ok: boolean;
+  readonly message?: string;
+  readonly notice?: string;
+}
+
 export interface BodyDictationControlsProps {
-  readonly onCommit: (text: string, mode: BodyInsertMode) => void;
+  readonly onApplyBatch: (
+    batch: VoiceFormattingBatch,
+    mode: BodyInsertMode,
+  ) => VoiceApplyResult;
+  readonly contentGraphemeCount: number;
+  readonly targetMode: "source" | "visual";
   readonly disabled?: boolean;
   readonly disabledReason?: string | null;
 }
 
+function formatCount(value: number): string {
+  return value.toLocaleString("cs-CZ");
+}
+
+function formatLatency(value: number | null): string {
+  return value === null ? "—" : `${value.toLocaleString("cs-CZ")} ms`;
+}
+
+function describeFormatState(state: VoiceFormatState): string {
+  const parts: string[] = [];
+
+  if (state.marks.includes("strong")) {
+    parts.push("tučně");
+  }
+
+  if (state.marks.includes("emphasis")) {
+    parts.push("kurzívou");
+  }
+
+  if (state.listVariant === "task") {
+    parts.push(state.listItemOpen ? "úkol" : "seznam úkolů");
+  } else if (state.listVariant === "bullet") {
+    parts.push(state.listItemOpen ? "položka seznamu" : "seznam");
+  }
+
+  return parts.length > 0 ? parts.join(", ") : "bez formátování";
+}
+
 export function BodyDictationControls({
-  onCommit,
+  onApplyBatch,
+  contentGraphemeCount,
+  targetMode,
   disabled = false,
   disabledReason = null,
 }: BodyDictationControlsProps) {
   const [insertAtEnd, setInsertAtEnd] = useState(false);
+  const [commandLog, setCommandLog] = useState<readonly string[]>([]);
+  const [formatState, setFormatState] = useState<VoiceFormatState>(
+    INITIAL_VOICE_FORMAT_STATE,
+  );
+  const [applyError, setApplyError] = useState<string | null>(null);
+  const [applyNotice, setApplyNotice] = useState<string | null>(null);
+  const formattingSessionRef = useRef(new VoiceFormattingSession());
+  const insertAtEndRef = useRef(insertAtEnd);
+  const onApplyBatchRef = useRef(onApplyBatch);
+  const applyBatchRef = useRef<(batch: VoiceFormattingBatch) => boolean>(
+    () => true,
+  );
+  const stopDictationRef = useRef<
+    (options?: { flush?: boolean }) => Promise<void>
+  >(() => Promise.resolve());
+  const previousStatusRef = useRef<MicrophoneSessionStatus>("idle");
+  const vadSilence = useSyncExternalStore(
+    subscribeVadSilencePreference,
+    getVadSilencePreferenceSnapshot,
+    getVadSilencePreferenceServerSnapshot,
+  );
+  const diagnostics = useSyncExternalStore(
+    subscribeVoiceDiagnostics,
+    getVoiceDiagnosticsSnapshot,
+    getVoiceDiagnosticsServerSnapshot,
+  );
+
+  useEffect(() => {
+    insertAtEndRef.current = insertAtEnd;
+  }, [insertAtEnd]);
+
+  useEffect(() => {
+    onApplyBatchRef.current = onApplyBatch;
+  }, [onApplyBatch]);
+
+  const applyBatch = useCallback((batch: VoiceFormattingBatch): boolean => {
+    setFormatState(batch.stateAfter);
+
+    if (batch.labels.length > 0) {
+      setCommandLog((current) => [...current, ...batch.labels].slice(-12));
+    }
+
+    const result = onApplyBatchRef.current(
+      batch,
+      insertAtEndRef.current ? "end" : "cursor",
+    );
+    setApplyNotice(result.notice ?? null);
+
+    if (!result.ok) {
+      setApplyError(
+        result.message ?? "Diktovaný text se nepodařilo vložit.",
+      );
+      formattingSessionRef.current.reset();
+      setFormatState(INITIAL_VOICE_FORMAT_STATE);
+      void stopDictationRef.current({ flush: false });
+      return false;
+    }
+
+    setApplyError(null);
+    return true;
+  }, []);
+
+  useEffect(() => {
+    applyBatchRef.current = applyBatch;
+  }, [applyBatch]);
+
   const dictation = useScribeDictation({
     flushOnStop: true,
+    vadSilenceThresholdSecs: vadSilence,
+    onBeforeSessionClose: () => {
+      const batch = formattingSessionRef.current.flush();
+      applyBatchRef.current(batch);
+    },
     onCommit: (segment) => {
-      onCommit(segment.text, insertAtEnd ? "end" : "cursor");
+      const batch = formattingSessionRef.current.accept(segment.text);
+      const applied = applyBatchRef.current(batch);
+
+      if (batch.stopped && applied) {
+        void stopDictationRef.current({ flush: false });
+      }
     },
   });
+
+  const stopDictation = dictation.stop;
+
+  useEffect(() => {
+    stopDictationRef.current = stopDictation;
+  }, [stopDictation]);
 
   const {
     session,
@@ -371,18 +531,57 @@ export function BodyDictationControls({
     disabled || webLocksSupported !== true || busy || isStopping;
   const stopDisabled =
     !busy || session.status === "stopping" || isStopping;
+  const partialGraphemeCount = useMemo(
+    () => countGraphemes(partialTranscript),
+    [partialTranscript],
+  );
+  const approximateCount = contentGraphemeCount + partialGraphemeCount;
+  const approximateOverLimit = approximateCount > CONTENT_MAX_GRAPHEMES;
+
+  useEffect(() => {
+    if (disabled && busy && !isStopping) {
+      void stopDictation({ flush: false });
+    }
+  }, [busy, disabled, isStopping, stopDictation]);
+
+  useEffect(() => {
+    const previous = previousStatusRef.current;
+    previousStatusRef.current = session.status;
+
+    if (session.status === "error" && previous !== "error") {
+      formattingSessionRef.current.reset();
+      setFormatState(INITIAL_VOICE_FORMAT_STATE);
+      setCommandLog([]);
+      setApplyError(null);
+      setApplyNotice(null);
+    }
+  }, [session.status]);
 
   function handleStart() {
     if (startDisabled) {
       return;
     }
 
+    formattingSessionRef.current.reset();
+    setFormatState(INITIAL_VOICE_FORMAT_STATE);
+    setCommandLog([]);
+    setApplyError(null);
+    setApplyNotice(null);
     dictation.clearTranscripts();
     dictation.start();
   }
 
   function handleStop() {
+    setApplyError(null);
     void dictation.stop();
+  }
+
+  function handleVadSilenceChange(value: string) {
+    const parsed = Number(value);
+
+    if (isVadSilenceSecs(parsed)) {
+      writeVadSilencePreference(parsed);
+    }
   }
 
   return (
@@ -399,7 +598,8 @@ export function BodyDictationControls({
             Diktování textu
           </h3>
           <p className="mt-1 text-sm leading-6 text-stone-600">
-            Potvrzené segmenty se vloží do rozpracovaného textu. Průběžný
+            Potvrzené segmenty se vloží do rozpracovaného textu. České
+            formátovací příkazy se zpracují až z potvrzeného přepisu; průběžný
             přepis zůstává jen v overlayi a do poznámky se nezapisuje.
           </p>
         </div>
@@ -458,9 +658,55 @@ export function BodyDictationControls({
           />
           Vložit na konec
         </label>
+        <label className="flex items-center gap-2 text-sm text-stone-700">
+          Prodleva ticha (VAD)
+          <select
+            className="rounded-lg border border-stone-300 bg-white px-2 py-1 text-sm text-stone-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 disabled:cursor-not-allowed disabled:bg-stone-100"
+            data-testid="vad-silence-select"
+            disabled={busy || isStopping}
+            onChange={(event) => handleVadSilenceChange(event.target.value)}
+            value={vadSilence}
+          >
+            {VAD_SILENCE_OPTIONS.map((option) => (
+              <option key={option} value={option}>
+                {formatVadSilence(option)}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
-      <p className="mt-3 text-sm text-stone-700">
+      <p className="mt-2 text-xs leading-5 text-stone-500">
+        VAD se předává ElevenLabs Scribe SDK pro příští relaci; změna během
+        běžícího diktování se projeví až po novém Startu.
+      </p>
+
+      <p className="mt-3 text-sm text-stone-700" data-testid="voice-insert-mode">
+        Režim vkládání:{" "}
+        {targetMode === "visual"
+          ? "vizuální editor; formátovací příkazy na konec"
+          : insertAtEnd
+            ? "na konec"
+            : "na kurzor"}
+      </p>
+
+      <div className="mt-2 space-y-1 text-sm text-stone-700">
+        <p data-testid="voice-format-state">
+          Formát: {describeFormatState(formatState)}
+        </p>
+        {commandLog.length > 0 ? (
+          <p data-testid="voice-command-feedback">
+            Poslední příkazy: {commandLog.join(" · ")}
+          </p>
+        ) : null}
+        {applyNotice !== null ? (
+          <p aria-live="polite" className="text-amber-900">
+            {applyNotice}
+          </p>
+        ) : null}
+      </div>
+
+      <p className="mt-2 text-sm text-stone-700">
         Stav: {isStopping ? "Ukončuji…" : statusLabels[session.status]}
       </p>
 
@@ -476,8 +722,39 @@ export function BodyDictationControls({
           >
             {partialTranscript || "Čekám na řeč…"}
           </p>
+          <p
+            className={
+              approximateOverLimit
+                ? "mt-2 text-sm font-semibold text-red-800"
+                : "mt-2 text-sm text-stone-600"
+            }
+            data-testid="voice-approximate-count"
+          >
+            Přibližně {formatCount(approximateCount)} /{" "}
+            {formatCount(CONTENT_MAX_GRAPHEMES)} viditelných znaků včetně
+            průběžného přepisu. Přesný počet se ověří při vložení.
+          </p>
+          {approximateOverLimit ? (
+            <p className="mt-1 text-sm text-red-800" role="alert">
+              Přibližný počet překračuje limit. Vložení bude odmítnuto a
+              stávající obsah zůstane beze změny.
+            </p>
+          ) : null}
         </div>
       ) : null}
+
+      <p
+        className="mt-3 text-xs leading-5 text-stone-500"
+        data-testid="voice-diagnostics"
+      >
+        {`Diagnostika v paměti: potvrzení ${formatLatency(
+          diagnostics.lastCommitLatencyMs,
+        )}, příkaz ${formatLatency(
+          diagnostics.lastCommandLatencyMs,
+        )}, ruční reconnecty (všechna diktování) ${diagnostics.manualReconnectCount.toLocaleString(
+          "cs-CZ",
+        )}. Zvuk ani přepis se nelogují.`}
+      </p>
 
       {incompleteNotice ? (
         <p
@@ -485,6 +762,15 @@ export function BodyDictationControls({
           aria-live="polite"
         >
           {incompleteNotice}
+        </p>
+      ) : null}
+
+      {applyError ? (
+        <p
+          className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm leading-6 text-red-900"
+          role="alert"
+        >
+          {applyError}
         </p>
       ) : null}
 

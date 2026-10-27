@@ -27,6 +27,11 @@ import {
   type MicrophoneSessionState,
 } from "@/lib/voice/microphone";
 import {
+  recordVoiceCommandLatency,
+  recordVoiceCommitLatency,
+  recordVoiceManualReconnect,
+} from "@/lib/voice/diagnostics";
+import {
   TranscriptSession,
   type AcceptedTranscriptSegment,
 } from "@/lib/voice/transcript-session";
@@ -37,6 +42,19 @@ export const FLUSH_SETTLE_MS = 150;
 const subscribeToWebLocks = () => () => undefined;
 const getWebLocksSnapshot = () => isWebLocksSupported();
 const getWebLocksServerSnapshot = () => null;
+
+function isConnectionLostError(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "";
+
+  return /websocket (closed unexpectedly|error)|connection (lost|closed)|network (error|failure)/iu.test(
+    message,
+  );
+}
 
 type ScribeConnection = NonNullable<
   ReturnType<UseScribeReturn["getConnection"]>
@@ -51,6 +69,8 @@ export interface UseScribeDictationOptions {
   readonly onCommit: (segment: AcceptedTranscriptSegment) => void;
   readonly stopAfterFirstCommit?: boolean;
   readonly flushOnStop?: boolean;
+  readonly vadSilenceThresholdSecs?: number;
+  readonly onBeforeSessionClose?: () => void;
 }
 
 export interface UseScribeDictationResult {
@@ -109,6 +129,12 @@ export function useScribeDictation(
     options.stopAfterFirstCommit ?? false,
   );
   const flushOnStopRef = useRef(options.flushOnStop ?? true);
+  const vadSilenceRef = useRef(
+    options.vadSilenceThresholdSecs ?? SCRIBE_VAD_SILENCE_THRESHOLD_SECS,
+  );
+  const onBeforeSessionCloseRef = useRef(options.onBeforeSessionClose);
+  const hasStartedRef = useRef(false);
+  const lastPartialAtRef = useRef<number | null>(null);
 
   useEffect(() => {
     onCommitRef.current = options.onCommit;
@@ -122,6 +148,15 @@ export function useScribeDictation(
     flushOnStopRef.current = options.flushOnStop ?? true;
   }, [options.flushOnStop]);
 
+  useEffect(() => {
+    vadSilenceRef.current =
+      options.vadSilenceThresholdSecs ?? SCRIBE_VAD_SILENCE_THRESHOLD_SECS;
+  }, [options.vadSilenceThresholdSecs]);
+
+  useEffect(() => {
+    onBeforeSessionCloseRef.current = options.onBeforeSessionClose;
+  }, [options.onBeforeSessionClose]);
+
   function notifySessionError(message: string) {
     const sessionId = sessionIdRef.current;
 
@@ -134,11 +169,17 @@ export function useScribeDictation(
     modelId: SCRIBE_MODEL_ID,
     languageCode: SCRIBE_LANGUAGE_CODE,
     commitStrategy: CommitStrategy.VAD,
-    vadSilenceThresholdSecs: SCRIBE_VAD_SILENCE_THRESHOLD_SECS,
+    vadSilenceThresholdSecs:
+      options.vadSilenceThresholdSecs ?? SCRIBE_VAD_SILENCE_THRESHOLD_SECS,
     microphone: {
       echoCancellation: true,
       noiseSuppression: true,
       autoGainControl: true,
+    },
+    onPartialTranscript: (data) => {
+      if (data.text.trim() !== "") {
+        lastPartialAtRef.current = Date.now();
+      }
     },
     onSessionStarted: () => {
       const sessionId = sessionIdRef.current;
@@ -157,12 +198,19 @@ export function useScribeDictation(
     onError: (sessionError) => {
       const sessionId = sessionIdRef.current;
 
-      if (sessionId !== null) {
-        void controllerRef.current?.notifyError(
-          sessionId,
-          toCzechSessionError(sessionError),
-        );
+      if (sessionId === null) {
+        return;
       }
+
+      if (isConnectionLostError(sessionError)) {
+        void controllerRef.current?.notifyDisconnected(sessionId);
+        return;
+      }
+
+      void controllerRef.current?.notifyError(
+        sessionId,
+        toCzechSessionError(sessionError),
+      );
     },
     onAuthError: () => {
       notifySessionError(
@@ -350,6 +398,16 @@ export function useScribeDictation(
           if (controllerRef.current === null) {
             closeTranscriptSession();
           } else {
+            if (reason === "user" && flush) {
+              try {
+                onBeforeSessionCloseRef.current?.();
+              } catch {
+                setIncompleteNotice(
+                  "Poslední formátovací příkaz se nepodařilo dokončit. Zkontrolujte text před uložením.",
+                );
+              }
+            }
+
             await controllerRef.current.stop(reason);
           }
         } finally {
@@ -384,7 +442,10 @@ export function useScribeDictation(
 
       finalCommitResolverRef.current = null;
       currentScribe.clearTranscripts();
-      await currentScribe.connect({ token });
+      await currentScribe.connect({
+        token,
+        vadSilenceThresholdSecs: vadSilenceRef.current,
+      });
 
       const connection = currentScribe.getConnection();
 
@@ -408,7 +469,22 @@ export function useScribeDictation(
           return;
         }
 
-        onCommitRef.current(segment);
+        const utteranceEndedAt = lastPartialAtRef.current;
+        const receivedAt = Date.now();
+        lastPartialAtRef.current = null;
+        recordVoiceCommitLatency(
+          utteranceEndedAt === null ? null : receivedAt - utteranceEndedAt,
+        );
+
+        try {
+          onCommitRef.current(segment);
+        } finally {
+          recordVoiceCommandLatency(
+            utteranceEndedAt === null
+              ? null
+              : Date.now() - utteranceEndedAt,
+          );
+        }
 
         if (stopAfterFirstCommitRef.current) {
           void stopInternal({ flush: false });
@@ -442,7 +518,14 @@ export function useScribeDictation(
       return;
     }
 
+    if (hasStartedRef.current) {
+      recordVoiceManualReconnect();
+    } else {
+      hasStartedRef.current = true;
+    }
+
     setIncompleteNotice(null);
+    lastPartialAtRef.current = null;
     scribeRef.current?.clearTranscripts();
     void getOrCreateController().start();
   }, [getOrCreateController]);

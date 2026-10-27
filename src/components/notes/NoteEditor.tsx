@@ -40,14 +40,17 @@ import {
   type VisualConversionFailure,
 } from "@/lib/notes/editor-markdown";
 import { isSafeLinkDestination, parseNoteMarkdown } from "@/lib/notes/markdown";
+import type { InlineMark } from "@/lib/voice/format-state";
 import {
-  appendCommittedText,
-  insertCommittedTextAtCursor,
+  applyVoicePartsToMarkdown,
+  type VoiceFormattingBatch,
+  type VoiceRenderedPart,
 } from "@/lib/voice/transcript-session";
 
 import {
   BodyDictationControls,
   type BodyInsertMode,
+  type VoiceApplyResult,
 } from "../voice/DictationControls";
 import { MarkdownSource } from "./MarkdownSource";
 
@@ -80,6 +83,84 @@ function getServerSnapshot(): boolean {
 
 function formatCount(value: number): string {
   return value.toLocaleString("cs-CZ");
+}
+
+function voiceLimitMessage(actual: number): string {
+  return `Diktovaný text by překročil limit ${formatCount(CONTENT_MAX_GRAPHEMES)} viditelných znaků (nově ${formatCount(actual)}). Dřívější obsah zůstal beze změny. Zkraťte text a spusťte diktování znovu.`;
+}
+
+function isBlockVoicePart(part: VoiceRenderedPart): boolean {
+  return (
+    part.kind === "heading" ||
+    part.kind === "paragraph_break" ||
+    part.kind === "list_item" ||
+    part.kind === "list_end"
+  );
+}
+
+function needsVisualParagraphAfter(
+  parts: readonly VoiceRenderedPart[],
+): boolean {
+  const last = parts.at(-1);
+
+  return (
+    last?.kind === "paragraph_break" ||
+    last?.kind === "heading" ||
+    last?.kind === "list_end"
+  );
+}
+
+function toTiptapMarks(marks: readonly InlineMark[]): { type: string }[] {
+  return marks.map((mark) => ({
+    type: mark === "strong" ? "bold" : "italic",
+  }));
+}
+
+function insertVisualVoiceText(
+  editor: Editor,
+  text: string,
+  marks: readonly InlineMark[],
+): void {
+  if (text === "") {
+    return;
+  }
+
+  const { $from } = editor.state.selection;
+  const before = $from.parent.textBetween(
+    0,
+    $from.parentOffset,
+    undefined,
+    "\0",
+  );
+  const separator =
+    before.length > 0 && !/\s$/u.test(before) && !/^\s/u.test(text)
+      ? " "
+      : "";
+  const tiptapMarks = toTiptapMarks(marks);
+
+  editor
+    .chain()
+    .focus()
+    .insertContent({
+      type: "text",
+      text: `${separator}${text}`,
+      ...(tiptapMarks.length > 0 ? { marks: tiptapMarks } : {}),
+    })
+    .run();
+}
+
+function setVisualSelectionAtEnd(editor: Editor): void {
+  const selection = TextSelection.near(
+    editor.state.doc.resolve(editor.state.doc.content.size),
+    -1,
+  );
+  editor.commands.setTextSelection(selection.from);
+}
+
+function insertVisualParagraphAtEnd(editor: Editor): void {
+  const end = editor.state.doc.content.size;
+  editor.chain().focus().insertContentAt(end, { type: "paragraph" }).run();
+  setVisualSelectionAtEnd(editor);
 }
 
 function describeVisualFailure(failure: VisualConversionFailure): string {
@@ -429,6 +510,8 @@ export function NoteEditor({ note, onSaved, onDirtyChange }: NoteEditorProps) {
   const restoreBaseVersionRef = useRef<number | null>(null);
   const visualEditedRef = useRef(false);
   const visualEditorRef = useRef<Editor | null>(null);
+  const visualVoiceEndModeRef = useRef(false);
+  const visualPendingParagraphRef = useRef(false);
   const controllerRef = useRef<DraftAutosaveController | null>(null);
   const onSavedRef = useRef(onSaved);
   const onDirtyChangeRef = useRef(onDirtyChange);
@@ -755,86 +838,238 @@ export function NoteEditor({ note, onSaved, onDirtyChange }: NoteEditorProps) {
     controllerRef.current?.notifyChange();
   }, []);
 
-  const insertDictatedText = useCallback(
-    (text: string, insertMode: BodyInsertMode) => {
-      if (text === "") {
+  const syncVisualVoiceContent = useCallback(
+    (markdown: string) => {
+      visualEditedRef.current = true;
+      setSource(markdown);
+      sourceTextRef.current = markdown;
+      setVisualDirty(false);
+      storeDraft(markdown);
+      notifyChange();
+    },
+    [notifyChange, storeDraft],
+  );
+
+  const revertVisualVoiceContent = useCallback(
+    (editor: Editor, beforeJson: JSONContent) => {
+      editor.commands.setContent(beforeJson, { emitUpdate: false });
+      visualEditedRef.current = true;
+      setVisualDirty(false);
+
+      try {
+        const markdown = serializeVisualJson(beforeJson);
+        setSource(markdown);
+        sourceTextRef.current = markdown;
+        storeDraft(markdown);
+      } catch {
         return;
+      }
+    },
+    [storeDraft],
+  );
+
+  const applyVisualBlockBatch = useCallback(
+    (
+      editor: Editor,
+      parts: readonly VoiceRenderedPart[],
+    ): VoiceApplyResult => {
+      const base = readCurrentContent();
+
+      if (base === null) {
+        return {
+          ok: false,
+          message:
+            "Vizuální obsah nelze bezpečně přečíst. Přepněte do zdrojového režimu.",
+        };
+      }
+
+      const applied = applyVoicePartsToMarkdown(base, base.length, parts);
+      const parsedNext = parseNoteMarkdown(applied.content);
+
+      if (parsedNext.graphemeCount > CONTENT_MAX_GRAPHEMES) {
+        return {
+          ok: false,
+          message: voiceLimitMessage(parsedNext.graphemeCount),
+        };
+      }
+
+      let visualJson: JSONContent;
+
+      try {
+        visualJson = convertMarkdownToVisual(applied.content);
+      } catch {
+        return {
+          ok: false,
+          message:
+            "Formátovaný text nelze ve vizuálním režimu bezpečně zobrazit. Přepněte do zdrojového režimu.",
+        };
+      }
+
+      const beforeJson = editor.getJSON();
+      editor.commands.setContent(visualJson, { emitUpdate: false });
+
+      let canonical: string;
+
+      try {
+        canonical = serializeVisualJson(editor.getJSON());
+      } catch {
+        revertVisualVoiceContent(editor, beforeJson);
+        return {
+          ok: false,
+          message:
+            "Formátovaný text nelze bezpečně převést zpět do Markdownu. Obsah zůstal beze změny.",
+        };
+      }
+
+      const parsedCanonical = parseNoteMarkdown(canonical);
+
+      if (parsedCanonical.graphemeCount > CONTENT_MAX_GRAPHEMES) {
+        revertVisualVoiceContent(editor, beforeJson);
+        return {
+          ok: false,
+          message: voiceLimitMessage(parsedCanonical.graphemeCount),
+        };
+      }
+
+      setVisualSelectionAtEnd(editor);
+      syncVisualVoiceContent(canonical);
+
+      return {
+        ok: true,
+        notice:
+          "Formátovací příkazy se ve vizuálním režimu vkládají na konec poznámky.",
+      };
+    },
+    [readCurrentContent, revertVisualVoiceContent, syncVisualVoiceContent],
+  );
+
+  const applyVisualInlineBatch = useCallback(
+    (
+      editor: Editor,
+      parts: readonly VoiceRenderedPart[],
+      mode: BodyInsertMode,
+    ): VoiceApplyResult => {
+      const beforeJson = editor.getJSON();
+
+      if (visualPendingParagraphRef.current) {
+        insertVisualParagraphAtEnd(editor);
+        visualPendingParagraphRef.current = false;
+      }
+
+      if (mode === "end") {
+        setVisualSelectionAtEnd(editor);
+      }
+
+      for (const part of parts) {
+        if (part.kind === "text") {
+          insertVisualVoiceText(editor, part.text, part.marks);
+        } else if (part.kind === "line_break") {
+          editor.chain().focus().setHardBreak().run();
+        }
+      }
+
+      let markdown: string;
+
+      try {
+        markdown = serializeVisualJson(editor.getJSON());
+      } catch {
+        revertVisualVoiceContent(editor, beforeJson);
+        return {
+          ok: false,
+          message:
+            "Vizuální text nelze bezpečně převést do Markdownu. Obsah zůstal beze změny.",
+        };
+      }
+
+      const parsedNext = parseNoteMarkdown(markdown);
+
+      if (parsedNext.graphemeCount > CONTENT_MAX_GRAPHEMES) {
+        revertVisualVoiceContent(editor, beforeJson);
+        return {
+          ok: false,
+          message: voiceLimitMessage(parsedNext.graphemeCount),
+        };
+      }
+
+      syncVisualVoiceContent(markdown);
+      return { ok: true };
+    },
+    [revertVisualVoiceContent, syncVisualVoiceContent],
+  );
+
+  const applyVoiceBatch = useCallback(
+    (
+      batch: VoiceFormattingBatch,
+      insertMode: BodyInsertMode,
+    ): VoiceApplyResult => {
+      if (batch.batchIndex === 0) {
+        visualVoiceEndModeRef.current = false;
+        visualPendingParagraphRef.current = false;
+      }
+
+      if (batch.parts.length === 0) {
+        return { ok: true };
       }
 
       if (modeRef.current === "visual") {
         const editor = visualEditorRef.current;
 
         if (editor === null) {
-          setError(
-            "Vizuální editor není připravený. Přepněte do zdrojového režimu.",
-          );
-          return;
+          return {
+            ok: false,
+            message:
+              "Vizuální editor není připravený. Přepněte do zdrojového režimu.",
+          };
         }
 
-        if (insertMode === "end") {
-          const separator =
-            editor.state.doc.textContent.length > 0 &&
-            !/\s$/u.test(editor.state.doc.textContent) &&
-            !/^\s/u.test(text)
-              ? " "
-              : "";
-          const endSelection = TextSelection.near(
-            editor.state.doc.resolve(editor.state.doc.content.size),
-            -1,
+        if (batch.parts.some(isBlockVoicePart)) {
+          visualVoiceEndModeRef.current = true;
+          visualPendingParagraphRef.current = needsVisualParagraphAfter(
+            batch.parts,
           );
-          editor
-            .chain()
-            .focus()
-            .insertContentAt(endSelection.from, {
-              type: "text",
-              text: `${separator}${text}`,
-            })
-            .run();
-          return;
+          return applyVisualBlockBatch(editor, batch.parts);
         }
 
-        const { $from } = editor.state.selection;
-        const before = $from.parent.textBetween(
-          0,
-          $from.parentOffset,
-          undefined,
-          "\0",
-        );
-        const separator =
-          before.length > 0 && !/\s$/u.test(before) && !/^\s/u.test(text)
-            ? " "
-            : "";
-        editor.chain().focus().insertContent({
-          type: "text",
-          text: `${separator}${text}`,
-        }).run();
-        return;
+        const effectiveMode = visualVoiceEndModeRef.current
+          ? "end"
+          : insertMode;
+
+        return applyVisualInlineBatch(editor, batch.parts, effectiveMode);
       }
 
       const current = sourceTextRef.current;
+      const cursor =
+        insertMode === "end"
+          ? current.length
+          : (pendingSelectionRef.current ??
+            textareaRef.current?.selectionStart ??
+            current.length);
+      const applied = applyVoicePartsToMarkdown(current, cursor, batch.parts);
+      const parsedNext = parseNoteMarkdown(applied.content);
 
-      if (insertMode === "end") {
-        const next = appendCommittedText(current, text);
-        sourceTextRef.current = next;
-        setSource(next);
-        pendingSelectionRef.current = next.length;
-        storeDraft(next);
-        notifyChange();
-        return;
+      if (parsedNext.graphemeCount > CONTENT_MAX_GRAPHEMES) {
+        return {
+          ok: false,
+          message: voiceLimitMessage(parsedNext.graphemeCount),
+        };
       }
 
-      const cursor =
-        pendingSelectionRef.current ??
-        textareaRef.current?.selectionStart ??
-        current.length;
-      const result = insertCommittedTextAtCursor(current, text, cursor);
-      sourceTextRef.current = result.content;
-      setSource(result.content);
-      pendingSelectionRef.current = result.cursor;
-      storeDraft(result.content);
-      notifyChange();
+      if (applied.content !== current) {
+        sourceTextRef.current = applied.content;
+        setSource(applied.content);
+        storeDraft(applied.content);
+        notifyChange();
+      }
+
+      pendingSelectionRef.current = applied.cursor;
+      return { ok: true };
     },
-    [notifyChange, storeDraft],
+    [
+      applyVisualBlockBatch,
+      applyVisualInlineBatch,
+      notifyChange,
+      storeDraft,
+    ],
   );
 
   const clearRecoverableError = useCallback(() => {
@@ -1312,9 +1547,11 @@ export function NoteEditor({ note, onSaved, onDirtyChange }: NoteEditorProps) {
       ) : null}
 
       <BodyDictationControls
-        onCommit={insertDictatedText}
+        contentGraphemeCount={parsed.graphemeCount}
         disabled={bodyDictationDisabled}
         disabledReason={bodyDictationDisabledReason}
+        onApplyBatch={applyVoiceBatch}
+        targetMode={mode}
       />
 
       <div className="mt-4">

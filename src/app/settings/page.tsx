@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { UsageSettings } from "@/components/settings/UsageSettings";
+import { VoiceSettings } from "@/components/settings/VoiceSettings";
 import { getUsageService, type UsageSummaryDto } from "@/lib/ai/usage";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +30,9 @@ export default async function SettingsPage() {
         Nastavení
       </h1>
       <UsageSettings initialError={error} initialSummary={summary} />
+      <div className="mt-6">
+        <VoiceSettings />
+      </div>
     </div>
   );
 }
