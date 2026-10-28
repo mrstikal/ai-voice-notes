@@ -1,8 +1,8 @@
-import { sql } from "drizzle-orm";
 import type { LlmOperation } from "../ai/schemas.ts";
 import type { OperationCandidate } from "../notes/operations.ts";
 import {
   check,
+  customType,
   index,
   integer,
   jsonb,
@@ -15,6 +15,16 @@ import {
   uuid,
   vector,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+
+const tsvector = customType<{
+  data: string;
+  driverData: string;
+}>({
+  dataType() {
+    return "tsvector";
+  },
+});
 
 export interface NoteSnapshot {
   title: string;
@@ -32,6 +42,7 @@ export const notes = pgTable(
     contentMd: text("content_md").notNull(),
     contentPlain: text("content_plain").notNull(),
     category: text("category"),
+    searchVector: tsvector("search_vector"),
     version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at", {
       withTimezone: true,
@@ -56,6 +67,7 @@ export const notes = pgTable(
       .on(table.createdAt.desc(), table.id.desc())
       .where(sql`${table.deletedAt} is null`),
     index("notes_deleted_at_idx").on(table.deletedAt),
+    index("notes_search_vector_gin").using("gin", table.searchVector),
   ],
 );
 

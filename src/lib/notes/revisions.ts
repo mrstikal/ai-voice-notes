@@ -24,6 +24,7 @@ import {
   type NoteDetailDto,
   type NoteService,
 } from "./service.ts";
+import { refreshNoteSearch } from "../search/fts.ts";
 
 export type RevisionReason =
   | "initial"
@@ -248,6 +249,7 @@ export function createRevisionService(
           title: note.title,
           contentMd: note.contentMd,
           category: note.category,
+          searchVector: null,
           version: note.version,
           contentPlain: note.contentPlain,
           createdAt: note.createdAt,
@@ -408,6 +410,7 @@ export function createRevisionService(
           beforeSnapshot: before,
           afterSnapshot: after,
         });
+        await refreshNoteSearch(tx, noteId);
 
         return toNoteDetail(updated, normalizedTarget.tags);
       });

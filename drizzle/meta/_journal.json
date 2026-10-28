@@ -29,6 +29,13 @@
       "when": 1793124944073,
       "tag": "0003_proposal_nonce_used",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793216695221,
+      "tag": "0004_search",
+      "breakpoints": true
     }
   ]
 }

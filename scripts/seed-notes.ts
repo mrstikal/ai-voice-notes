@@ -1,6 +1,9 @@
 import { randomInt } from "node:crypto";
+import { join } from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
+
+import { readMigrationFiles } from "drizzle-orm/migrator";
 
 import nextEnv from "@next/env";
 
@@ -99,6 +102,33 @@ async function runSeed(
 
   try {
     return await connection.db.transaction(async (tx) => {
+      const migrations = readMigrationFiles({
+        migrationsFolder: join(process.cwd(), "drizzle"),
+      });
+      const latestMigration = migrations.at(-1);
+      let latestApplied: string | undefined;
+
+      try {
+        const migrationResult = await tx.execute(
+          sql`select max(created_at)::bigint as latest from drizzle.__drizzle_migrations`,
+        );
+        latestApplied = migrationResult.rows[0]?.latest as string | undefined;
+      } catch {
+        throw new Error(
+          "Cílová databáze není migrovaná. Před seedem spusťte pnpm db:migrate:test (testovací DB) nebo pnpm db:migrate (vývojová DB); seed nic nesmazal.",
+        );
+      }
+
+      if (
+        !latestMigration ||
+        latestApplied === undefined ||
+        Number(latestApplied) < latestMigration.folderMillis
+      ) {
+        throw new Error(
+          "Cílová databáze není migrovaná na nejnovější schéma. Před seedem spusťte pnpm db:migrate:test (testovací DB) nebo pnpm db:migrate (vývojová DB); seed nic nesmazal.",
+        );
+      }
+
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtext(${SEED_KEY_PREFIX}))`,
       );

@@ -130,6 +130,30 @@ to the development database; run it only after explicit authorization and, if
 the development database contains data, after taking a backup. Migrations do not
 seed data, and test commands never migrate the development database.
 
+### Search-index migration and backups
+
+Migration `drizzle/0004_search.sql` adds `notes.search_vector`, backfills it
+from the current title, visible body and tags, and creates the GIN index. It
+does not rewrite Markdown. Before applying it to a database with valuable notes,
+take and verify a backup:
+
+```bash
+mkdir -p backups
+docker compose exec -T db pg_dump -U ai_voice_notes -d ai_voice_notes -Fc > backups/ai-voice-notes-before-search.dump
+pg_restore --list backups/ai-voice-notes-before-search.dump >/dev/null
+```
+
+Restore is deliberately manual into a disposable/empty target; there is no
+automatic rollback:
+
+```bash
+docker compose exec -T db pg_restore -U ai_voice_notes -d ai_voice_notes --clean --if-exists < backups/ai-voice-notes-before-search.dump
+```
+
+Run `pnpm db:migrate` after the backup and before starting the updated app or
+`pnpm db:seed`. `db:seed` checks the applied migration version and refuses with
+a Czech migrate-first message before deleting any `demo-v1:*` rows.
+
 ## Scripts
 
 | Command | Description |

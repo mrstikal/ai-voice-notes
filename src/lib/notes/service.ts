@@ -21,6 +21,7 @@ import {
   type TtsCache,
 } from "../tts/cache.ts";
 import { parseNoteMarkdown } from "./markdown.ts";
+import { refreshNoteSearch } from "../search/fts.ts";
 import {
   NoteMetadataError,
   normalizeNoteMetadata,
@@ -377,6 +378,7 @@ export async function createSeededNoteInTransaction(
     afterSnapshot: toSnapshot(note, tags),
     createdAt: input.createdAt,
   });
+  await refreshNoteSearch(db, note.id);
 
   return toDetail(note, tags);
 }
@@ -446,6 +448,7 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
           beforeSnapshot: EMPTY_NOTE_SNAPSHOT,
           afterSnapshot: toSnapshot(note, tags),
         });
+        await refreshNoteSearch(tx, note.id);
 
         return toDetail(note, tags);
       });
@@ -499,6 +502,8 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
             afterSnapshot: toSnapshot(updated, tags),
           });
         }
+
+        await refreshNoteSearch(tx, id);
 
         return toDetail(updated, tags);
       });
@@ -563,6 +568,7 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
           beforeSnapshot: toSnapshot(current, currentTags),
           afterSnapshot: toSnapshot(updated, normalized.tags),
         });
+        await refreshNoteSearch(tx, id);
 
         return toDetail(updated, normalized.tags);
       });
@@ -608,6 +614,7 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
           beforeSnapshot: toSnapshot(current, tags),
           afterSnapshot: toSnapshot(updated, tags),
         });
+        await refreshNoteSearch(tx, id);
 
         return toDetail(updated, tags);
       });
@@ -637,6 +644,8 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
           await throwCasFailure(tx, id, false);
           throw new NoteConflictError(current.version);
         }
+
+        await refreshNoteSearch(tx, id);
 
         return toDetail(updated, tags);
       });
@@ -674,6 +683,7 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
           beforeSnapshot: toSnapshot(current, tags),
           afterSnapshot: toSnapshot(updated, tags),
         });
+        await refreshNoteSearch(tx, id);
 
         return toDetail(updated, tags);
       });

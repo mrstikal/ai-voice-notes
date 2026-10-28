@@ -113,6 +113,14 @@ describe.skipIf(!hasTestDatabase)("seed CLI", () => {
     return result.rows;
   }
 
+  async function countSeedVectors(): Promise<number> {
+    const result = await connection.pool.query<{ count: number }>(
+      "SELECT count(*)::int AS count FROM notes WHERE seed_key LIKE $1 AND search_vector IS NOT NULL",
+      [`${SEED_KEY_PREFIX}%`],
+    );
+    return result.rows[0]?.count ?? 0;
+  }
+
   async function getSeedRevisions(): Promise<SeedRevisionRow[]> {
     const result = await connection.pool.query<SeedRevisionRow>(
       "SELECT r.note_id, r.note_version, r.reason, r.created_at FROM note_revisions r JOIN notes n ON n.id = r.note_id WHERE n.seed_key LIKE $1 ORDER BY r.note_id",
@@ -232,6 +240,8 @@ describe.skipIf(!hasTestDatabase)("seed CLI", () => {
     );
     expect(distinctDays.size).toBeGreaterThanOrEqual(5);
 
+    expect(await countSeedVectors()).toBe(20);
+
     const revisions = await getSeedRevisions();
     expect(revisions).toHaveLength(20);
 
@@ -254,6 +264,42 @@ describe.skipIf(!hasTestDatabase)("seed CLI", () => {
       version: 1,
       deleted_at: null,
     });
+  });
+
+  it("refuses an outdated migration before deleting any seed rows", async () => {
+    const firstRun = spawnSeed();
+    expect(firstRun.status, firstRun.stderr).toBe(0);
+    const before = await getSeedRows();
+    const latest = await connection.pool.query<{
+      created_at: string;
+      hash: string;
+    }>(
+      "select hash, created_at from drizzle.__drizzle_migrations order by created_at desc limit 1",
+    );
+    const row = latest.rows[0];
+
+    if (!row) {
+      throw new Error("Migrační tabulka neobsahuje záznam.");
+    }
+
+    await connection.pool.query(
+      "delete from drizzle.__drizzle_migrations where hash = $1",
+      [row.hash],
+    );
+
+    try {
+      const blocked = spawnSeed();
+      expect(blocked.status).not.toBe(0);
+      expect(blocked.stderr).toMatch(/db:migrate|migrovan/);
+      expect((await getSeedRows()).map((item) => item.id)).toEqual(
+        before.map((item) => item.id),
+      );
+    } finally {
+      await connection.pool.query(
+        "insert into drizzle.__drizzle_migrations (hash, created_at) values ($1, $2)",
+        [row.hash, row.created_at],
+      );
+    }
   });
 
   it("leaves the dev database unchanged on a successful test-mode seed", async () => {
@@ -306,6 +352,7 @@ describe.skipIf(!hasTestDatabase)("seed CLI", () => {
       SEED_FIXTURES.map((fixture) => fixture.title).sort(),
     );
     expect(secondIds.every((id) => !firstIds.includes(id))).toBe(true);
+    expect(await countSeedVectors()).toBe(20);
     expect(await countNotesByIds(firstIds)).toBe(0);
     expect(await countRevisionsByIds(firstIds)).toBe(0);
 
