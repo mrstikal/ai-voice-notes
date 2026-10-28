@@ -25,6 +25,7 @@ import {
   LLM_EDIT_JSON_SCHEMA,
   llmEditResponseSchema,
 } from "../../src/lib/ai/schemas";
+import { TAG_SUGGESTIONS_SCHEMA_NAME } from "../../src/lib/ai/tag-suggestions";
 import { createMockOpenRouterTransport } from "../helpers/provider-mocks";
 
 const RESERVATION_ID = "33333333-3333-4333-8333-333333333333";
@@ -236,6 +237,31 @@ describe("P21 structured OpenRouter client", () => {
     expect(usagePayload).not.toContain(PROMPT);
     expect(usagePayload).not.toContain("Nový odstavec");
     expect(usagePayload).toContain(LLM_SCHEMA_NAME);
+  });
+
+  it("requests and validates the separate tag-suggestion JSON schema", async () => {
+    const transport = createMockOpenRouterTransport({
+      responses: [chatResponse({ tags: ["atlas"], category: "Práce" })],
+    });
+    const { service } = createService({ transport });
+
+    const result = await service.requestTagSuggestions({
+      prompt: "Navrhni tagy pro poznámku.",
+    });
+
+    expect(result).toEqual({ tags: ["atlas"], category: "Práce" });
+    const body = JSON.parse(transport.calls[0]!.body) as {
+      response_format: {
+        json_schema: { name: string; schema: Record<string, unknown> };
+      };
+    };
+    expect(body.response_format.json_schema.name).toBe(
+      TAG_SUGGESTIONS_SCHEMA_NAME,
+    );
+    expect(body.response_format.json_schema.schema).toMatchObject({
+      additionalProperties: false,
+      required: ["tags", "category"],
+    });
   });
 
   it("accepts a valid unclear response without inventing an operation", async () => {

@@ -74,6 +74,8 @@ export function NoteWorkspace({
       <NoteTags
         disabled={editorDirty}
         key={`tags:${note.id}:${note.category ?? ""}:${JSON.stringify(note.tags)}`}
+        llmError={llmError}
+        llmStatus={llmStatus}
         note={note}
         onApplied={setMetadataNotice}
         onNoteUpdated={handleNoteUpdated}

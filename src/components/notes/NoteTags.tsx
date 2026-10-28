@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 
+import type { LlmProviderStatus } from "@/lib/ai/structured";
+import type { TagSuggestion } from "@/lib/ai/tag-suggestions";
+import { formatUsdAmount } from "@/lib/ai/usage-format";
 import {
   NOTE_CATEGORIES,
   NOTE_TAGS_MAX,
@@ -24,9 +27,17 @@ function tagsDiffer(left: readonly string[], right: readonly string[]): boolean 
   return left.some((tag, index) => tag !== right[index]);
 }
 
+interface SuggestedTagItem {
+  readonly key: string;
+  readonly text: string;
+  readonly selected: boolean;
+}
+
 export interface NoteTagsProps {
   readonly note: NoteDetail;
   readonly disabled?: boolean;
+  readonly llmStatus: LlmProviderStatus | null;
+  readonly llmError?: string | null;
   readonly onNoteUpdated: (note: NoteDetail) => void;
   readonly onApplied?: (message: string | null) => void;
 }
@@ -34,6 +45,8 @@ export interface NoteTagsProps {
 export function NoteTags({
   note,
   disabled = false,
+  llmStatus,
+  llmError = null,
   onNoteUpdated,
   onApplied,
 }: NoteTagsProps) {
@@ -41,8 +54,16 @@ export function NoteTags({
   const [tags, setTags] = useState<string[]>([...note.tags]);
   const [tagInput, setTagInput] = useState("");
   const [saving, setSaving] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestion, setSuggestion] = useState<TagSuggestion | null>(null);
+  const [suggestionItems, setSuggestionItems] = useState<SuggestedTagItem[]>(
+    [],
+  );
+  const [applySuggestedCategory, setApplySuggestedCategory] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [suggestionError, setSuggestionError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const providerBlocked = llmStatus === null || !llmStatus.configured;
   const dirty =
     category !== (note.category ?? "") || tagsDiffer(tags, note.tags);
 
@@ -123,6 +144,141 @@ export function NoteTags({
             : "Metadata se nepodařilo uložit.",
         );
       }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function suggest() {
+    if (providerBlocked || disabled || suggesting) {
+      return;
+    }
+
+    setSuggesting(true);
+    setSuggestionError(null);
+    setStatus(null);
+    setSuggestion(null);
+    setSuggestionItems([]);
+    setApplySuggestedCategory(false);
+
+    try {
+      const response = await fetch(`/api/notes/${note.id}/ai-suggest`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: "tag_suggestions" }),
+      });
+
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as {
+          error?: { message?: string };
+        } | null;
+
+        throw new Error(
+          body?.error?.message ??
+            "AI návrh tagů není dostupný. Ruční tagy můžete upravovat dál.",
+        );
+      }
+
+      const result = (await response.json()) as TagSuggestion;
+      setSuggestion(result);
+      setSuggestionItems(
+        result.tags.map((tag, index) => ({
+          key: `${index}:${tag}`,
+          selected: true,
+          text: tag,
+        })),
+      );
+      setStatus(
+        "AI návrh je připravený. Vyberte tagy a případně potvrďte kategorii; poznámka se změní až potvrzením.",
+      );
+    } catch (suggestError) {
+      setSuggestionError(
+        suggestError instanceof Error
+          ? suggestError.message
+          : "AI návrh tagů se nepodařilo načíst.",
+      );
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
+  async function applySuggestion() {
+    if (suggestion === null) {
+      return;
+    }
+
+    if (Date.parse(suggestion.expiresAt) <= Date.now()) {
+      setSuggestionError(
+        "AI návrh vypršel. Vytvořte nový návrh; poznámka zůstala beze změny.",
+      );
+      return;
+    }
+
+    if (suggestion.noteVersion !== note.version) {
+      setSuggestionError(
+        "Poznámka se mezitím změnila. Vytvořte AI návrh znovu; nic nebylo použito.",
+      );
+      return;
+    }
+
+    if (dirty) {
+      setSuggestionError(
+        "Nejprve uložte ruční změny kategorie nebo tagů. AI návrh se aplikuje jen na uložená metadata. Uložení tento AI návrh odstraní a po uložení budete muset požádat o nový, což je další placené volání.",
+      );
+      return;
+    }
+
+    if (suggestionItems.every((item) => !item.selected) && !applySuggestedCategory) {
+      setSuggestionError(
+        "Vyberte alespoň jeden tag nebo zvolte použití navržené kategorie.",
+      );
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    setSuggestionError(null);
+    setStatus(null);
+    onApplied?.(null);
+
+    try {
+      const selectedTags = suggestionItems
+        .filter((item) => item.selected)
+        .map((item) => item.text);
+      const mergedTags = normalizeTags([...note.tags, ...selectedTags]);
+      const nextCategory = applySuggestedCategory
+        ? suggestion.category
+        : note.category;
+      const updated = await updateNoteMetadata(note.id, {
+        category: nextCategory,
+        tags: mergedTags,
+        expectedVersion: suggestion.noteVersion,
+      });
+      const changed = updated.version !== suggestion.noteVersion;
+      setCategory(updated.category ?? "");
+      setTags([...updated.tags]);
+      setSuggestion(null);
+      setSuggestionItems([]);
+      setApplySuggestedCategory(false);
+      setStatus(
+        changed
+          ? `AI metadata uložena · verze ${updated.version}. Vznikla jedna revize „Změna metadat“.`
+          : "AI návrh byl aplikován, ale metadata už byla stejná; nová revize nevznikla.",
+      );
+      onNoteUpdated(updated);
+      onApplied?.(
+        changed
+          ? `AI metadata uložena · verze ${updated.version} · jedna revize „Změna metadat“.`
+          : "Vybraná metadata už byla uložená; nová revize nevznikla.",
+      );
+    } catch (applyError) {
+      setSuggestionError(
+        applyError instanceof NoteApiError
+          ? applyError.message
+          : applyError instanceof Error
+            ? applyError.message
+            : "AI návrh se nepodařilo použít.",
+      );
     } finally {
       setSaving(false);
     }
@@ -280,6 +436,172 @@ export function NoteTags({
           Tagy jsou bez ohledu na velikost písmen jedinečné; diakritika se
           zachovává.
         </span>
+      </div>
+
+      <div className="mt-6 border-t border-stone-200 pt-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-950 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:border-stone-200 disabled:bg-stone-100 disabled:text-stone-400"
+            data-testid="tag-ai-suggest"
+            disabled={disabled || suggesting || providerBlocked}
+            onClick={() => void suggest()}
+            type="button"
+          >
+            {suggesting ? "Navrhuji…" : "Navrhnout tagy AI"}
+          </button>
+          <span className="text-xs leading-5 text-stone-500">
+            Placená akce. Odesílá se titulek a obsah poznámky; výsledek se
+            neuloží bez potvrzení. Kategorii nelze změnit bez samostatné volby.
+          </span>
+        </div>
+
+        {llmStatus ? (
+          <p className="mt-1 text-xs leading-5 text-stone-500">
+            OpenRouter · {llmStatus.model} · odhad až{" "}
+            {formatUsdAmount(String(llmStatus.estimatedMaxCostUsd))} na
+            požadavek.
+          </p>
+        ) : null}
+
+        {providerBlocked ? (
+          <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+            {llmStatus?.blockedReason ??
+              "AI návrh tagů není nakonfigurovaný. Ruční tagy můžete upravovat dál."}
+          </p>
+        ) : null}
+
+        {llmError ? (
+          <p className="mt-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900">
+            {llmError}
+          </p>
+        ) : null}
+
+        {suggestionError ? (
+          <p
+            className="mt-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900"
+            data-testid="tag-ai-error"
+            role="alert"
+          >
+            {suggestionError}
+          </p>
+        ) : null}
+
+        {suggestion ? (
+          <div
+            className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4"
+            data-testid="tag-ai-suggestion"
+          >
+            <p className="text-sm font-semibold text-emerald-950">
+              AI návrh · verze {suggestion.noteVersion}
+            </p>
+            {suggestionItems.length === 0 ? (
+              <p className="mt-1 text-sm text-emerald-950">
+                Model nenavrhl žádné tagy.
+              </p>
+            ) : (
+              <fieldset className="mt-2">
+                <legend className="text-xs font-semibold text-emerald-900">
+                  Vyberte a případně upravte tagy k přidání
+                </legend>
+                <div className="mt-1 space-y-2">
+                  {suggestionItems.map((item, index) => (
+                    <div className="flex items-center gap-2" key={item.key}>
+                      <input
+                        checked={item.selected}
+                        data-testid={`tag-ai-suggested-${item.text}`}
+                        onChange={(event) =>
+                          setSuggestionItems((current) =>
+                            current.map((currentItem, currentIndex) =>
+                              currentIndex === index
+                                ? {
+                                    ...currentItem,
+                                    selected: event.target.checked,
+                                  }
+                                : currentItem,
+                            ),
+                          )
+                        }
+                        type="checkbox"
+                      />
+                      <input
+                        aria-label={`Upravit navržený tag ${item.text}`}
+                        className="min-w-40 flex-1 rounded-lg border border-emerald-300 bg-white px-2 py-1 text-sm text-emerald-950"
+                        data-testid={`tag-ai-edit-${item.key}`}
+                        onChange={(event) =>
+                          setSuggestionItems((current) =>
+                            current.map((currentItem, currentIndex) =>
+                              currentIndex === index
+                                ? {
+                                    ...currentItem,
+                                    text: event.target.value,
+                                  }
+                                : currentItem,
+                            ),
+                          )
+                        }
+                        type="text"
+                        value={item.text}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </fieldset>
+            )}
+
+            <label className="mt-3 flex items-start gap-2 text-sm text-emerald-950">
+              <input
+                checked={applySuggestedCategory}
+                data-testid="tag-ai-apply-category"
+                onChange={(event) =>
+                  setApplySuggestedCategory(event.target.checked)
+                }
+                type="checkbox"
+              />
+              <span>
+                Použít navrženou kategorii:{" "}
+                <strong>{suggestion.category ?? "bez kategorie"}</strong>. Bez
+                zaškrtnutí zůstane stávající kategorie.
+              </span>
+            </label>
+
+            <p className="mt-2 text-xs text-emerald-900">
+              Návrh platí do{" "}
+              {new Date(suggestion.expiresAt).toLocaleTimeString("cs-CZ")}.
+            </p>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                className="rounded-lg bg-emerald-800 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-900 disabled:cursor-not-allowed disabled:bg-stone-300"
+                data-testid="tag-ai-apply"
+                disabled={
+                  disabled ||
+                  saving ||
+                  (suggestionItems.every((item) => !item.selected) &&
+                    !applySuggestedCategory)
+                }
+                onClick={() => void applySuggestion()}
+                type="button"
+              >
+                Použít vybrané
+              </button>
+              <button
+                className="rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm font-semibold text-emerald-950 hover:bg-emerald-100"
+                data-testid="tag-ai-reject"
+                disabled={disabled || saving}
+                onClick={() => {
+                  setSuggestion(null);
+                  setSuggestionItems([]);
+                  setApplySuggestedCategory(false);
+                  setSuggestionError(null);
+                  setStatus("AI návrh byl zamítnut. Poznámka zůstala beze změny.");
+                }}
+                type="button"
+              >
+                Zamítnout návrh
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
     </section>
   );

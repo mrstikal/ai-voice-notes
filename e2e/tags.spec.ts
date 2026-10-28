@@ -287,3 +287,196 @@ test("pending tag edits survive an editor autosave version bump", async ({
     "škola",
   ]);
 });
+
+async function mockTagSuggestions(
+  page: Page,
+  state: {
+    version: number;
+    tags: string[];
+    category: string | null;
+    expiresAt?: string;
+  },
+) {
+  await page.route("**/api/notes/*/ai-suggest", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        kind: "tag_suggestions",
+        noteId: createdNoteId,
+        noteVersion: state.version,
+        tags: state.tags,
+        category: state.category,
+        expiresAt:
+          state.expiresAt ?? new Date(Date.now() + 5 * 60_000).toISOString(),
+      }),
+    });
+  });
+}
+
+test("AI suggestion applies only the selected subset and keeps category unless explicitly chosen", async ({
+  page,
+  request,
+}) => {
+  const title = `AI tagy E2E ${Date.now()}`;
+  const noteId = await createNote(page, title, "Projekt Atlas a migrace databáze.");
+
+  await page.getByTestId("tag-category").selectOption("Osobní");
+  await addTag(page, "manual");
+  await page.getByTestId("tag-save").click();
+  await expect
+    .poll(async () => (await currentNote(request, noteId)).version, {
+      timeout: 15_000,
+    })
+    .toBe(2);
+
+  const suggestion = {
+    version: 2,
+    tags: ["atlas", "migrace"],
+    category: "Práce",
+  };
+  await mockTagSuggestions(page, suggestion);
+
+  await page.getByTestId("tag-ai-suggest").click();
+  await expect(page.getByTestId("tag-ai-suggestion")).toBeVisible();
+  await page.getByTestId("tag-ai-suggested-migrace").uncheck();
+  await page.getByTestId("tag-ai-apply").click();
+
+  await expect
+    .poll(async () => (await currentNote(request, noteId)).version, {
+      timeout: 15_000,
+    })
+    .toBe(3);
+  const first = await currentNote(request, noteId);
+  expect(first.category).toBe("Osobní");
+  expect(first.tags).toEqual(["atlas", "manual"]);
+  expect(
+    (await revisionRows(noteId)).filter((row) => row.reason === "metadata"),
+  ).toHaveLength(2);
+
+  suggestion.version = 3;
+  suggestion.tags = ["tým"];
+  await page.getByTestId("tag-ai-suggest").click();
+  await expect(page.getByTestId("tag-ai-suggestion")).toBeVisible();
+  await page.getByTestId("tag-ai-apply-category").check();
+  await page.getByTestId("tag-ai-apply").click();
+
+  await expect
+    .poll(async () => (await currentNote(request, noteId)).version, {
+      timeout: 15_000,
+    })
+    .toBe(4);
+  const second = await currentNote(request, noteId);
+  expect(second.category).toBe("Práce");
+  expect(second.tags).toEqual(["atlas", "manual", "tým"]);
+  expect(
+    (await revisionRows(noteId)).filter((row) => row.reason === "metadata"),
+  ).toHaveLength(3);
+});
+
+test("expired and failed AI suggestions never change the note", async ({
+  page,
+  request,
+}) => {
+  const title = `AI tagy selhani E2E ${Date.now()}`;
+  const noteId = await createNote(page, title, "Text pro AI metadata.");
+
+  await mockTagSuggestions(page, {
+    version: 1,
+    tags: ["atlas"],
+    category: "Práce",
+    expiresAt: new Date(Date.now() - 60_000).toISOString(),
+  });
+
+  await page.getByTestId("tag-ai-suggest").click();
+  await expect(page.getByTestId("tag-ai-suggestion")).toBeVisible();
+  await page.getByTestId("tag-ai-apply").click();
+  await expect(page.getByTestId("tag-ai-error")).toContainText("vypršel");
+  await page.getByTestId("tag-ai-reject").click();
+
+  await page.route("**/api/notes/*/ai-suggest", async (route) => {
+    await route.fulfill({
+      status: 502,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: { message: "Poskytovatel AI selhal." },
+      }),
+    });
+  });
+  await page.getByTestId("tag-ai-suggest").click();
+  await expect(page.getByTestId("tag-ai-error")).toContainText(
+    "Poskytovatel AI selhal.",
+  );
+
+  const current = await currentNote(request, noteId);
+  expect(current.version).toBe(1);
+  expect(current.tags).toEqual([]);
+  expect(current.category).toBeNull();
+  expect((await revisionRows(noteId)).length).toBe(1);
+});
+
+test("AI apply refuses pending manual edits, edits suggested text and reports a no-op without stale status", async ({
+  page,
+  request,
+}) => {
+  const title = `AI tagy hrany E2E ${Date.now()}`;
+  const noteId = await createNote(page, title, "Projekt Atlas.");
+
+  await page.getByTestId("tag-category").selectOption("Osobní");
+  await addTag(page, "manual");
+  await page.getByTestId("tag-save").click();
+  await expect
+    .poll(async () => (await currentNote(request, noteId)).version, {
+      timeout: 15_000,
+    })
+    .toBe(2);
+
+  const suggestion = {
+    version: 2,
+    tags: ["atlas"],
+    category: "Práce",
+  };
+  await mockTagSuggestions(page, suggestion);
+
+  await page.getByTestId("tag-category").selectOption("Práce");
+  await page.getByTestId("tag-ai-suggest").click();
+  await expect(page.getByTestId("tag-ai-suggestion")).toBeVisible();
+  await page.getByTestId("tag-ai-apply").click();
+  await expect(page.getByTestId("tag-ai-error")).toContainText(
+    "Nejprve uložte ruční změny",
+  );
+  await expect(page.getByTestId("tag-ai-error")).toContainText(
+    "další placené volání",
+  );
+  expect((await currentNote(request, noteId)).version).toBe(2);
+  expect((await currentNote(request, noteId)).category).toBe("Osobní");
+
+  await page.getByTestId("tag-category").selectOption("Osobní");
+  await page
+    .getByLabel("Upravit navržený tag atlas")
+    .fill("atlas-edit");
+  await page.getByTestId("tag-ai-apply").click();
+  await expect
+    .poll(async () => (await currentNote(request, noteId)).version, {
+      timeout: 15_000,
+    })
+    .toBe(3);
+  expect((await currentNote(request, noteId)).tags).toEqual([
+    "atlas-edit",
+    "manual",
+  ]);
+  expect((await currentNote(request, noteId)).category).toBe("Osobní");
+
+  suggestion.version = 3;
+  suggestion.tags = ["atlas-edit"];
+  await page.getByTestId("tag-ai-suggest").click();
+  await expect(page.getByTestId("tag-ai-suggestion")).toBeVisible();
+  await page.getByTestId("tag-ai-apply").click();
+
+  await expect(page.getByTestId("metadata-applied")).toContainText(
+    "nová revize nevznikla",
+  );
+  expect((await currentNote(request, noteId)).version).toBe(3);
+  expect((await currentNote(request, noteId)).category).toBe("Osobní");
+  await expect(page.getByText("AI návrh je připravený")).toHaveCount(0);
+});

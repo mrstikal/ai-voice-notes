@@ -11,6 +11,10 @@ import {
   suggestSummary,
 } from "@/lib/ai/summary";
 import {
+  TagSuggestionError,
+  suggestTags,
+} from "@/lib/ai/tag-suggestions";
+import {
   StructuredLlmError,
   getStructuredLlmService,
 } from "@/lib/ai/structured";
@@ -80,9 +84,16 @@ const summaryRequestSchema = z
     }
   });
 
+const tagSuggestionsRequestSchema = z
+  .object({
+    kind: z.literal("tag_suggestions"),
+  })
+  .strict();
+
 const suggestRequestSchema = z.union([
   cleanupRequestSchema,
   summaryRequestSchema,
+  tagSuggestionsRequestSchema,
 ]);
 
 type SuggestRequest = z.infer<typeof suggestRequestSchema>;
@@ -102,6 +113,15 @@ export const POST = createGuardedJsonRoute<
     try {
       const { id } = await routeContext!.params;
       const note = await getNoteService().getNote(id);
+
+      if (data.kind === "tag_suggestions") {
+        const suggestion = await suggestTags({
+          note,
+          llm: getStructuredLlmService(),
+        });
+
+        return jsonOk({ kind: "tag_suggestions", ...suggestion });
+      }
 
       if (data.kind === "summary") {
         const suggestion = await suggestSummary({
@@ -162,6 +182,10 @@ export const POST = createGuardedJsonRoute<
         sourceHash: resolution.sourceHash,
       });
     } catch (error) {
+      if (error instanceof TagSuggestionError) {
+        return jsonError(error.status, error.code, error.message);
+      }
+
       if (error instanceof SummaryError) {
         return jsonError(error.status, error.code, error.message);
       }
@@ -187,9 +211,11 @@ export const POST = createGuardedJsonRoute<
       }
 
       const unavailable =
-        data.kind === "summary"
-          ? "Shrnutí není dostupné. Poznámky lze dál upravovat ručně."
-          : "Čištění diktátu není dostupné. Poznámky lze dál upravovat ručně.";
+        data.kind === "tag_suggestions"
+          ? "AI návrh tagů není dostupný. Ruční tagy lze dál upravovat."
+          : data.kind === "summary"
+            ? "Shrnutí není dostupné. Poznámky lze dál upravovat ručně."
+            : "Čištění diktátu není dostupné. Poznámky lze dál upravovat ručně.";
 
       if (error instanceof ConfigurationError) {
         return jsonError(503, "ai_unavailable", unavailable);

@@ -19,9 +19,16 @@ import {
   openRouterModelMetadataSchema,
   type LlmEditResponse,
 } from "./schemas.ts";
+import {
+  TAG_SUGGESTIONS_JSON_SCHEMA,
+  TAG_SUGGESTIONS_SCHEMA_NAME,
+  tagSuggestionResponseSchema,
+  type TagSuggestionResponse,
+} from "./tag-suggestions.ts";
 
 export const LLM_CANDIDATE_MODEL_ID = DEFAULT_OPENROUTER_LLM_MODEL;
 export const LLM_OPERATION = "llm_structured_edit";
+export const TAG_SUGGESTIONS_OPERATION = "llm_tag_suggestions";
 export const LLM_INPUT_MAX_CODE_UNITS = 12_000;
 export const LLM_MAX_OUTPUT_TOKENS = 1_200;
 export const LLM_TIMEOUT_MS = 20_000;
@@ -295,6 +302,9 @@ export interface StructuredLlmServiceOptions {
 
 export interface StructuredLlmService {
   request(input: StructuredLlmRequest): Promise<LlmEditResponse>;
+  requestTagSuggestions(
+    input: StructuredLlmRequest,
+  ): Promise<TagSuggestionResponse>;
 }
 
 function ensureSupportedModel(modelId: string): void {
@@ -324,9 +334,7 @@ function parseJsonBytes(
   }
 }
 
-function parseProviderResponse(
-  response: OpenRouterResponse,
-): LlmEditResponse {
+function readProviderContent(response: OpenRouterResponse): unknown {
   const envelope = chatCompletionResponseSchema.safeParse(
     parseJsonBytes(
       response.bytes,
@@ -380,12 +388,19 @@ function parseProviderResponse(
     );
   }
 
-  const content = parseJsonBytes(
+  return parseJsonBytes(
     new TextEncoder().encode(choice.message.content),
     "llm_malformed_json",
     "Model nevrátil platný JSON. AI úprava nebyla vytvořena.",
   );
-  const provider = llmProviderResponseSchema.safeParse(content);
+}
+
+function parseProviderResponse(
+  response: OpenRouterResponse,
+): LlmEditResponse {
+  const provider = llmProviderResponseSchema.safeParse(
+    readProviderContent(response),
+  );
 
   if (!provider.success) {
     throw new StructuredLlmError(
@@ -424,6 +439,30 @@ function parseProviderResponse(
   return parsed.data;
 }
 
+function parseTagSuggestionProviderResponse(
+  response: OpenRouterResponse,
+): TagSuggestionResponse {
+  const parsed = tagSuggestionResponseSchema.safeParse(
+    readProviderContent(response),
+  );
+
+  if (!parsed.success) {
+    throw new StructuredLlmError(
+      502,
+      "llm_schema_invalid",
+      "Model nevrátil platný návrh tagů. Návrh nebyl přijat.",
+      {
+        issues: parsed.error.issues.map((issue) => ({
+          path: issue.path.map(String).join("."),
+          code: issue.code,
+        })),
+      },
+    );
+  }
+
+  return parsed.data;
+}
+
 export function createStructuredLlmService(
   options: StructuredLlmServiceOptions,
 ): StructuredLlmService {
@@ -447,103 +486,134 @@ export function createStructuredLlmService(
     ),
   );
 
-  return {
-    async request(input) {
-      ensureSupportedModel(modelId);
+  interface StructuredRequestConfig<T> {
+    readonly label: string;
+    readonly schemaName: string;
+    readonly jsonSchema: unknown;
+    readonly operation: string;
+    readonly requestKind: string;
+    readonly parse: (response: OpenRouterResponse) => T;
+  }
 
-      const prompt = input.prompt.trim();
-      const systemPrompt =
-        input.systemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT;
+  async function requestStructured<T>(
+    input: StructuredLlmRequest,
+    config: StructuredRequestConfig<T>,
+  ): Promise<T> {
+    ensureSupportedModel(modelId);
 
-      if (prompt === "") {
-        throw new StructuredLlmError(
-          400,
-          "llm_empty_prompt",
-          "Zadání pro AI úpravu je prázdné.",
-        );
-      }
+    const prompt = input.prompt.trim();
+    const systemPrompt =
+      input.systemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT;
 
-      const inputCodeUnits = prompt.length + systemPrompt.length;
-
-      if (inputCodeUnits > inputMaxCodeUnits) {
-        throw new StructuredLlmError(
-          422,
-          "llm_input_too_large",
-          `Zadání pro AI úpravu překračuje limit ${inputMaxCodeUnits.toLocaleString("cs-CZ")} znaků.`,
-          { inputCodeUnits, inputMaxCodeUnits },
-        );
-      }
-
-      const estimatedMaxCostUsd = estimateStructuredLlmMaxCostUsd(
-        inputCodeUnits,
-        maxOutputTokens,
+    if (prompt === "") {
+      throw new StructuredLlmError(
+        400,
+        "llm_empty_prompt",
+        `Zadání pro ${config.label} je prázdné.`,
       );
+    }
 
-      if (estimatedMaxCostUsd > LLM_MAX_ESTIMATED_COST_USD) {
-        throw new StructuredLlmError(
-          422,
-          "llm_cost_cap_exceeded",
-          "Odhad ceny AI úpravy překračuje místní limit. Operace nebyla zahájena.",
-        );
-      }
+    const inputCodeUnits = prompt.length + systemPrompt.length;
 
-      let response: OpenRouterResponse;
+    if (inputCodeUnits > inputMaxCodeUnits) {
+      throw new StructuredLlmError(
+        422,
+        "llm_input_too_large",
+        `Zadání pro ${config.label} překračuje limit ${inputMaxCodeUnits.toLocaleString("cs-CZ")} znaků.`,
+        { inputCodeUnits, inputMaxCodeUnits },
+      );
+    }
 
-      try {
-        response = await options.client.request({
-          path: "/chat/completions",
-          body: {
-            model: modelId,
-            messages: [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: prompt },
-            ],
-            temperature: 0,
-            max_completion_tokens: maxOutputTokens,
-            response_format: {
-              type: "json_schema",
-              json_schema: {
-                name: LLM_SCHEMA_NAME,
-                strict: true,
-                schema: LLM_EDIT_JSON_SCHEMA,
-              },
-            },
-            provider: { require_parameters: true },
-          },
-          operation: LLM_OPERATION,
+    const estimatedMaxCostUsd = estimateStructuredLlmMaxCostUsd(
+      inputCodeUnits,
+      maxOutputTokens,
+    );
+
+    if (estimatedMaxCostUsd > LLM_MAX_ESTIMATED_COST_USD) {
+      throw new StructuredLlmError(
+        422,
+        "llm_cost_cap_exceeded",
+        `Odhad ceny pro ${config.label} překračuje místní limit. Operace nebyla zahájena.`,
+      );
+    }
+
+    let response: OpenRouterResponse;
+
+    try {
+      response = await options.client.request({
+        path: "/chat/completions",
+        body: {
           model: modelId,
-          estimatedMaxCostUsd,
-          accept: "application/json",
-          expectedContentType: "application/json",
-          maxResponseBytes: LLM_RESPONSE_MAX_BYTES,
-          timeoutMs,
-          providerUsage: {
-            requestKind: "structured_edit",
-            schemaName: LLM_SCHEMA_NAME,
-            inputCodeUnits,
-            estimatedInputTokens:
-              estimateStructuredLlmInputTokens(inputCodeUnits),
-            maxOutputTokens,
-            modelProfileCheckedAt: LLM_MODEL_PROFILE.checkedAt,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: prompt },
+          ],
+          temperature: 0,
+          max_completion_tokens: maxOutputTokens,
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: config.schemaName,
+              strict: true,
+              schema: config.jsonSchema,
+            },
           },
-        });
-      } catch (error) {
-        if (
-          error instanceof OpenRouterHttpError ||
-          error instanceof UsageServiceError
-        ) {
-          throw error;
-        }
-
-        throw new StructuredLlmError(
-          502,
-          "llm_request_failed",
-          "Strukturovaný požadavek na OpenRouter se nepodařilo provést.",
-        );
+          provider: { require_parameters: true },
+        },
+        operation: config.operation,
+        model: modelId,
+        estimatedMaxCostUsd,
+        accept: "application/json",
+        expectedContentType: "application/json",
+        maxResponseBytes: LLM_RESPONSE_MAX_BYTES,
+        timeoutMs,
+        providerUsage: {
+          requestKind: config.requestKind,
+          schemaName: config.schemaName,
+          inputCodeUnits,
+          estimatedInputTokens:
+            estimateStructuredLlmInputTokens(inputCodeUnits),
+          maxOutputTokens,
+          modelProfileCheckedAt: LLM_MODEL_PROFILE.checkedAt,
+        },
+      });
+    } catch (error) {
+      if (
+        error instanceof OpenRouterHttpError ||
+        error instanceof UsageServiceError
+      ) {
+        throw error;
       }
 
-      return parseProviderResponse(response);
-    },
+      throw new StructuredLlmError(
+        502,
+        "llm_request_failed",
+        "Strukturovaný požadavek na OpenRouter se nepodařilo provést.",
+      );
+    }
+
+    return config.parse(response);
+  }
+
+  return {
+    request: (input) =>
+      requestStructured(input, {
+        label: "AI úpravu",
+        schemaName: LLM_SCHEMA_NAME,
+        jsonSchema: LLM_EDIT_JSON_SCHEMA,
+        operation: LLM_OPERATION,
+        requestKind: "structured_edit",
+        parse: parseProviderResponse,
+      }),
+    requestTagSuggestions: (input) =>
+      requestStructured(input, {
+        label: "návrh tagů",
+        schemaName: TAG_SUGGESTIONS_SCHEMA_NAME,
+        jsonSchema: TAG_SUGGESTIONS_JSON_SCHEMA,
+        operation: TAG_SUGGESTIONS_OPERATION,
+        requestKind: "tag_suggestions",
+        parse: parseTagSuggestionProviderResponse,
+      }),
   };
 }
 

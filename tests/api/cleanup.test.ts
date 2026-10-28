@@ -17,6 +17,7 @@ const cleaned =
   "Včera jsem se sešel s Janem Novákem a měl jsem 3 schůzky.";
 
 const llmRequest = vi.hoisted(() => vi.fn());
+const llmTagRequest = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/ai/structured", async (importOriginal) => {
   const actual =
@@ -24,7 +25,10 @@ vi.mock("@/lib/ai/structured", async (importOriginal) => {
 
   return {
     ...actual,
-    getStructuredLlmService: () => ({ request: llmRequest }),
+    getStructuredLlmService: () => ({
+      request: llmRequest,
+      requestTagSuggestions: llmTagRequest,
+    }),
   };
 });
 
@@ -37,7 +41,9 @@ vi.mock("@/lib/notes/service", async (importOriginal) => {
     getNoteService: () => ({
       getNote: async () => ({
         id: NOTE_ID,
+        title: "Testovací poznámka",
         contentMd: original,
+        contentPlain: original,
         version: 1,
       }),
     }),
@@ -84,9 +90,76 @@ afterAll(() => {
 
 beforeEach(() => {
   llmRequest.mockReset();
+  llmTagRequest.mockReset();
 });
 
 describe("cleanup suggestion API", () => {
+  it("returns bounded AI tag suggestions without writing a note", async () => {
+    llmTagRequest.mockResolvedValue({
+      tags: ["atlas", "migrace"],
+      category: "Práce",
+    });
+
+    const response = await suggestCleanupRoute(
+      request({ kind: "tag_suggestions" }),
+      context(),
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      kind: string;
+      tags: string[];
+      category: string | null;
+      noteId: string;
+      noteVersion: number;
+      expiresAt: string;
+    };
+    expect(body).toMatchObject({
+      kind: "tag_suggestions",
+      tags: ["atlas", "migrace"],
+      category: "Práce",
+      noteId: NOTE_ID,
+      noteVersion: 1,
+    });
+    expect(Number.isNaN(Date.parse(body.expiresAt))).toBe(false);
+    expect(llmTagRequest).toHaveBeenCalledTimes(1);
+    const prompt = String(
+      llmTagRequest.mock.calls[0]?.[0]?.prompt,
+    );
+    expect(prompt).toContain("Já jsem já jsem");
+    expect(prompt).toContain("Druhý odstavec");
+    expect(prompt).toContain("Testovací poznámka");
+  });
+
+  it("rejects invalid provider tag data and maps tag-specific fallback wording", async () => {
+    llmTagRequest.mockResolvedValueOnce({
+      tags: ["x".repeat(33)],
+      category: null,
+    });
+    const invalid = await suggestCleanupRoute(
+      request({ kind: "tag_suggestions" }),
+      context(),
+    );
+    expect(invalid.status).toBe(422);
+    expect(await invalid.json()).toMatchObject({
+      error: { code: "tag_suggestion_invalid" },
+    });
+
+    llmTagRequest.mockRejectedValueOnce(
+      new ConfigurationError("OpenRouter není nakonfigurovaný."),
+    );
+    const config = await suggestCleanupRoute(
+      request({ kind: "tag_suggestions" }),
+      context(),
+    );
+    expect(config.status).toBe(503);
+    expect(await config.json()).toMatchObject({
+      error: {
+        message: "AI návrh tagů není dostupný. Ruční tagy lze dál upravovat.",
+      },
+    });
+  });
+
   it("returns one resolved paragraph operation bound to version, hash and candidate", async () => {
     llmRequest.mockResolvedValue(operation(cleaned));
 
