@@ -22,6 +22,7 @@ import {
   createSeededNoteInTransaction,
   type NoteService,
 } from "../../src/lib/notes/service";
+import { searchNotesFullText } from "../../src/lib/search/fts";
 
 const hasTestDatabase = Boolean(
   process.env.DATABASE_URL && process.env.TEST_DATABASE_URL,
@@ -175,6 +176,100 @@ describe.skipIf(!hasTestDatabase)("P33 materialized full-text index", () => {
       }),
     );
     expect(await matches(seeded.id, "seedovaná")).toBe(true);
+  });
+
+  it("serves accent/case/quote/tag/pagination queries and excludes deleted notes without SQL injection", async () => {
+    const migration = await notes.createNote({
+      title: "Plán migrace PostgreSQL",
+      contentMd: "Plán migrace databáze a testování.",
+    });
+    const tagged = await notes.createNote({
+      title: "Archiv",
+      contentMd: "Text bez hledaného výrazu.",
+    });
+    await notes.updateNoteMetadata(tagged.id, {
+      category: "Práce",
+      tags: ["archiv"],
+      expectedVersion: 1,
+    });
+
+    const accent = await searchNotesFullText(connection.db, {
+      page: 1,
+      query: "databaze",
+    });
+    expect(accent.items.map((item) => item.id)).toContain(migration.id);
+    expect(accent.items[0]?.snippet).toContain("[[[databáze]]]");
+
+    const caseQuery = await searchNotesFullText(connection.db, {
+      page: 1,
+      query: "DATABÁZE",
+    });
+    expect(caseQuery.items.map((item) => item.id)).toContain(migration.id);
+
+    const phrase = await searchNotesFullText(connection.db, {
+      page: 1,
+      query: '"plán migrace"',
+    });
+    expect(phrase.items.map((item) => item.id)).toContain(migration.id);
+    expect(
+      phrase.items.find((item) => item.id === migration.id)?.snippet,
+    ).toContain("[[[Plán migrace]]]");
+    const reversed = await searchNotesFullText(connection.db, {
+      page: 1,
+      query: '"migrace plán"',
+    });
+    expect(reversed.items.map((item) => item.id)).not.toContain(migration.id);
+
+    const tagQuery = await searchNotesFullText(connection.db, {
+      page: 1,
+      query: "archiv",
+    });
+    expect(tagQuery.items.map((item) => item.id)).toContain(tagged.id);
+    expect(tagQuery.items.find((item) => item.id === tagged.id)?.tags).toEqual([
+      "archiv",
+    ]);
+
+    for (let index = 0; index < 11; index += 1) {
+      await notes.createNote({
+        title: `Hledaný termín ${index}`,
+        contentMd: "Stejný text.",
+      });
+    }
+
+    const firstPage = await searchNotesFullText(connection.db, {
+      page: 1,
+      query: "hledany",
+    });
+    expect(firstPage.items).toHaveLength(10);
+    expect(firstPage.total).toBe(11);
+    expect(firstPage.hasNext).toBe(true);
+    expect(firstPage.items.map((item) => item.id)).toEqual(
+      [...firstPage.items.map((item) => item.id)].sort(),
+    );
+
+    const secondPage = await searchNotesFullText(connection.db, {
+      page: 2,
+      query: "hledany",
+    });
+    expect(secondPage.items).toHaveLength(1);
+    expect(secondPage.hasNext).toBe(false);
+    expect(
+      [...firstPage.items, ...secondPage.items].map((item) => item.id),
+    ).toHaveLength(11);
+
+    await notes.deleteNote(migration.id, 1);
+    const deleted = await searchNotesFullText(connection.db, {
+      page: 1,
+      query: "databaze",
+    });
+    expect(deleted.items.map((item) => item.id)).not.toContain(migration.id);
+
+    const sqlLike = await searchNotesFullText(connection.db, {
+      page: 1,
+      query: "'; drop table notes; --",
+    });
+    expect(sqlLike.items).toEqual([]);
+    expect(await notes.listActiveNotes(1)).toBeTruthy();
   });
 
   it("refreshes after P24 proposal apply and P25 Undo without changing unrelated Markdown", async () => {

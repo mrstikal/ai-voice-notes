@@ -45,6 +45,14 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
                 <li>
                   <Link
                     className="rounded-sm text-stone-700 hover:text-emerald-800 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-700"
+                    href="/search"
+                  >
+                    Vyhledávání
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    className="rounded-sm text-stone-700 hover:text-emerald-800 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-700"
                     href="/notes/trash"
                   >
                     Koš

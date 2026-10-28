@@ -170,6 +170,23 @@ a Czech migrate-first message before deleting any `demo-v1:*` rows.
 | `pnpm db:migrate:test` | Apply committed migrations to the guarded test database |
 | `pnpm db:migrate` | Apply committed migrations to the development database (explicit authorization required) |
 
+## Full-text search
+
+`/search` provides read-only Czech full-text search over active notes.
+`GET /api/search?q=&mode=fulltext&page=` also accepts only `mode=fulltext`
+until semantic search is implemented. Queries are trimmed, limited to 200
+graphemes, and an empty query returns an explanatory empty state rather than all
+notes. Unquoted terms use `plainto_tsquery('simple', unaccent(...))`; a query
+wrapped in `"..."`, `„...“`, or `“...”` uses
+`phraseto_tsquery('simple', unaccent(...))` for exact word order. Results are
+ranked by `ts_rank` with `id ASC` as a stable tie-break, ten per page, and
+exclude soft-deleted notes. The API accepts `mode=fulltext` or an absent/empty
+`mode`. Snippets are built in JavaScript: both the document and query are
+case/diacritic folded (including the compatibility transliterations used by the
+database `unaccent`), the original matched Czech substring is marked with
+`[[[`/`]]]`, and `SearchResults` renders it as escaped React text plus a
+`<mark>` element, never raw HTML.
+
 ## Markdown subset
 
 Canonical note content is Markdown. The codec supports H1-H3, paragraphs, soft
