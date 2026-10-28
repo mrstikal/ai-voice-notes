@@ -51,6 +51,7 @@ const selectionFields = {
   end: z.number().int().nonnegative().optional(),
   paragraphIndex: z.number().int().nonnegative().optional(),
   listIndex: z.number().int().nonnegative().optional(),
+  paragraphCount: z.number().int().min(1).max(5).optional(),
 };
 
 const directRequestSchema = z
@@ -230,6 +231,7 @@ function selectionPayload(selection: TtsSelection) {
     end: selection.end,
     paragraphIndex: selection.paragraphIndex,
     listIndex: selection.listIndex,
+    paragraphCount: selection.paragraphCount,
   };
 }
 

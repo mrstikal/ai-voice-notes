@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { formatUsdAmount } from "../ai/usage-format.ts";
-import type { TtsScope } from "./scopes.ts";
+import { TTS_SCOPES, type TtsScope } from "./scopes.ts";
 
 export interface TtsSelectionPayload {
   readonly scope: TtsScope;
@@ -9,6 +9,7 @@ export interface TtsSelectionPayload {
   readonly end?: number;
   readonly paragraphIndex?: number;
   readonly listIndex?: number;
+  readonly paragraphCount?: number;
 }
 
 export interface TtsManifestSection {
@@ -45,11 +46,12 @@ const manifestSectionSchema = z
 
 const selectionSchema = z
   .object({
-    scope: z.enum(["full", "range", "paragraph", "tasks"]),
+    scope: z.enum(TTS_SCOPES),
     start: z.number().int().nonnegative().optional(),
     end: z.number().int().nonnegative().optional(),
     paragraphIndex: z.number().int().nonnegative().optional(),
     listIndex: z.number().int().nonnegative().optional(),
+    paragraphCount: z.number().int().min(1).max(5).optional(),
   })
   .strict();
 
@@ -97,6 +99,9 @@ export function buildManifestBody(
     ...(selection.listIndex === undefined
       ? {}
       : { listIndex: selection.listIndex }),
+    ...(selection.paragraphCount === undefined
+      ? {}
+      : { paragraphCount: selection.paragraphCount }),
   };
 }
 

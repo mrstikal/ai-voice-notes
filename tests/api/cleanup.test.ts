@@ -19,6 +19,7 @@ const cleaned =
 const llmRequest = vi.hoisted(() => vi.fn());
 const llmTagRequest = vi.hoisted(() => vi.fn());
 const llmTaskRequest = vi.hoisted(() => vi.fn());
+const llmSummaryRequest = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/ai/structured", async (importOriginal) => {
   const actual =
@@ -30,6 +31,7 @@ vi.mock("@/lib/ai/structured", async (importOriginal) => {
       request: llmRequest,
       requestTagSuggestions: llmTagRequest,
       requestTaskSuggestions: llmTaskRequest,
+      requestSummary: llmSummaryRequest,
     }),
   };
 });
@@ -94,6 +96,7 @@ beforeEach(() => {
   llmRequest.mockReset();
   llmTagRequest.mockReset();
   llmTaskRequest.mockReset();
+  llmSummaryRequest.mockReset();
 });
 
 describe("cleanup suggestion API", () => {
@@ -273,10 +276,7 @@ describe("cleanup suggestion API", () => {
 
   it("returns a bound derived summary without writing a note", async () => {
     const summary = "Shrnutí: včera proběhla schůzka s Janem a třemi kroky.";
-    llmRequest.mockResolvedValue({
-      kind: "operation",
-      operation: { type: "append_bounded_section", text: summary },
-    } as LlmEditResponse);
+    llmSummaryRequest.mockResolvedValue({ summaryText: summary });
     const plain = parseNoteMarkdown(original).plainText;
     const secondStart = plain.indexOf("Druhý");
 
@@ -297,13 +297,13 @@ describe("cleanup suggestion API", () => {
       noteVersion: 1,
       summaryText: summary,
     });
-    const prompt = String(llmRequest.mock.calls[0]?.[0]?.prompt);
+    const prompt = String(llmSummaryRequest.mock.calls[0]?.[0]?.prompt);
     expect(prompt).toContain("Já jsem já jsem");
     expect(prompt).not.toContain("Druhý odstavec");
   });
 
   it("maps summary budget and configuration failures to summary-specific responses", async () => {
-    llmRequest.mockRejectedValueOnce(
+    llmSummaryRequest.mockRejectedValueOnce(
       new BudgetExceededError({
         budgetUsd: "2.000000",
         committedUsd: "2.000000",
@@ -319,7 +319,7 @@ describe("cleanup suggestion API", () => {
       error: { code: "budget_exceeded" },
     });
 
-    llmRequest.mockRejectedValueOnce(
+    llmSummaryRequest.mockRejectedValueOnce(
       new ConfigurationError("OpenRouter není nakonfigurovaný."),
     );
     const configResponse = await suggestCleanupRoute(

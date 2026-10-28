@@ -45,6 +45,8 @@ export function NoteWorkspace({
   const [cleanupNotice, setCleanupNotice] = useState<string | null>(null);
   const [summaryPlayback, setSummaryPlayback] =
     useState<SummaryArtifact | null>(null);
+  const [summaryArtifact, setSummaryArtifact] =
+    useState<SummaryArtifact | null>(null);
   const [metadataNotice, setMetadataNotice] = useState<string | null>(null);
 
   function handleNoteUpdated(updated: NoteDetail) {
@@ -98,6 +100,7 @@ export function NoteWorkspace({
         note={note}
         onNoteUpdated={handleExternalNoteUpdate}
         onReadSummary={setSummaryPlayback}
+        onSummaryChange={setSummaryArtifact}
       />
       <TaskSuggestions
         disabled={editorDirty}
@@ -116,6 +119,8 @@ export function NoteWorkspace({
             ? summaryPlayback
             : null
         }
+        summaryArtifact={summaryArtifact}
+        onVoiceSummary={setSummaryPlayback}
       />
       <TaskVoiceControls
         disabled={editorDirty}

@@ -41,6 +41,7 @@ export interface SummaryActionProps {
   readonly llmError?: string | null;
   readonly onNoteUpdated: (note: NoteDetail) => void;
   readonly onReadSummary?: (artifact: SummaryArtifact | null) => void;
+  readonly onSummaryChange?: (artifact: SummaryArtifact | null) => void;
 }
 
 export function SummaryAction({
@@ -50,6 +51,7 @@ export function SummaryAction({
   llmError = null,
   onNoteUpdated,
   onReadSummary,
+  onSummaryChange,
 }: SummaryActionProps) {
   const [scope, setScope] = useState<"full" | "range">("full");
   const [selection, setSelection] = useState({ start: 0, end: 0 });
@@ -87,6 +89,7 @@ export function SummaryAction({
     setProposal(null);
     nonceRef.current = null;
     onReadSummary?.(null);
+    onSummaryChange?.(null);
     setBusy(true);
 
     try {
@@ -117,17 +120,20 @@ export function SummaryAction({
       }
 
       const result = (await response.json()) as SummaryResponse;
-      setArtifact({
+      const nextArtifact = {
         noteId: result.noteId,
         noteVersion: result.noteVersion,
         summaryText: result.summaryText,
         sourceGraphemes: result.sourceGraphemes,
-      });
+      };
+      setArtifact(nextArtifact);
+      onSummaryChange?.(nextArtifact);
       setStatus(
         "Shrnutí je odvozený, neuložený náhled. Poznámka se nezměnila; vložit ho lze až přes potvrzený P23 diff.",
       );
     } catch (generateError) {
       setArtifact(null);
+      onSummaryChange?.(null);
       setError(errorMessage(generateError));
     } finally {
       setBusy(false);
@@ -190,6 +196,7 @@ export function SummaryAction({
       nonceRef.current = null;
       setProposal(confirmed.proposal);
       setStatus("Shrnutí bylo vloženo jako nová revize.");
+      onSummaryChange?.(null);
       onNoteUpdated(confirmed.note);
     } catch (confirmError) {
       setError(errorMessage(confirmError));
@@ -282,6 +289,7 @@ export function SummaryAction({
             setError(null);
             nonceRef.current = null;
             onReadSummary?.(null);
+            onSummaryChange?.(null);
           }}
           value={scope}
         >
@@ -374,6 +382,7 @@ export function SummaryAction({
                 setStatus(null);
                 setError(null);
                 onReadSummary?.(null);
+                onSummaryChange?.(null);
                 nonceRef.current = null;
               }}
               type="button"

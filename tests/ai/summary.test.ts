@@ -2,13 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   SUMMARY_MAX_SOURCE_GRAPHEMES,
+  SUMMARY_SYSTEM_PROMPT,
   SummaryError,
   buildSummaryPrompt,
   selectSummarySource,
   suggestSummary,
   validateSummaryText,
 } from "../../src/lib/ai/summary";
-import type { LlmEditResponse } from "../../src/lib/ai/schemas";
 import type { StructuredLlmService } from "../../src/lib/ai/structured";
 import { parseNoteMarkdown } from "../../src/lib/notes/markdown";
 
@@ -23,22 +23,19 @@ const content = [
 ].join("\n");
 
 function fakeLlm(
-  response: LlmEditResponse,
-): Pick<StructuredLlmService, "request"> & {
-  request: ReturnType<typeof vi.fn>;
+  response: { readonly summaryText: string },
+): Pick<StructuredLlmService, "requestSummary"> & {
+  requestSummary: ReturnType<typeof vi.fn>;
 } {
   return {
-    request: vi.fn(async () => response),
-  } as Pick<StructuredLlmService, "request"> & {
-    request: ReturnType<typeof vi.fn>;
+    requestSummary: vi.fn(async () => response),
+  } as Pick<StructuredLlmService, "requestSummary"> & {
+    requestSummary: ReturnType<typeof vi.fn>;
   };
 }
 
-function summaryResponse(text: string): LlmEditResponse {
-  return {
-    kind: "operation",
-    operation: { type: "append_bounded_section", text },
-  };
+function summaryResponse(text: string) {
+  return { summaryText: text };
 }
 
 function plainOffsets(contentMd: string, needle: string) {
@@ -65,7 +62,7 @@ describe("summary source selection", () => {
       noteVersion: 4,
       summaryText,
     });
-    const prompt = String(llm.request.mock.calls[0]?.[0]?.prompt);
+    const prompt = String(llm.requestSummary.mock.calls[0]?.[0]?.prompt);
     expect(prompt).toContain(phrase);
     expect(prompt).not.toContain("Druhý odstavec");
     expect(prompt).not.toContain("**");
@@ -83,7 +80,7 @@ describe("summary source selection", () => {
         llm,
       }),
     ).rejects.toMatchObject({ code: "summary_source_too_large", status: 422 });
-    expect(llm.request).not.toHaveBeenCalled();
+    expect(llm.requestSummary).not.toHaveBeenCalled();
 
     const offsets = plainOffsets(content, "První odstavec");
     await expect(
@@ -121,33 +118,14 @@ describe("summary output validation", () => {
       validateSummaryText("a".repeat(2_001)),
     ).toThrow(SummaryError);
 
-    const wrongKind = fakeLlm({
-      kind: "unclear",
-      clarification: "Nevím.",
-    });
+    const empty = fakeLlm({ summaryText: "" });
     await expect(
       suggestSummary({
         note: { contentMd: "Text.", id: "11111111-1111-4111-8111-111111111111", version: 1 },
         selection: { scope: "full" },
-        llm: wrongKind,
+        llm: empty,
       }),
-    ).rejects.toMatchObject({ code: "summary_model_invalid" });
-
-    const wrongOperation = fakeLlm({
-      kind: "operation",
-      operation: {
-        type: "replace_paragraph",
-        target: { startPhrase: "Text", endPhrase: "Text" },
-        text: summaryText,
-      },
-    });
-    await expect(
-      suggestSummary({
-        note: { contentMd: "Text.", id: "11111111-1111-4111-8111-111111111111", version: 1 },
-        selection: { scope: "full" },
-        llm: wrongOperation,
-      }),
-    ).rejects.toMatchObject({ code: "summary_model_invalid" });
+    ).rejects.toMatchObject({ code: "summary_empty" });
   });
 
   it("uses a data-only prompt and bounds the summary for direct TTS", () => {

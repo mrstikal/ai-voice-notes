@@ -22,6 +22,7 @@ export interface TtsSelectionRequest {
   readonly end?: number;
   readonly paragraphIndex?: number;
   readonly listIndex?: number;
+  readonly paragraphCount?: number;
 }
 
 export interface TtsSelection extends TtsSelectionRequest {
@@ -277,6 +278,43 @@ export function selectTtsText(
 
       text = selectParagraph(request, plainText, spans);
       break;
+    case "last_paragraphs": {
+      if (parsed.sourceOnly) {
+        throw sourceOnlyError();
+      }
+
+      const count = request.paragraphCount;
+
+      if (
+        count === undefined ||
+        !Number.isSafeInteger(count) ||
+        count < 1 ||
+        count > 5
+      ) {
+        throw new TtsTextError(
+          400,
+          "tts_invalid_paragraph_count",
+          "Počet posledních odstavců musí být 1 až 5.",
+        );
+      }
+
+      const paragraphSpans = spans.filter(
+        (span) => span.node.type === "paragraph",
+      );
+      const selected = paragraphSpans.slice(-count);
+
+      if (selected.length === 0) {
+        throw new TtsTextError(
+          400,
+          "tts_no_paragraph",
+          "V poznámce není žádný odstavec k přečtení.",
+        );
+      }
+
+      selected.forEach((span) => assertBlockSupported(span.node));
+      text = selected.map((span) => span.text).join("\n\n");
+      break;
+    }
     case "tasks":
       if (
         parsed.sourceOnly &&

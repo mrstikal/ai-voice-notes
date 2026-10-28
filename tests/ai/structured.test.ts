@@ -25,6 +25,7 @@ import {
   LLM_EDIT_JSON_SCHEMA,
   llmEditResponseSchema,
 } from "../../src/lib/ai/schemas";
+import { SUMMARY_SCHEMA_NAME } from "../../src/lib/ai/summary";
 import { TAG_SUGGESTIONS_SCHEMA_NAME } from "../../src/lib/ai/tag-suggestions";
 import { TASK_SUGGESTIONS_SCHEMA_NAME } from "../../src/lib/ai/task-suggestions";
 import { createMockOpenRouterTransport } from "../helpers/provider-mocks";
@@ -238,6 +239,30 @@ describe("P21 structured OpenRouter client", () => {
     expect(usagePayload).not.toContain(PROMPT);
     expect(usagePayload).not.toContain("Nový odstavec");
     expect(usagePayload).toContain(LLM_SCHEMA_NAME);
+  });
+
+  it("requests and validates the dedicated summary JSON schema", async () => {
+    const transport = createMockOpenRouterTransport({
+      responses: [chatResponse({ summaryText: "Stručné shrnutí." })],
+    });
+    const { service } = createService({ transport });
+
+    const result = await service.requestSummary({
+      prompt: "Shrň text.",
+    });
+
+    expect(result).toEqual({ summaryText: "Stručné shrnutí." });
+    const body = JSON.parse(transport.calls[0]!.body) as {
+      response_format: {
+        json_schema: { name: string; schema: Record<string, unknown> };
+      };
+    };
+    expect(body.response_format.json_schema.name).toBe(SUMMARY_SCHEMA_NAME);
+    expect(body.response_format.json_schema.schema).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      required: ["summaryText"],
+    });
   });
 
   it("requests and validates the separate tag-suggestion JSON schema", async () => {

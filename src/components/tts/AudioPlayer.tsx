@@ -12,6 +12,7 @@ import {
 } from "react";
 
 import type { SummaryArtifact } from "@/lib/ai/summary";
+import type { ReadSelectionResult } from "@/lib/notes/read-selection";
 import type { NoteDetail } from "@/lib/notes/client";
 import {
   getMediaActivityServerSnapshot,
@@ -49,14 +50,16 @@ import {
   subscribeTtsVoicePreference,
   writeTtsVoicePreference,
 } from "@/lib/tts/voice-preference";
-import type {
-  MicrophoneLease,
-  MicrophoneLockManager,
+import {
+  MICROPHONE_SESSION_MAX_MS,
+  type MicrophoneLease,
+  type MicrophoneLockManager,
 } from "@/lib/voice/microphone";
 
 import { SpokenStopMonitor } from "./SpokenStopMonitor";
 import { SummaryPlayback } from "./SummaryPlayback";
 import { VoiceSelector } from "./VoiceSelector";
+import { useScribeDictation } from "../voice/useScribeDictation";
 
 type PlaybackPhase = "idle" | "loading" | "playing" | "paused";
 
@@ -79,6 +82,8 @@ export interface AudioPlayerProps {
   readonly audioFactory?: PlaybackAudioFactory;
   readonly playbackLocks?: MicrophoneLockManager | null;
   readonly summary?: SummaryArtifact | null;
+  readonly summaryArtifact?: SummaryArtifact | null;
+  readonly onVoiceSummary?: (artifact: SummaryArtifact) => void;
 }
 
 function createBrowserAudio(src: string): PlaybackAudioHandle {
@@ -130,6 +135,8 @@ export function AudioPlayer({
   audioFactory = createBrowserAudio,
   playbackLocks,
   summary = null,
+  summaryArtifact = null,
+  onVoiceSummary,
 }: AudioPlayerProps) {
   const ownerId = useId();
   const media = useSyncExternalStore(
@@ -157,11 +164,13 @@ export function AudioPlayer({
   const paragraphs = sourceOptions?.paragraphs ?? [];
   const taskLists = sourceOptions?.taskLists ?? [];
   const [paragraphIndex, setParagraphIndex] = useState(0);
+  const [paragraphCount, setParagraphCount] = useState(2);
   const [taskListSelection, setTaskListSelection] = useState("all");
   const [rangeStart, setRangeStart] = useState(0);
   const [rangeEnd, setRangeEnd] = useState(
     () => plainText.length,
   );
+  const [rangeTouched, setRangeTouched] = useState(false);
   const [manifest, setManifest] = useState<TtsManifest | null>(null);
   const [manifestLoading, setManifestLoading] = useState(false);
   const [consent, setConsent] = useState(false);
@@ -171,6 +180,70 @@ export function AudioPlayer({
   const [monitorActive, setMonitorActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [voiceCommandOpen, setVoiceCommandOpen] = useState(false);
+  const [voiceCommandError, setVoiceCommandError] = useState<string | null>(
+    null,
+  );
+  const [voiceCommandStatus, setVoiceCommandStatus] = useState<string | null>(
+    null,
+  );
+
+  async function applyVoiceReadResult(result: ReadSelectionResult) {
+    if (result.action === "summary") {
+      if (summaryArtifact === null) {
+        setVoiceCommandError(
+          "Shrnutí není k dispozici. Nejprve ho vytvořte v části Shrnutí poznámky.",
+        );
+        return;
+      }
+
+      onVoiceSummary?.(summaryArtifact);
+      setVoiceCommandStatus(
+        "Shrnutí je připravené k přečtení v části Shrnutí k přečtení.",
+      );
+      return;
+    }
+
+    if (result.action !== "read") {
+      setVoiceCommandError(result.message);
+      return;
+    }
+
+    setVoiceCommandError(null);
+    setScope(result.selection.scope);
+    if (result.selection.scope === "range") {
+      setRangeStart(result.selection.start ?? 0);
+      setRangeEnd(result.selection.end ?? plainText.length);
+    }
+    if (result.selection.scope === "paragraph") {
+      setParagraphIndex(result.selection.paragraphIndex ?? 0);
+    }
+    if (result.selection.scope === "tasks") {
+      setTaskListSelection("all");
+    }
+    if (result.selection.scope === "last_paragraphs") {
+      setParagraphCount(result.selection.count ?? 2);
+    }
+    clearManifest();
+    setVoiceCommandStatus(
+      `Připraveno: ${result.text.slice(0, 120)}${result.text.length > 120 ? "…" : ""}`,
+    );
+    await loadManifest({
+      scope: result.selection.scope,
+      ...(result.selection.start === undefined
+        ? {}
+        : { start: result.selection.start }),
+      ...(result.selection.end === undefined
+        ? {}
+        : { end: result.selection.end }),
+      ...(result.selection.paragraphIndex === undefined
+        ? {}
+        : { paragraphIndex: result.selection.paragraphIndex }),
+      ...(result.selection.count === undefined
+        ? {}
+        : { paragraphCount: result.selection.count }),
+    });
+  }
 
   const voices = availableVoices(providerStatus);
   const effectiveVoice =
@@ -272,7 +345,7 @@ export function AudioPlayer({
         setError(message);
       }
     },
-    [stopPlayback],
+    [setConsent, stopPlayback],
   );
 
   const failPlayback = useCallback(
@@ -407,6 +480,10 @@ export function AudioPlayer({
       return { scope, paragraphIndex };
     }
 
+    if (scope === "last_paragraphs") {
+      return { scope, paragraphCount };
+    }
+
     if (scope === "tasks") {
       if (taskLists.length === 0) {
         setError("V poznámce není žádný úkol k přečtení.");
@@ -430,8 +507,8 @@ export function AudioPlayer({
     return { scope };
   }
 
-  async function loadManifest() {
-    const selection = buildSelection();
+  async function loadManifest(selectionOverride?: TtsSelectionPayload) {
+    const selection = selectionOverride ?? buildSelection();
 
     if (selection === null) {
       return;
@@ -839,11 +916,13 @@ export function AudioPlayer({
 
   function handleRangeStartChange(value: string) {
     setRangeStart(Number(value));
+    setRangeTouched(true);
     clearManifest();
   }
 
   function handleRangeEndChange(value: string) {
     setRangeEnd(Number(value));
+    setRangeTouched(true);
     clearManifest();
   }
 
@@ -857,6 +936,7 @@ export function AudioPlayer({
     if (end > start) {
       setRangeStart(start);
       setRangeEnd(end);
+      setRangeTouched(true);
       clearManifest();
     }
   }
@@ -880,6 +960,11 @@ export function AudioPlayer({
   const canGoNext =
     manifest !== null && activeIndex + 1 < manifest.sections.length;
   const multiSection = (manifest?.sections.length ?? 0) > 1;
+  const voiceCommandDisabled =
+    disabled ||
+    providerUnavailable ||
+    media.playbackActive ||
+    media.microphoneActive;
 
   return (
     <section
@@ -969,6 +1054,66 @@ export function AudioPlayer({
             ))}
           </select>
 
+          <div className="mt-3 rounded-xl border border-stone-200 bg-white p-3">
+            {voiceCommandOpen ? (
+              <VoiceReadCommand
+                disabled={voiceCommandDisabled}
+                fetchImpl={fetchImpl}
+                noteId={note.id}
+                paragraphIndex={scope === "paragraph" ? paragraphIndex : undefined}
+                selection={
+                  rangeTouched
+                    ? {
+                        start: effectiveRangeStart,
+                        end: effectiveRangeEnd,
+                      }
+                    : undefined
+                }
+                summaryArtifact={summaryArtifact}
+                onClose={() => setVoiceCommandOpen(false)}
+                onError={(message) => {
+                  setVoiceCommandError(message);
+                  setVoiceCommandOpen(false);
+                }}
+                onResult={(result) => {
+                  setVoiceCommandOpen(false);
+                  void applyVoiceReadResult(result);
+                }}
+              />
+            ) : (
+              <>
+                <button
+                  className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-semibold text-stone-800 hover:bg-stone-100 disabled:cursor-not-allowed disabled:text-stone-400"
+                  data-testid="tts-voice-command"
+                  disabled={voiceCommandDisabled}
+                  onClick={() => {
+                    setVoiceCommandError(null);
+                    setVoiceCommandStatus(null);
+                    setVoiceCommandOpen(true);
+                  }}
+                  type="button"
+                >
+                  Zadat hlasový příkaz
+                </button>
+                <span className="ml-2 text-xs leading-5 text-stone-500">
+                  Jednorázový Scribe příkaz, max.{" "}
+                  {MICROPHONE_SESSION_MAX_MS / 1000} s. Nic se nezapisuje do
+                  poznámky.
+                </span>
+              </>
+            )}
+            {voiceCommandError ? (
+              <p className="mt-2 text-sm text-red-900" role="alert">
+                {voiceCommandError}
+              </p>
+            ) : null}
+            {voiceCommandStatus ? (
+              <p aria-live="polite" className="mt-2 text-sm text-stone-700">
+                {voiceCommandStatus}
+              </p>
+            ) : null}
+          </div>
+
           {scope === "paragraph" ? (
             <div className="mt-3">
               <label
@@ -1002,6 +1147,34 @@ export function AudioPlayer({
                   Poznámka neobsahuje žádný odstavec.
                 </p>
               ) : null}
+            </div>
+          ) : null}
+
+          {scope === "last_paragraphs" ? (
+            <div className="mt-3">
+              <label
+                className="text-sm font-medium text-stone-700"
+                htmlFor="tts-paragraph-count"
+              >
+                Počet posledních odstavců
+              </label>
+              <select
+                className="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 disabled:cursor-not-allowed disabled:bg-stone-100"
+                data-testid="tts-paragraph-count"
+                disabled={manifestLoading || phase !== "idle"}
+                id="tts-paragraph-count"
+                onChange={(event) => {
+                  setParagraphCount(Number(event.target.value));
+                  clearManifest();
+                }}
+                value={paragraphCount}
+              >
+                {[1, 2, 3, 4, 5].map((count) => (
+                  <option key={count} value={count}>
+                    {count}
+                  </option>
+                ))}
+              </select>
             </div>
           ) : null}
 
@@ -1291,5 +1464,142 @@ export function AudioPlayer({
         </div>
       ) : null}
     </section>
+  );
+}
+
+interface VoiceReadCommandProps {
+  readonly noteId: string;
+  readonly disabled: boolean;
+  readonly selection?: { readonly start: number; readonly end: number };
+  readonly paragraphIndex?: number;
+  readonly summaryArtifact: SummaryArtifact | null;
+  readonly fetchImpl: typeof fetch;
+  readonly onResult: (result: ReadSelectionResult) => void;
+  readonly onError: (message: string) => void;
+  readonly onClose: () => void;
+}
+
+function VoiceReadCommand({
+  noteId,
+  disabled,
+  selection,
+  paragraphIndex,
+  summaryArtifact,
+  fetchImpl,
+  onResult,
+  onError,
+  onClose,
+}: VoiceReadCommandProps) {
+  const [submitting, setSubmitting] = useState(false);
+  const dictation = useScribeDictation({
+    stopAfterFirstCommit: true,
+    flushOnStop: false,
+    onCommit: (segment) => {
+      void submit(segment.text);
+    },
+  });
+  const busy =
+    dictation.session.status !== "idle" &&
+    dictation.session.status !== "error";
+
+  async function submit(transcript: string) {
+    setSubmitting(true);
+
+    try {
+      const response = await fetchImpl("/api/voice/read-selection", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          noteId,
+          transcript,
+          ...(selection === undefined ? {} : { selection }),
+          ...(paragraphIndex === undefined ? {} : { paragraphIndex }),
+          summary:
+            summaryArtifact === null
+              ? null
+              : {
+                  noteVersion: summaryArtifact.noteVersion,
+                  text: summaryArtifact.summaryText,
+                },
+        }),
+      });
+
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as {
+          error?: { message?: string };
+        } | null;
+
+        throw new Error(
+          body?.error?.message ??
+            "Hlasový příkaz pro čtení se nepodařilo vyhodnotit.",
+        );
+      }
+
+      onResult((await response.json()) as ReadSelectionResult);
+    } catch (error) {
+      onError(
+        error instanceof Error
+          ? error.message
+          : "Hlasový příkaz pro čtení se nepodařilo vyhodnotit.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div data-testid="tts-voice-command-panel">
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-semibold text-stone-800 hover:bg-stone-100 disabled:cursor-not-allowed disabled:text-stone-400"
+          data-testid="tts-voice-start"
+          disabled={
+            (!busy && disabled) ||
+            submitting ||
+            dictation.isStopping ||
+            dictation.webLocksSupported === false
+          }
+          onClick={() => {
+            if (busy) {
+              void dictation.stop({ flush: false });
+              return;
+            }
+
+            dictation.clearTranscripts();
+            dictation.start();
+          }}
+          type="button"
+        >
+          {busy ? "Ukončit příkaz" : "Spustit hlasový příkaz"}
+        </button>
+        <button
+          className="rounded-lg border border-stone-300 px-2 py-2 text-xs font-semibold text-stone-600 hover:bg-stone-100"
+          onClick={onClose}
+          type="button"
+        >
+          Zavřít
+        </button>
+        <span className="text-xs leading-5 text-stone-500">
+          Max. {MICROPHONE_SESSION_MAX_MS / 1000} s. Přepis se do poznámky
+          nezapisuje.
+        </span>
+      </div>
+      {busy ? (
+        <p aria-live="polite" className="mt-2 text-sm text-stone-700">
+          {dictation.partialTranscript || "Čekám na příkaz…"}
+        </p>
+      ) : null}
+      {dictation.webLocksSupported === false ? (
+        <p className="mt-2 text-sm text-red-900" role="alert">
+          Tento prohlížeč nepodporuje Web Locks, proto nelze bezpečně zajistit
+          výhradní přístup k mikrofonu. Otevřete aplikaci v Chromiu nebo Edge.
+        </p>
+      ) : null}
+      {dictation.session.error ? (
+        <p className="mt-2 text-sm text-red-900" role="alert">
+          {dictation.session.error}
+        </p>
+      ) : null}
+    </div>
   );
 }
