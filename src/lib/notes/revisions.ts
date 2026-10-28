@@ -25,6 +25,7 @@ import {
   type NoteService,
 } from "./service.ts";
 import { refreshNoteSearch } from "../search/fts.ts";
+import { refreshNoteChunks } from "../search/index-state.ts";
 
 export type RevisionReason =
   | "initial"
@@ -411,6 +412,7 @@ export function createRevisionService(
           afterSnapshot: after,
         });
         await refreshNoteSearch(tx, noteId);
+        await refreshNoteChunks(tx, updated);
 
         return toNoteDetail(updated, normalizedTarget.tags);
       });

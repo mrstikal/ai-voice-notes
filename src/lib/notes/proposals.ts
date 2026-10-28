@@ -31,6 +31,7 @@ import {
   type NoteService,
 } from "./service.ts";
 import { refreshNoteSearch } from "../search/fts.ts";
+import { refreshNoteChunks } from "../search/index-state.ts";
 import {
   DEFAULT_NOTE_GRAPHEME_LIMITS as DEFAULT_PROPOSAL_LIMITS,
   TITLE_MAX_GRAPHEMES,
@@ -748,6 +749,7 @@ export function createEditProposalService(
           },
         });
         await refreshNoteSearch(tx, noteId);
+        await refreshNoteChunks(tx, updated);
 
         const updatedProposalRows = await tx
           .update(editProposals)

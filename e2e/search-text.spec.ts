@@ -99,6 +99,9 @@ test("fulltext search finds accent variants, a quoted phrase and opens the exact
   await expect(
     page.getByTestId(`search-result-${noteId}`).locator("mark"),
   ).toContainText("databáze");
+  await expect(page.getByTestId(`index-status-${noteId}`)).toContainText(
+    "Čeká",
+  );
   await page.getByRole("link", { name: title, exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/notes/${noteId}$`));
   await expect(page.getByRole("heading", { name: title })).toBeVisible();

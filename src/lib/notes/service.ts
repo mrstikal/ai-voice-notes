@@ -22,6 +22,7 @@ import {
 } from "../tts/cache.ts";
 import { parseNoteMarkdown } from "./markdown.ts";
 import { refreshNoteSearch } from "../search/fts.ts";
+import { refreshNoteChunks } from "../search/index-state.ts";
 import {
   NoteMetadataError,
   normalizeNoteMetadata,
@@ -379,6 +380,7 @@ export async function createSeededNoteInTransaction(
     createdAt: input.createdAt,
   });
   await refreshNoteSearch(db, note.id);
+  await refreshNoteChunks(db, note);
 
   return toDetail(note, tags);
 }
@@ -449,6 +451,7 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
           afterSnapshot: toSnapshot(note, tags),
         });
         await refreshNoteSearch(tx, note.id);
+        await refreshNoteChunks(tx, note);
 
         return toDetail(note, tags);
       });
@@ -504,6 +507,7 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
         }
 
         await refreshNoteSearch(tx, id);
+        await refreshNoteChunks(tx, updated);
 
         return toDetail(updated, tags);
       });
@@ -569,6 +573,7 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
           afterSnapshot: toSnapshot(updated, normalized.tags),
         });
         await refreshNoteSearch(tx, id);
+        await refreshNoteChunks(tx, updated);
 
         return toDetail(updated, normalized.tags);
       });
@@ -615,6 +620,7 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
           afterSnapshot: toSnapshot(updated, tags),
         });
         await refreshNoteSearch(tx, id);
+        await refreshNoteChunks(tx, updated);
 
         return toDetail(updated, tags);
       });
@@ -684,6 +690,7 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
           afterSnapshot: toSnapshot(updated, tags),
         });
         await refreshNoteSearch(tx, id);
+        await refreshNoteChunks(tx, updated);
 
         return toDetail(updated, tags);
       });

@@ -113,6 +113,14 @@ describe.skipIf(!hasTestDatabase)("seed CLI", () => {
     return result.rows;
   }
 
+  async function countSeedChunks(): Promise<number> {
+    const result = await connection.pool.query<{ count: number }>(
+      "SELECT count(*)::int AS count FROM note_chunks c JOIN notes n ON n.id = c.note_id WHERE n.seed_key LIKE $1 AND c.note_version = n.version AND c.status = 'pending'",
+      [`${SEED_KEY_PREFIX}%`],
+    );
+    return result.rows[0]?.count ?? 0;
+  }
+
   async function countSeedVectors(): Promise<number> {
     const result = await connection.pool.query<{ count: number }>(
       "SELECT count(*)::int AS count FROM notes WHERE seed_key LIKE $1 AND search_vector IS NOT NULL",
@@ -241,6 +249,7 @@ describe.skipIf(!hasTestDatabase)("seed CLI", () => {
     expect(distinctDays.size).toBeGreaterThanOrEqual(5);
 
     expect(await countSeedVectors()).toBe(20);
+    expect(await countSeedChunks()).toBeGreaterThanOrEqual(20);
 
     const revisions = await getSeedRevisions();
     expect(revisions).toHaveLength(20);
@@ -353,6 +362,7 @@ describe.skipIf(!hasTestDatabase)("seed CLI", () => {
     );
     expect(secondIds.every((id) => !firstIds.includes(id))).toBe(true);
     expect(await countSeedVectors()).toBe(20);
+    expect(await countSeedChunks()).toBeGreaterThanOrEqual(20);
     expect(await countNotesByIds(firstIds)).toBe(0);
     expect(await countRevisionsByIds(firstIds)).toBe(0);
 

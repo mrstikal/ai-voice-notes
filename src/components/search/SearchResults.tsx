@@ -2,6 +2,10 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import type { SearchResult } from "@/lib/search/fts";
+import {
+  INDEX_STATUS_LABELS,
+  type IndexStatus,
+} from "@/lib/search/index-state";
 
 function snippetNodes(value: string): ReactNode[] {
   const parts = value.split(/(\[\[\[|\]\]\])/u);
@@ -43,9 +47,13 @@ function Snippet({ value }: { readonly value: string }) {
 
 export interface SearchResultsProps {
   readonly result: SearchResult;
+  readonly indexStatuses?: ReadonlyMap<string, IndexStatus>;
 }
 
-export function SearchResults({ result }: SearchResultsProps) {
+export function SearchResults({
+  result,
+  indexStatuses,
+}: SearchResultsProps) {
   if (result.empty) {
     return (
       <div
@@ -84,7 +92,10 @@ export function SearchResults({ result }: SearchResultsProps) {
         {result.page}.
       </p>
       <ol className="mt-3 space-y-3">
-        {result.items.map((item) => (
+        {result.items.map((item) => {
+          const indexStatus = indexStatuses?.get(item.id) ?? "pending";
+
+          return (
           <li
             className="rounded-xl border border-stone-200 bg-white p-5"
             data-testid={`search-result-${item.id}`}
@@ -105,6 +116,12 @@ export function SearchResults({ result }: SearchResultsProps) {
               <Snippet value={item.snippet} />
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-stone-600">
+              <span
+                className="rounded-full border border-stone-200 px-2 py-1"
+                data-testid={`index-status-${item.id}`}
+              >
+                Index: {INDEX_STATUS_LABELS[indexStatus]}
+              </span>
               {item.category ? (
                 <span className="rounded-full bg-stone-100 px-2 py-1">
                   {item.category}
@@ -120,7 +137,8 @@ export function SearchResults({ result }: SearchResultsProps) {
               ))}
             </div>
           </li>
-        ))}
+          );
+        })}
       </ol>
       <div className="mt-5 flex gap-3">
         {result.page > 1 ? (

@@ -13,6 +13,7 @@ import {
   normalizeSearchQuery,
   searchNotesFullText,
 } from "@/lib/search/fts";
+import { getIndexStatuses } from "@/lib/search/index-state";
 
 export const dynamic = "force-dynamic";
 
@@ -117,7 +118,17 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
           {error}
         </p>
       ) : (
-        <SearchResults result={result} />
+        <SearchResults
+          indexStatuses={
+            result.items.length === 0
+              ? undefined
+              : await getIndexStatuses(
+                  getDb(),
+                  result.items.map((item) => item.id),
+                )
+          }
+          result={result}
+        />
       )}
     </div>
   );
