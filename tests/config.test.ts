@@ -51,6 +51,7 @@ describe("loadConfig", () => {
       elevenLabsApiBaseUrl: DEFAULT_ELEVENLABS_API_BASE_URL,
       openRouterApiKey: null,
       openRouterLlmModel: "deepseek/deepseek-v4.1-flash-1017",
+      openRouterEmbeddingModel: "openai/text-embedding-3-small",
       openAiApiKey: null,
       geminiApiKey: null,
       noteMaxCharacters: DEFAULT_NOTE_MAX_CHARACTERS,

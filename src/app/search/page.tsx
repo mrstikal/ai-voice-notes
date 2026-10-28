@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { IndexControls } from "@/components/search/IndexControls";
 import { SearchResults } from "@/components/search/SearchResults";
 import { getDb } from "@/lib/db/client";
 import {
@@ -76,6 +77,8 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
         Fulltextové hledání v názvu, viditelném textu a tazích aktivních
         poznámek. Hledání nerozlišuje velikost písmen ani diakritiku.
       </p>
+
+      <IndexControls />
 
       <form
         action="/search"

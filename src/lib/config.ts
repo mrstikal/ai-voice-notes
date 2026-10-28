@@ -8,6 +8,8 @@ export const DEFAULT_AI_REQUEST_BUDGET_USD = 2.0;
 export const DEFAULT_ELEVENLABS_API_BASE_URL = "https://api.elevenlabs.io";
 export const DEFAULT_OPENROUTER_LLM_MODEL =
   "deepseek/deepseek-v4.1-flash-1017";
+export const DEFAULT_OPENROUTER_EMBEDDING_MODEL =
+  "openai/text-embedding-3-small";
 
 export const TEST_MODE_PROVIDER_KEYS = {
   ELEVENLABS_API_KEY: "test-only-elevenlabs",
@@ -39,6 +41,7 @@ export interface AppConfig {
   elevenLabsApiBaseUrl: string;
   openRouterApiKey: string | null;
   openRouterLlmModel: string;
+  openRouterEmbeddingModel: string;
   openAiApiKey: string | null;
   geminiApiKey: string | null;
   noteMaxCharacters: number;
@@ -375,7 +378,7 @@ function assertAiTestModeEnvironment(options: {
 
 function parseOptionalModelId(
   env: Environment,
-  name: "OPENROUTER_LLM_MODEL",
+  name: "OPENROUTER_LLM_MODEL" | "OPENROUTER_EMBEDDING_MODEL",
   fallback: string,
 ): string {
   const rawValue = env[name]?.trim();
@@ -500,6 +503,11 @@ export function loadConfig(
     "OPENROUTER_LLM_MODEL",
     DEFAULT_OPENROUTER_LLM_MODEL,
   );
+  const openRouterEmbeddingModel = parseOptionalModelId(
+    env,
+    "OPENROUTER_EMBEDDING_MODEL",
+    DEFAULT_OPENROUTER_EMBEDDING_MODEL,
+  );
   const openAiApiKey = parseOptionalSecret(env, "OPENAI_API_KEY");
   const geminiApiKey = parseOptionalSecret(env, "GEMINI_API_KEY");
   const elevenLabsApiBaseUrl = parseElevenLabsApiBaseUrl(env, aiTestMode);
@@ -535,6 +543,7 @@ export function loadConfig(
     elevenLabsApiBaseUrl,
     openRouterApiKey,
     openRouterLlmModel,
+    openRouterEmbeddingModel,
     openAiApiKey,
     geminiApiKey,
     noteMaxCharacters,

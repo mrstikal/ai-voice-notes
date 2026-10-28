@@ -43,6 +43,10 @@ function tokenCount(text: string): number {
   return count;
 }
 
+export function countCl100kTokens(text: string): number {
+  return tokenCount(text);
+}
+
 function splitGraphemes(text: string): string[] {
   return Array.from(graphemeSegmenter.segment(text), (part) => part.segment);
 }

@@ -425,6 +425,55 @@ the user's headset verification, not on a recorded ten-trial aggregate.
   synthetic smoke notes and TTS cache were deleted/purged. No full ten-trial
   manual headset protocol was run.
 
+## P36 OpenRouter embeddings
+
+- **Frozen contract:** `POST /api/v1/embeddings` with
+  `model: "openai/text-embedding-3-small"`, `dimensions: 1536`,
+  `encoding_format: "float"` and a text/array `input`. A different
+  `OPENROUTER_EMBEDDING_MODEL` blocks semantic indexing with a Czech reason;
+  the database `vector(1536)` dimension is never changed silently.
+- **Official documentation checked (2026-10-28):**
+  <https://openrouter.ai/docs/api/api-reference/embeddings/submit-an-embedding-request>
+  documents `input`, `model`, `dimensions` and `encoding_format`; the success
+  response contains `data[].embedding` (float array or base64 string),
+  `data[].index`, `model`, and `usage.prompt_tokens`/`total_tokens`/`cost`.
+  <https://openrouter.ai/docs/api/reference/embeddings> shows the same
+  OpenAI-compatible batch shape.
+- **Catalog caveat:** `GET /api/v1/models` returned `200` with 425 entries on
+  2026-10-28 but no `openai/text-embedding-3-small` entry, so catalog metadata
+  could not confirm `dimensions` support. The adapter therefore validates the
+  **actual** returned vectors (exactly 1,536 finite numbers each) rather than
+  trusting catalog metadata.
+- **Live evidence (authorized 2026-10-28):** one real embeddings call with two
+  short Czech inputs returned two vectors of 1,536 finite values in 789 ms.
+  The upstream response reported `model: "text-embedding-3-small"` (the short
+  form of the requested `openai/text-embedding-3-small`); the adapter accepts
+  that documented normalization only for the frozen model and stores the
+  canonical requested ID. `usage.prompt_tokens` was 35 and the reported cost
+  was `0.0000007 USD`. The P12 ledger row is `embedding_reindex` /
+  `openrouter` / `openai/text-embedding-3-small`, status `settled`, reserved
+  `0.000001`, reported `0.000001`, with HTTP metadata, dimensions, input count,
+  token count and the returned model in `provider_usage`; no input text, key or
+  vector was logged. A full note-level reindex was not run live.
+- **Bounded reindex:** only the explicit `Reindexovat` action derives missing
+  current-version chunks for pre-P35 notes and shows an estimate; a second
+  explicit confirmation submits at most 3 notes / 20 chunks. A confirmed batch
+  whose recomputed estimate exceeds the approved one is refused with
+  `reindex_cost_changed`. The next batch needs another user action. Vectors are
+  written as `ready` with the current note version and model only after
+  re-reading the locked note version in a transaction. A failed or ambiguous
+  provider request marks the affected chunks `error` (never retried
+  automatically) and leaves P12 billing `unknown` when the provider cost cannot
+  be established. An edit during the flight discards the stale batch.
+- **Deterministic evidence:** `tests/search/embeddings.test.ts` covers the
+  request contract, provider order, reported-cost settlement fallback, wrong
+  length, non-finite/null values, missing vectors, wrong model, contract
+  rejection, batch bounds and the blocked key state. `tests/db/reindex.test.ts`
+  covers preparing a missing pre-P35 note, ready/model skip, failure plus
+  manual retry, edit-during-flight, readable/searchable other notes, changed
+  cost refusal, the 3-note/20-chunk cap and the no-approval path. Offline tests
+  use an injected transport and make zero paid calls.
+
 ## Live evidence (2026-10-26)
 
 - **Authorization:** the user explicitly requested the live microphone/provider

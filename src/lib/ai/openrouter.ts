@@ -22,6 +22,11 @@ export interface OpenRouterTransport {
   fetch(request: OpenRouterTransportRequest): Promise<Response>;
 }
 
+export interface OpenRouterSuccessSettlement {
+  readonly reportedCostUsd: number | null;
+  readonly providerUsage?: Readonly<Record<string, unknown>>;
+}
+
 export interface OpenRouterRequestOptions {
   readonly path: string;
   readonly body: unknown;
@@ -33,6 +38,9 @@ export interface OpenRouterRequestOptions {
   readonly maxResponseBytes: number;
   readonly timeoutMs?: number;
   readonly providerUsage?: Readonly<Record<string, unknown>>;
+  readonly successSettlement?: (
+    bytes: Uint8Array,
+  ) => OpenRouterSuccessSettlement | null;
 }
 
 export interface OpenRouterResponse {
@@ -551,21 +559,63 @@ export class OpenRouterClient {
       );
     }
 
-    try {
-      await this.usage.markUnknown(reservation.id, {
-        ...options.providerUsage,
-        httpStatus: response.status,
-        contentType,
-        byteLength: bytes.byteLength,
-        generationId,
-        chargeReason: "openrouter_cost_not_reported",
-      });
-    } catch {
-      throw new OpenRouterHttpError(
-        503,
-        "openrouter_usage_settlement_failed",
-        "Odpověď byla vytvořena, ale využití se nepodařilo zapsat. Zkuste to znovu.",
-      );
+    let settlement: OpenRouterSuccessSettlement | null = null;
+
+    if (options.successSettlement) {
+      try {
+        settlement = options.successSettlement(bytes);
+      } catch {
+        settlement = null;
+      }
+    }
+
+    const successUsage = {
+      ...options.providerUsage,
+      ...(settlement?.providerUsage ?? {}),
+    };
+    const reportedCostUsd = settlement?.reportedCostUsd ?? null;
+
+    if (
+      typeof reportedCostUsd === "number" &&
+      Number.isFinite(reportedCostUsd) &&
+      reportedCostUsd >= 0
+    ) {
+      try {
+        await this.usage.settle(reservation.id, {
+          reportedCostUsd,
+          providerUsage: {
+            ...successUsage,
+            httpStatus: response.status,
+            contentType,
+            byteLength: bytes.byteLength,
+            generationId,
+            chargeReason: "provider_cost_reported",
+          },
+        });
+      } catch {
+        throw new OpenRouterHttpError(
+          503,
+          "openrouter_usage_settlement_failed",
+          "Odpověď byla vytvořena, ale využití se nepodařilo zapsat. Zkuste to znovu.",
+        );
+      }
+    } else {
+      try {
+        await this.usage.markUnknown(reservation.id, {
+          ...successUsage,
+          httpStatus: response.status,
+          contentType,
+          byteLength: bytes.byteLength,
+          generationId,
+          chargeReason: "openrouter_cost_not_reported",
+        });
+      } catch {
+        throw new OpenRouterHttpError(
+          503,
+          "openrouter_usage_settlement_failed",
+          "Odpověď byla vytvořena, ale využití se nepodařilo zapsat. Zkuste to znovu.",
+        );
+      }
     }
 
     return {
