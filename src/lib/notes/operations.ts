@@ -712,6 +712,24 @@ function collectTasks(ast: Root, source: string): TaskCandidate[] {
   return tasks;
 }
 
+export interface ExistingTaskLabel {
+  readonly text: string;
+  readonly normalized: string;
+  readonly checked: boolean;
+}
+
+export function listExistingTaskLabels(
+  contentMd: string,
+): ExistingTaskLabel[] {
+  const parsed = parseNoteMarkdown(contentMd);
+
+  return collectTasks(parsed.ast, contentMd).map((task) => ({
+    text: task.text,
+    normalized: normalizeMatchText(task.text),
+    checked: task.checked,
+  }));
+}
+
 function setTaskChecked(
   input: ResolveOperationInput,
   operation: Extract<LlmOperation, { readonly type: "set_task_checked" }>,

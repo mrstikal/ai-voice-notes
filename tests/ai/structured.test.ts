@@ -26,6 +26,7 @@ import {
   llmEditResponseSchema,
 } from "../../src/lib/ai/schemas";
 import { TAG_SUGGESTIONS_SCHEMA_NAME } from "../../src/lib/ai/tag-suggestions";
+import { TASK_SUGGESTIONS_SCHEMA_NAME } from "../../src/lib/ai/task-suggestions";
 import { createMockOpenRouterTransport } from "../helpers/provider-mocks";
 
 const RESERVATION_ID = "33333333-3333-4333-8333-333333333333";
@@ -261,6 +262,33 @@ describe("P21 structured OpenRouter client", () => {
     expect(body.response_format.json_schema.schema).toMatchObject({
       additionalProperties: false,
       required: ["tags", "category"],
+    });
+  });
+
+  it("requests and validates the task-suggestion array schema", async () => {
+    const transport = createMockOpenRouterTransport({
+      responses: [chatResponse({ tasks: [{ text: "Koupit mléko" }] })],
+    });
+    const { service } = createService({ transport });
+
+    const result = await service.requestTaskSuggestions({
+      prompt: "Vytáhni úkoly.",
+    });
+
+    expect(result).toEqual({ tasks: [{ text: "Koupit mléko" }] });
+    const body = JSON.parse(transport.calls[0]!.body) as {
+      response_format: {
+        json_schema: { name: string; schema: Record<string, unknown> };
+      };
+    };
+    expect(body.response_format.json_schema.name).toBe(
+      TASK_SUGGESTIONS_SCHEMA_NAME,
+    );
+    expect(body.response_format.json_schema.schema).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      required: ["tasks"],
+      properties: { tasks: { maxItems: 10 } },
     });
   });
 

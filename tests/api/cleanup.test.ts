@@ -18,6 +18,7 @@ const cleaned =
 
 const llmRequest = vi.hoisted(() => vi.fn());
 const llmTagRequest = vi.hoisted(() => vi.fn());
+const llmTaskRequest = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/ai/structured", async (importOriginal) => {
   const actual =
@@ -28,6 +29,7 @@ vi.mock("@/lib/ai/structured", async (importOriginal) => {
     getStructuredLlmService: () => ({
       request: llmRequest,
       requestTagSuggestions: llmTagRequest,
+      requestTaskSuggestions: llmTaskRequest,
     }),
   };
 });
@@ -91,9 +93,80 @@ afterAll(() => {
 beforeEach(() => {
   llmRequest.mockReset();
   llmTagRequest.mockReset();
+  llmTaskRequest.mockReset();
 });
 
 describe("cleanup suggestion API", () => {
+  it("returns bounded task suggestions and prepares an append operation without writing", async () => {
+    llmTaskRequest.mockResolvedValue({
+      tasks: [{ text: "Koupit mléko" }, { text: "Zavolat lékaři" }],
+    });
+    const plain = parseNoteMarkdown(original).plainText;
+    const firstEnd = plain.indexOf("Druhý") - 1;
+
+    const suggestion = await suggestCleanupRoute(
+      request({
+        kind: "task_suggestions",
+        start: 0,
+        end: firstEnd,
+      }),
+      context(),
+    );
+    expect(suggestion.status).toBe(200);
+    expect(await suggestion.json()).toMatchObject({
+      kind: "task_suggestions",
+      noteId: NOTE_ID,
+      noteVersion: 1,
+      tasks: [
+        { duplicate: false, text: "Koupit mléko" },
+        { duplicate: false, text: "Zavolat lékaři" },
+      ],
+    });
+
+    const applied = await suggestCleanupRoute(
+      request({
+        kind: "task_apply",
+        expectedVersion: 1,
+        tasks: ["Koupit mléko", "Zavolat lékaři"],
+      }),
+      context(),
+    );
+    expect(applied.status).toBe(200);
+    expect(await applied.json()).toMatchObject({
+      kind: "task_apply",
+      noteVersion: 1,
+      operation: { type: "append_bounded_section" },
+    });
+  });
+
+  it("rejects duplicate/stale task insertions without writing a note", async () => {
+    const duplicate = await suggestCleanupRoute(
+      request({
+        kind: "task_apply",
+        expectedVersion: 1,
+        tasks: ["Koupit mléko", "koupit mléko"],
+      }),
+      context(),
+    );
+    expect(duplicate.status).toBe(409);
+    expect(await duplicate.json()).toMatchObject({
+      error: { code: "task_suggestion_duplicate" },
+    });
+
+    const stale = await suggestCleanupRoute(
+      request({
+        kind: "task_apply",
+        expectedVersion: 2,
+        tasks: ["Koupit mléko"],
+      }),
+      context(),
+    );
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({
+      error: { code: "task_suggestion_stale" },
+    });
+  });
+
   it("returns bounded AI tag suggestions without writing a note", async () => {
     llmTagRequest.mockResolvedValue({
       tags: ["atlas", "migrace"],

@@ -25,10 +25,17 @@ import {
   tagSuggestionResponseSchema,
   type TagSuggestionResponse,
 } from "./tag-suggestions.ts";
+import {
+  TASK_SUGGESTIONS_JSON_SCHEMA,
+  TASK_SUGGESTIONS_SCHEMA_NAME,
+  taskSuggestionResponseSchema,
+  type TaskSuggestionResponse,
+} from "./task-suggestions.ts";
 
 export const LLM_CANDIDATE_MODEL_ID = DEFAULT_OPENROUTER_LLM_MODEL;
 export const LLM_OPERATION = "llm_structured_edit";
 export const TAG_SUGGESTIONS_OPERATION = "llm_tag_suggestions";
+export const TASK_SUGGESTIONS_OPERATION = "llm_task_suggestions";
 export const LLM_INPUT_MAX_CODE_UNITS = 12_000;
 export const LLM_MAX_OUTPUT_TOKENS = 1_200;
 export const LLM_TIMEOUT_MS = 20_000;
@@ -305,6 +312,9 @@ export interface StructuredLlmService {
   requestTagSuggestions(
     input: StructuredLlmRequest,
   ): Promise<TagSuggestionResponse>;
+  requestTaskSuggestions(
+    input: StructuredLlmRequest,
+  ): Promise<TaskSuggestionResponse>;
 }
 
 function ensureSupportedModel(modelId: string): void {
@@ -451,6 +461,30 @@ function parseTagSuggestionProviderResponse(
       502,
       "llm_schema_invalid",
       "Model nevrátil platný návrh tagů. Návrh nebyl přijat.",
+      {
+        issues: parsed.error.issues.map((issue) => ({
+          path: issue.path.map(String).join("."),
+          code: issue.code,
+        })),
+      },
+    );
+  }
+
+  return parsed.data;
+}
+
+function parseTaskSuggestionProviderResponse(
+  response: OpenRouterResponse,
+): TaskSuggestionResponse {
+  const parsed = taskSuggestionResponseSchema.safeParse(
+    readProviderContent(response),
+  );
+
+  if (!parsed.success) {
+    throw new StructuredLlmError(
+      502,
+      "llm_schema_invalid",
+      "Model nevrátil platný seznam úkolů. Návrh nebyl přijat.",
       {
         issues: parsed.error.issues.map((issue) => ({
           path: issue.path.map(String).join("."),
@@ -613,6 +647,15 @@ export function createStructuredLlmService(
         operation: TAG_SUGGESTIONS_OPERATION,
         requestKind: "tag_suggestions",
         parse: parseTagSuggestionProviderResponse,
+      }),
+    requestTaskSuggestions: (input) =>
+      requestStructured(input, {
+        label: "extrakci úkolů",
+        schemaName: TASK_SUGGESTIONS_SCHEMA_NAME,
+        jsonSchema: TASK_SUGGESTIONS_JSON_SCHEMA,
+        operation: TASK_SUGGESTIONS_OPERATION,
+        requestKind: "task_suggestions",
+        parse: parseTaskSuggestionProviderResponse,
       }),
   };
 }

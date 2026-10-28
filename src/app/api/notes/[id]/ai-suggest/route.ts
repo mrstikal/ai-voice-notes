@@ -15,6 +15,11 @@ import {
   suggestTags,
 } from "@/lib/ai/tag-suggestions";
 import {
+  TaskSuggestionError,
+  prepareTaskInsertion,
+  suggestTasks,
+} from "@/lib/ai/task-suggestions";
+import {
   StructuredLlmError,
   getStructuredLlmService,
 } from "@/lib/ai/structured";
@@ -90,10 +95,36 @@ const tagSuggestionsRequestSchema = z
   })
   .strict();
 
+const taskSuggestionsRequestSchema = z
+  .object({
+    kind: z.literal("task_suggestions"),
+    start: z.number().int().nonnegative(),
+    end: z.number().int().nonnegative(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.start >= value.end) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Vybraná pasáž vyžaduje platný začátek a konec.",
+      });
+    }
+  });
+
+const taskApplyRequestSchema = z
+  .object({
+    kind: z.literal("task_apply"),
+    expectedVersion: z.number().int().min(1).max(2_147_483_647),
+    tasks: z.array(z.string().min(1).max(200)).min(1).max(10),
+  })
+  .strict();
+
 const suggestRequestSchema = z.union([
   cleanupRequestSchema,
   summaryRequestSchema,
   tagSuggestionsRequestSchema,
+  taskSuggestionsRequestSchema,
+  taskApplyRequestSchema,
 ]);
 
 type SuggestRequest = z.infer<typeof suggestRequestSchema>;
@@ -113,6 +144,32 @@ export const POST = createGuardedJsonRoute<
     try {
       const { id } = await routeContext!.params;
       const note = await getNoteService().getNote(id);
+
+      if (data.kind === "task_suggestions") {
+        const suggestion = await suggestTasks({
+          note,
+          start: data.start,
+          end: data.end,
+          llm: getStructuredLlmService(),
+        });
+
+        return jsonOk({ kind: "task_suggestions", ...suggestion });
+      }
+
+      if (data.kind === "task_apply") {
+        const insertion = prepareTaskInsertion({
+          note,
+          expectedVersion: data.expectedVersion,
+          tasks: data.tasks,
+        });
+
+        return jsonOk({
+          kind: "task_apply",
+          operation: insertion.operation,
+          noteVersion: insertion.noteVersion,
+          tasks: insertion.tasks,
+        });
+      }
 
       if (data.kind === "tag_suggestions") {
         const suggestion = await suggestTags({
@@ -182,6 +239,10 @@ export const POST = createGuardedJsonRoute<
         sourceHash: resolution.sourceHash,
       });
     } catch (error) {
+      if (error instanceof TaskSuggestionError) {
+        return jsonError(error.status, error.code, error.message);
+      }
+
       if (error instanceof TagSuggestionError) {
         return jsonError(error.status, error.code, error.message);
       }
@@ -213,7 +274,9 @@ export const POST = createGuardedJsonRoute<
       const unavailable =
         data.kind === "tag_suggestions"
           ? "AI návrh tagů není dostupný. Ruční tagy lze dál upravovat."
-          : data.kind === "summary"
+          : data.kind === "task_suggestions" || data.kind === "task_apply"
+            ? "Extrakce úkolů není dostupná. Úkoly lze dál upravovat ručně."
+            : data.kind === "summary"
             ? "Shrnutí není dostupné. Poznámky lze dál upravovat ručně."
             : "Čištění diktátu není dostupné. Poznámky lze dál upravovat ručně.";
 

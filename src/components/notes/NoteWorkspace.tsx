@@ -11,6 +11,7 @@ import { AiEditControls } from "../ai/AiEditControls";
 import { CleanupAction } from "../ai/CleanupAction";
 import { ManualProposalPanel } from "../ai/ManualProposalPanel";
 import { SummaryAction } from "../ai/SummaryAction";
+import { TaskSuggestions } from "../ai/TaskSuggestions";
 import { RevisionHistory } from "./RevisionHistory";
 import { AudioPlayer } from "../tts/AudioPlayer";
 import { DictationControls } from "../voice/DictationControls";
@@ -97,6 +98,13 @@ export function NoteWorkspace({
         note={note}
         onNoteUpdated={handleExternalNoteUpdate}
         onReadSummary={setSummaryPlayback}
+      />
+      <TaskSuggestions
+        disabled={editorDirty}
+        llmError={llmError}
+        llmStatus={llmStatus}
+        note={note}
+        onNoteUpdated={handleExternalNoteUpdate}
       />
       <AudioPlayer
         disabled={editorDirty}
