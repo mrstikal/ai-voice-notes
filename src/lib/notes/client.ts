@@ -111,6 +111,20 @@ export async function updateNote(
   });
 }
 
+export async function updateNoteMetadata(
+  id: string,
+  input: {
+    category: string | null;
+    tags: string[];
+    expectedVersion: number;
+  },
+): Promise<NoteDetail> {
+  return requestJson<NoteDetail>(`/api/notes/${id}/tags`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
 export async function updateVoiceTitle(
   id: string,
   input: {

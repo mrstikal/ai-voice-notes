@@ -21,6 +21,12 @@ import {
   type TtsCache,
 } from "../tts/cache.ts";
 import { parseNoteMarkdown } from "./markdown.ts";
+import {
+  NoteMetadataError,
+  normalizeNoteMetadata,
+  sortTags,
+  tagsEqual,
+} from "./tags.ts";
 import * as repository from "./repository.ts";
 
 const expectedVersionSchema = z
@@ -37,6 +43,14 @@ export const updateNoteInputSchema = z
     contentMd: z.string(),
     expectedVersion: expectedVersionSchema,
     draft: z.boolean().optional(),
+  })
+  .strict();
+
+export const updateNoteMetadataInputSchema = z
+  .object({
+    category: z.string().max(50).nullable(),
+    tags: z.array(z.string()).max(100),
+    expectedVersion: expectedVersionSchema,
   })
   .strict();
 
@@ -57,6 +71,7 @@ export const restoreNoteInputSchema = deleteNoteInputSchema;
 
 export type CreateNoteInput = z.infer<typeof createNoteInputSchema>;
 export type UpdateNoteInput = z.infer<typeof updateNoteInputSchema>;
+export type UpdateNoteMetadataInput = z.infer<typeof updateNoteMetadataInputSchema>;
 export type UpdateNoteTitleInput = z.infer<typeof updateNoteTitleInputSchema>;
 export type DeleteNoteInput = z.infer<typeof deleteNoteInputSchema>;
 export type RestoreNoteInput = z.infer<typeof restoreNoteInputSchema>;
@@ -96,6 +111,10 @@ export interface NoteService {
   getNote(id: string): Promise<NoteDetailDto>;
   createNote(input: CreateNoteInput): Promise<NoteDetailDto>;
   updateNote(id: string, input: UpdateNoteInput): Promise<NoteDetailDto>;
+  updateNoteMetadata(
+    id: string,
+    input: UpdateNoteMetadataInput,
+  ): Promise<NoteDetailDto>;
   updateNoteTitle(
     id: string,
     input: UpdateNoteTitleInput,
@@ -255,7 +274,7 @@ function toDetail(
     ...toSummary(note),
     contentMd: note.contentMd,
     contentPlain: note.contentPlain,
-    tags,
+    tags: sortTags(tags),
   };
 }
 
@@ -489,6 +508,64 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
       }
 
       return result;
+    },
+
+    async updateNoteMetadata(id, input) {
+      assertNoteId(id);
+      let normalized: ReturnType<typeof normalizeNoteMetadata>;
+
+      try {
+        normalized = normalizeNoteMetadata(input.category, input.tags);
+      } catch (error) {
+        if (error instanceof NoteMetadataError) {
+          throw new NoteValidationError(error.message);
+        }
+
+        throw error;
+      }
+
+      return db.transaction(async (tx) => {
+        const current = await repository.findNoteByIdForUpdate(tx, id);
+        if (!current || current.deletedAt) {
+          throw new NoteNotFoundError();
+        }
+
+        if (current.version !== input.expectedVersion) {
+          throw new NoteConflictError(current.version);
+        }
+
+        const currentTags = sortTags(await repository.getNoteTags(tx, id));
+
+        if (
+          current.category === normalized.category &&
+          tagsEqual(currentTags, normalized.tags)
+        ) {
+          return toDetail(current, currentTags);
+        }
+
+        const updated = await repository.updateNoteMetadataCas(tx, {
+          id,
+          expectedVersion: input.expectedVersion,
+          category: normalized.category,
+        });
+
+        if (!updated) {
+          await throwCasFailure(tx, id, false);
+          throw new NoteConflictError(current.version);
+        }
+
+        await repository.replaceNoteTags(tx, id, normalized.tags);
+
+        await repository.insertRevision(tx, {
+          noteId: id,
+          noteVersion: updated.version,
+          reason: "metadata",
+          beforeSnapshot: toSnapshot(current, currentTags),
+          afterSnapshot: toSnapshot(updated, normalized.tags),
+        });
+
+        return toDetail(updated, normalized.tags);
+      });
     },
 
     async updateNoteTitle(id, input) {

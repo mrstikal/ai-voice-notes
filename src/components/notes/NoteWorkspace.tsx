@@ -18,6 +18,7 @@ import type { SummaryArtifact } from "@/lib/ai/summary-types";
 
 import { NoteEditor } from "./NoteEditor";
 import { NoteHeader } from "./NoteHeader";
+import { NoteTags } from "./NoteTags";
 import { TaskVoiceControls } from "./TaskVoiceControls";
 
 interface NoteWorkspaceProps {
@@ -43,6 +44,7 @@ export function NoteWorkspace({
   const [cleanupNotice, setCleanupNotice] = useState<string | null>(null);
   const [summaryPlayback, setSummaryPlayback] =
     useState<SummaryArtifact | null>(null);
+  const [metadataNotice, setMetadataNotice] = useState<string | null>(null);
 
   function handleNoteUpdated(updated: NoteDetail) {
     setNote(updated);
@@ -69,6 +71,22 @@ export function NoteWorkspace({
         onSaved={handleNoteUpdated}
         onDirtyChange={setEditorDirty}
       />
+      <NoteTags
+        disabled={editorDirty}
+        key={`tags:${note.id}:${note.category ?? ""}:${JSON.stringify(note.tags)}`}
+        note={note}
+        onApplied={setMetadataNotice}
+        onNoteUpdated={handleNoteUpdated}
+      />
+      {metadataNotice ? (
+        <p
+          aria-live="polite"
+          className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-medium text-emerald-950"
+          data-testid="metadata-applied"
+        >
+          {metadataNotice}
+        </p>
+      ) : null}
       <SummaryAction
         disabled={editorDirty}
         key={`summary:${note.version}`}

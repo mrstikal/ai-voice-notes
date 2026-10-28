@@ -10,6 +10,7 @@ import {
   type NoteSnapshot,
 } from "../db/schema.ts";
 import type * as schema from "../db/schema.ts";
+import { sortTags } from "./tags.ts";
 
 export type NotesExecutor = PgDatabase<
   NodePgQueryResultHKT,
@@ -152,6 +153,33 @@ export async function updateNoteSnapshotCas(
   return rows[0];
 }
 
+export async function updateNoteMetadataCas(
+  db: NotesExecutor,
+  input: {
+    id: string;
+    expectedVersion: number;
+    category: string | null;
+  },
+): Promise<NoteRow | undefined> {
+  const rows = await db
+    .update(notes)
+    .set({
+      category: input.category,
+      version: sql`${notes.version} + 1`,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(notes.id, input.id),
+        eq(notes.version, input.expectedVersion),
+        isNull(notes.deletedAt),
+      ),
+    )
+    .returning();
+
+  return rows[0];
+}
+
 export async function replaceNoteTags(
   db: NotesExecutor,
   noteId: string,
@@ -238,5 +266,5 @@ export async function getNoteTags(
     .where(eq(noteTags.noteId, noteId))
     .orderBy(asc(noteTags.tag));
 
-  return rows.map((row) => row.tag);
+  return sortTags(rows.map((row) => row.tag));
 }

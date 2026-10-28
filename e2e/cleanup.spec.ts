@@ -262,7 +262,7 @@ test("the preserved original transcript is restorable after a later named revisi
 
   const laterContent = `${cleaned} Pozdější změna.`;
   await page.getByLabel("Obsah (Markdown)").fill(laterContent);
-  await page.getByRole("button", { name: "Uložit" }).click();
+  await page.getByRole("button", { name: "Uložit", exact: true }).click();
   await expect
     .poll(async () => revisionCount(noteId), { timeout: 15_000 })
     .toBe(3);
