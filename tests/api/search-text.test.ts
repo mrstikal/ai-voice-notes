@@ -78,11 +78,11 @@ describe("P34 full-text search API", () => {
     });
   });
 
-  it("rejects semantic mode, overlong queries and invalid pages", async () => {
+  it("rejects semantic mode on GET, overlong queries and invalid pages", async () => {
     const semantic = await searchRoute(request("?q=test&mode=semantic"));
     expect(semantic.status).toBe(400);
     expect(await semantic.json()).toMatchObject({
-      error: { code: "search_mode_unsupported" },
+      error: { code: "semantic_requires_post" },
     });
 
     const overlong = await searchRoute(

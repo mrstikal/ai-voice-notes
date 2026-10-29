@@ -474,6 +474,46 @@ the user's headset verification, not on a recorded ten-trial aggregate.
   cost refusal, the 3-note/20-chunk cap and the no-approval path. Offline tests
   use an injected transport and make zero paid calls.
 
+## P37 semantic query
+
+- **Paid boundary:** `mode=semantic` is only available through a same-origin
+  `POST /api/search` with explicit `confirmCost: true` and an approved maximum
+  cost. GET with `mode=semantic`, page render, typing and refresh make no
+  provider call; GET returns `400 semantic_requires_post`. Full-text search and
+  its UI remain usable without a key.
+- **Query contract:** the query is trimmed to at most 200 graphemes (and 2,000
+  UTF-16 code units in the semantic route) before the P36 embedding adapter
+  embeds it once. The P12 row uses operation `embedding_query` and request kind
+  `embedding_query`; the query text is not stored, and no query vector is
+  written to note tables.
+- **Ranking:** exact pgvector cosine distance (`<=>`) over current-version,
+  active notes with `status='ready'`, the configured/frozen model and a
+  non-null embedding. `row_number()` picks the best chunk per note, then the
+  outer query orders by distance and note ID, so ties are deterministic. The
+  result shows a 240-grapheme excerpt and an incomplete-index notice when
+  current pending/error notes exist. An empty ready index returns
+  `409 semantic_index_empty` before any paid call, not a fake result.
+- **Live smoke (authorized 2026-10-28, isolated test database):** two
+  synthetic notes were created; the explicit reindex prepared and submitted
+  two chunks/vectors (`embedding_reindex`, settled `0.000002 USD`). One
+  confirmed query embedding (`embedding_query`, 17 prompt tokens, settled
+  `0.000001 USD`) ranked the chemistry note first for the query
+  `kyselina jablečná v laboratorním vzorku`; the unrelated administrative note
+  was returned second by KNN. No note text, provider payload or vector was
+  logged. Both synthetic notes/chunks were deleted in `finally`. This verifies
+  the live query-embedding path and cosine ranking, not semantic answer
+  quality; P38 owns the 20-query Hit@k/MRR evaluation.
+- **Deterministic evidence:** `tests/search/semantic.test.ts` covers excerpt
+  bounds/surrogates and pre-DB vector/page validation; `tests/db/semantic.test.ts`
+  covers closest-note ranking, best-chunk aggregation, deleted/other-version/
+  other-model exclusion, pending current chunks, deterministic pagination and
+  no note-table writes. `tests/api/search-semantic.test.ts` covers the GET
+  rejection, confirmation/approval gate, empty index, missing key plus usable
+  full-text search, one embedding call, index composition and provider error
+  mapping. `e2e/search-semantic-mock.spec.ts` proves no POST on load/typing,
+  one confirmed mocked POST, the incomplete-index notice, the exact note link
+  and the empty-index error.
+
 ## Live evidence (2026-10-26)
 
 - **Authorization:** the user explicitly requested the live microphone/provider

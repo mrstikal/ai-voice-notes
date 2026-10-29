@@ -93,6 +93,26 @@ describe("P36 OpenRouter embeddings adapter", () => {
     expect(options.estimatedMaxCostUsd).toBeGreaterThan(0);
   });
 
+  it("uses the semantic query operation and request kind when configured", async () => {
+    const body = validBody();
+    const { client, request } = fakeClient(body);
+    const embeddings = createEmbeddingService({
+      client,
+      operation: "embedding_query",
+      requestKind: "embedding_query",
+    });
+
+    await embeddings.embed(["migrace"]);
+    const options = request.mock.calls[0]![0] as OpenRouterRequestOptions;
+    const settlement = options.successSettlement?.(
+      new TextEncoder().encode(JSON.stringify(body)),
+    );
+
+    expect(options.operation).toBe("embedding_query");
+    expect(options.providerUsage?.requestKind).toBe("embedding_query");
+    expect(settlement?.providerUsage?.requestKind).toBe("embedding_query");
+  });
+
   it("preserves provider order by index and settles a reported cost", async () => {
     const body = validBody({ count: 2, cost: 0.000004 });
     body.data = [body.data[1]!, body.data[0]!];

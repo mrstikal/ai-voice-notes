@@ -18,7 +18,8 @@
     "test:e2e": "pnpm build && playwright test",
     "db:migrate": "node scripts/migrate.ts",
     "db:migrate:test": "node scripts/migrate.ts --test-db",
-    "db:seed": "node scripts/seed-notes.ts"
+    "db:seed": "node scripts/seed-notes.ts",
+    "eval:search": "node scripts/eval-search.ts"
   },
   "dependencies": {
     "@elevenlabs/elevenlabs-js": "2.74.0",

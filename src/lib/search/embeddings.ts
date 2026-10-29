@@ -13,6 +13,9 @@ import { countCl100kTokens } from "./chunking.ts";
 export const EMBEDDING_MODEL_ID = "openai/text-embedding-3-small";
 export const EMBEDDING_DIMENSIONS = 1536;
 export const EMBEDDING_OPERATION = "embedding_reindex";
+export const EMBEDDING_QUERY_OPERATION = "embedding_query";
+export const EMBEDDING_REINDEX_REQUEST_KIND = "embedding_reindex";
+export const EMBEDDING_QUERY_REQUEST_KIND = "embedding_query";
 export const EMBEDDING_BATCH_MAX_TEXTS = 20;
 export const EMBEDDING_TEXT_MAX_CODE_UNITS = 8_000;
 export const EMBEDDING_RESPONSE_MAX_BYTES = 4 * 1024 * 1024;
@@ -130,6 +133,7 @@ export function estimateEmbeddingMaxCostUsd(
 
 function readEmbeddingSettlement(
   bytes: Uint8Array,
+  requestKind: string,
 ): { reportedCostUsd: number | null; providerUsage: Record<string, unknown> } | null {
   let parsed: unknown;
 
@@ -154,7 +158,7 @@ function readEmbeddingSettlement(
   return {
     reportedCostUsd,
     providerUsage: {
-      requestKind: "embedding_reindex",
+      requestKind,
       dimensions: EMBEDDING_DIMENSIONS,
       encodingFormat: "float",
       returnedModel: response.data.model,
@@ -328,8 +332,12 @@ function toEmbeddingError(error: unknown): EmbeddingError {
 export function createEmbeddingService(options: {
   readonly client: Pick<OpenRouterClient, "request">;
   readonly modelId?: string;
+  readonly operation?: string;
+  readonly requestKind?: string;
 }): EmbeddingService {
   const modelId = options.modelId ?? EMBEDDING_MODEL_ID;
+  const operation = options.operation ?? EMBEDDING_OPERATION;
+  const requestKind = options.requestKind ?? EMBEDDING_REINDEX_REQUEST_KIND;
 
   if (!isSupportedModel(modelId)) {
     throw new EmbeddingError(
@@ -388,7 +396,7 @@ export function createEmbeddingService(options: {
             encoding_format: "float",
             input: [...texts],
           },
-          operation: EMBEDDING_OPERATION,
+          operation,
           model: modelId,
           estimatedMaxCostUsd,
           accept: "application/json",
@@ -396,7 +404,7 @@ export function createEmbeddingService(options: {
           maxResponseBytes: EMBEDDING_RESPONSE_MAX_BYTES,
           timeoutMs: EMBEDDING_TIMEOUT_MS,
           providerUsage: {
-            requestKind: "embedding_reindex",
+            requestKind,
             inputCount: texts.length,
             inputCodeUnits: texts.reduce(
               (total, text) => total + text.length,
@@ -406,7 +414,8 @@ export function createEmbeddingService(options: {
             encodingFormat: "float",
             estimatedMaxCostUsd,
           },
-          successSettlement: (bytes) => readEmbeddingSettlement(bytes),
+          successSettlement: (bytes) =>
+            readEmbeddingSettlement(bytes, requestKind),
         });
 
         return parseEmbeddingResponse(response, texts.length, modelId);
@@ -421,8 +430,14 @@ export function createEmbeddingService(options: {
   };
 }
 
-export function getEmbeddingService(): EmbeddingService {
+export function getEmbeddingService(
+  options: {
+    readonly operation?: string;
+    readonly requestKind?: string;
+  } = {},
+): EmbeddingService {
   return createEmbeddingService({
     client: getOpenRouterClient(),
+    ...options,
   });
 }

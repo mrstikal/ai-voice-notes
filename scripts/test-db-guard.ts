@@ -83,6 +83,18 @@ function databaseTargetKey(url: URL): string {
   return `${url.hostname.toLowerCase()}:${port}${url.pathname}`;
 }
 
+export function assertEvaluationTargets(
+  env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env,
+): TestDatabaseTargets {
+  if (env.NEXT_PHASE === "phase-production-build") {
+    throw new TestDatabaseGuardError(
+      "Hodnocení vyhledávání se nesmí spouštět během produkčního buildu.",
+    );
+  }
+
+  return assertTestDatabaseTargets(env);
+}
+
 export function assertTestDatabaseTargets(
   env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env,
 ): TestDatabaseTargets {
