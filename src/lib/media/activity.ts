@@ -4,7 +4,7 @@ const SERVER_SNAPSHOT = {
   dictationActive: false,
 } as const;
 
-export type MicrophoneActivityKind = "dictation" | "stop-monitor";
+export type MicrophoneActivityKind = "dictation" | "stop-monitor" | "meeting";
 
 let playbackOwners = new Set<string>();
 let microphoneOwners = new Map<string, MicrophoneActivityKind>();
