@@ -21,8 +21,9 @@ export default function MeetingsPage() {
       <p className="mt-3 max-w-2xl leading-7 text-stone-600">
         Nahrajte schůzku mikrofonem nebo vyberte lokální audio soubor. Server
         ověří skutečný typ a délku (MP3, WAV nebo WebM-Opus) a omezí nahrávku
-        na {config.meetingMaxMinutes} minut a 25 MiB. Přepis a vytvoření
-        poznámky přijdou v dalších fázích.
+        na {config.meetingMaxMinutes} minut a 25 MiB. Po výslovném potvrzení
+        ceny můžete nahrávku přepsat přes ElevenLabs Scribe v2 (batch). Přepis
+        zůstane neuložený v prohlížeči; poznámka se zatím nevytváří.
       </p>
       <MeetingRecorder
         maxBytes={MEETING_AUDIO_MAX_BYTES}

@@ -338,16 +338,30 @@ describe("MeetingRecorder", () => {
   it("previews and inspects a local file without auto-uploading", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn();
+    const inspectPayload = {
+      bytes: 3,
+      format: "wav",
+      codec: "pcm_s16le",
+      durationSeconds: 1,
+      inspection: "validated",
+      message: "Typ a délka ověřeny",
+    };
+    const offerPayload = {
+      provider: "elevenlabs",
+      model: "scribe_v2",
+      operation: "elevenlabs_scribe_batch",
+      languageCode: "cs",
+      maxMinutes: 15,
+      maxBytes: 25 * 1024 * 1024,
+      estimatedMaxCostUsd: 0.055,
+      transcriptMaxGraphemes: 60_000,
+      testMode: false,
+    };
 
-    fetchMock.mockImplementation(async () =>
-      response({
-        bytes: 3,
-        format: "wav",
-        codec: "pcm_s16le",
-        durationSeconds: 1,
-        inspection: "validated",
-        message: "Typ a délka ověřeny",
-      }),
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) =>
+      String(input).includes("/api/meetings/transcribe")
+        ? response(offerPayload)
+        : response(inspectPayload),
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -377,8 +391,12 @@ describe("MeetingRecorder", () => {
     expect(screen.getByTestId("meeting-inspected").textContent).toContain(
       "3 B",
     );
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0]!;
+    const inspectCalls = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes("/api/meetings/inspect"),
+    );
+
+    expect(inspectCalls).toHaveLength(1);
+    const [url, init] = inspectCalls[0]!;
 
     expect(url).toBe("/api/meetings/inspect");
     expect(init?.method).toBe("POST");
@@ -386,6 +404,106 @@ describe("MeetingRecorder", () => {
       "content-type": "application/octet-stream",
     });
     expect(init?.body).toBeInstanceOf(Blob);
+  });
+
+  it("locks preview-changing controls while a paid transcription is in flight", async () => {
+    const user = userEvent.setup();
+    let resolveTranscription: (value: Response) => void = () => undefined;
+    const pendingTranscription = new Promise<Response>((resolve) => {
+      resolveTranscription = resolve;
+    });
+    const inspectPayload = {
+      bytes: 3,
+      format: "wav",
+      codec: "pcm_s16le",
+      durationSeconds: 1,
+      inspection: "validated",
+      message: "Typ a délka ověřeny",
+    };
+    const offerPayload = {
+      provider: "elevenlabs",
+      model: "scribe_v2",
+      operation: "elevenlabs_scribe_batch",
+      languageCode: "cs",
+      maxMinutes: 15,
+      maxBytes: 25 * 1024 * 1024,
+      estimatedMaxCostUsd: 0.055,
+      transcriptMaxGraphemes: 60_000,
+      testMode: false,
+    };
+    const transcriptPayload = {
+      text: "Dobrý den.",
+      languageCode: "cs",
+      audioDurationSeconds: 1,
+      transcriptGraphemes: 10,
+      speakers: ["speaker_0"],
+      segments: [{ speakerId: "speaker_0", text: "Dobrý den." }],
+      diarization: "available",
+      model: "scribe_v2",
+      provider: "elevenlabs",
+      operation: "elevenlabs_scribe_batch",
+      durationSeconds: 1,
+      format: "wav",
+      bytes: 3,
+      testMode: false,
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+
+        if (url.includes("/api/meetings/transcribe")) {
+          return init?.method === "POST"
+            ? pendingTranscription
+            : response(offerPayload);
+        }
+
+        return response(inspectPayload);
+      },
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MeetingRecorder maxBytes={1_024} maxMinutes={15} />);
+
+    fireEvent.change(screen.getByTestId("meeting-file"), {
+      target: {
+        files: [new File(["abc"], "schuzka.wav", { type: "audio/wav" })],
+      },
+    });
+    await user.click(screen.getByTestId("meeting-inspect"));
+    await screen.findByTestId("meeting-inspected");
+    await screen.findByTestId("transcript-approve");
+    await user.click(screen.getByTestId("transcript-approve"));
+    await user.click(screen.getByTestId("transcript-start"));
+
+    await waitFor(() => {
+      expect(
+        (screen.getByTestId("meeting-start") as HTMLButtonElement).disabled,
+      ).toBe(true);
+    });
+    expect(
+      (screen.getByTestId("meeting-file") as HTMLInputElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByTestId("meeting-cancel") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByTestId("meeting-inspect") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByTestId("transcript-start") as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    await act(async () => {
+      resolveTranscription(response(transcriptPayload));
+    });
+
+    await waitFor(() => {
+      expect(
+        (screen.getByTestId("meeting-start") as HTMLButtonElement).disabled,
+      ).toBe(false);
+    });
+    expect(screen.getByTestId("transcript-preview")).toBeDefined();
   });
 
   it("reports an automatic stop after the meeting time limit", async () => {

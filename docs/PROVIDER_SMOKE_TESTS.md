@@ -549,3 +549,74 @@ the user's headset verification, not on a recorded ten-trial aggregate.
   transcription, Web Locks/UI, timeout and ledger path with synthetic audio. It
   does not verify a physical microphone, the real permission-denied prompt or a
   human 2-3 minute dictation; those remain manual checks.
+
+## P42 direct batch Scribe v2 transcription
+
+- **Provider contract (verified against the current vendor docs and the pinned
+  `@elevenlabs/elevenlabs-js` 2.74.0 types, without a paid call):** the direct
+  batch endpoint is `POST /v1/speech-to-text` with `multipart/form-data`,
+  `model_id=scribe_v2`, an optional `file`, `language_code`,
+  `timestamps_granularity` and `diarize`. The synchronous response is a
+  `SpeechToTextChunkResponseModel` with `text`, `language_code`,
+  `audio_duration_secs` and `words[].speaker_id`; a successful response does not
+  report a billed cost. The documented batch limits are 10 hours and 3 GB, so
+  the app's 15-minute/25 MiB bound is below the provider limit. Account-level
+  entitlement or quota rejection is still possible and is mapped to a Czech
+  `elevenlabs_entitlement_denied` error.
+- **Paid boundary:** `GET /api/meetings/transcribe` only returns the free cost
+  offer (provider, model, language, minute/byte bounds, upper estimate from
+  `0.22 USD/hour` and `MEETING_MAX_MINUTES`). `POST` requires exact Host,
+  Origin, `application/octet-stream`, the current 25 MiB stream bound and an
+  explicit `approveCostUsd` at or above the recomputed estimate; otherwise it
+  returns `409 meeting_cost_not_approved` before reading the body. The
+  approval ceiling is the larger of 1 USD and the displayed estimate, so a
+  raised `MEETING_MAX_MINUTES` remains usable. P12 reserves the estimate before
+  the outbound request. ElevenLabs does not report a cost, so a successful call
+  is left `unknown` with only model, language, audio duration, diarization flag
+  and a charge reason; no transcript text is stored in the usage ledger or
+  logs. The UI discloses that ElevenLabs processes the uploaded recording under
+  the provider's own retention policy; zero retention depends on the account.
+  The app does not set `enable_logging` because zero retention is documented
+  only for eligible enterprise accounts.
+- **Validation and cleanup:** the re-upload is written to a new 0600 temp file
+  under `.data/uploads`, re-inspected with P41B (`ffprobe` magic bytes,
+  format/codec, duration), transcribed, and unlinked in `finally` on success and
+  every failure. The browser keeps the original Blob; the server never retains
+  meeting audio. The returned text is bounded to
+  `MEETING_TRANSCRIPT_MAX_GRAPHEMES` (60,000) with no truncation. Speaker IDs
+  and segments are derived only from real `speaker_id` values in the provider
+  response; otherwise the UI shows `Rozlišení mluvčích není pro tento režim
+  dostupné` and no invented labels. Speaker segments keep the provider spacing
+  tokens, so a later P42B join does not merge words across speaker turns. All
+  preview controls that would replace the recording (Start, file input, Cancel,
+  Inspect) are locked while a paid transcription is in flight.
+- **Live smoke (authorized and observed 2026-10-29, development DB):** the user
+  explicitly authorized the paid check and supplied a 37.68 s Czech WAV
+  (16 kHz mono PCM, 1,205,804 B). The real app ran on `pnpm start` with the
+  gitignored `.env.local`, no `AI_TEST_MODE` and the real key. The UI showed
+  no mock notice, inspected `37,7 s`, offered `0,055 USD`, transcribed through
+  the real batch endpoint in 6.5 s and showed an editable 388-character Czech
+  transcript with `diarize=true` data: one verified speaker, `speaker_0`, with
+  the label editable to `Petra` and propagated to the segment. `Zahodit přepis`
+  removed the preview. The text matched the supplied recording (greeting,
+  Monday/autumn weather, shopping list, 10:00 meeting, closing sentence).
+  `ai_usage` recorded one `elevenlabs_scribe_batch` / `elevenlabs` /
+  `scribe_v2` row: status `unknown`, reserved `0.055000`, no reported cost,
+  provider usage only `model`, `diarize`, `chargeReason`, `languageCode=ces`
+  and `audioDurationSecs=37.68`; no transcript text. Zero notes were created
+  and `.data/uploads` held no meeting temp file afterwards. The only console
+  error was an unrelated `favicon.ico` 404. This confirms the provider accepts
+  the `application/octet-stream` part with the `meeting-upload.wav` filename
+  and returns the expected diarized shape; the actual per-second charge remains
+  unknown because the provider reports no cost.
+- **Deterministic evidence:** `tests/meetings/transcribe.test.ts` covers the
+  documented contract/estimate, diarized and no-speaker parsing, malformed,
+  empty and oversized output, missing key, entitlement, timeout, rate limit,
+  provider failure, the free offer, approval refusals, real 1-second WAV
+  re-inspection, a real 900-second WAV with a provider entitlement denial, a
+  raised `MEETING_MAX_MINUTES` approval, temp-file deletion and zero note/usage
+  side effects beyond the reservation. The loopback mock rejects a request whose
+  multipart body lacks a non-empty `file` part with a `meeting-upload` filename,
+  so the E2E proves the audio bytes reached the provider path. `e2e/meeting-inspect.spec.ts` uploads a validated WAV, confirms
+  the cost, checks the mocked Czech transcript and speaker labels, edits a
+  label, confirms zero notes and temp files, and dismisses the preview.

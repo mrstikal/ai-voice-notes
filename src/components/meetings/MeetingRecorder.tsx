@@ -9,6 +9,8 @@ import {
   type MicrophoneLease,
 } from "@/lib/voice/microphone";
 
+import { TranscriptReview } from "./TranscriptReview";
+
 const RECORDING_MIME_TYPE = "audio/webm;codecs=opus";
 
 interface MeetingRecorderProps {
@@ -17,6 +19,7 @@ interface MeetingRecorderProps {
 }
 
 interface MeetingPreview {
+  readonly id: number;
   readonly blob: Blob;
   readonly bytes: number;
   readonly mimeType: string;
@@ -78,6 +81,7 @@ export function MeetingRecorder({
   const [recordedBytes, setRecordedBytes] = useState(0);
   const [preview, setPreview] = useState<MeetingPreview | null>(null);
   const [inspecting, setInspecting] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
   const [inspected, setInspected] = useState<InspectResponse | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const previewRef = useRef<MeetingPreview | null>(null);
@@ -87,6 +91,7 @@ export function MeetingRecorder({
   const bytesRef = useRef(0);
   const cancelledRef = useRef(false);
   const sizeExceededRef = useRef(false);
+  const previewSequenceRef = useRef(0);
   const autoStopRef = useRef(false);
   const mountedRef = useRef(true);
   const intervalRef = useRef<number | null>(null);
@@ -223,7 +228,9 @@ export function MeetingRecorder({
       return;
     }
 
+    previewSequenceRef.current += 1;
     updatePreview({
+      id: previewSequenceRef.current,
       blob: new Blob(chunks, { type: RECORDING_MIME_TYPE }),
       bytes,
       mimeType: RECORDING_MIME_TYPE,
@@ -401,7 +408,9 @@ export function MeetingRecorder({
       return;
     }
 
+    previewSequenceRef.current += 1;
     updatePreview({
+      id: previewSequenceRef.current,
       blob: file,
       bytes: file.size,
       mimeType: file.type || "application/octet-stream",
@@ -460,6 +469,7 @@ export function MeetingRecorder({
 
   const recording = state === "recording" || state === "stopping";
   const busy = state === "starting" || recording;
+  const controlsLocked = busy || transcribing;
 
   return (
     <section
@@ -472,9 +482,10 @@ export function MeetingRecorder({
             Nahrání nahrávky schůzky
           </h2>
           <p className="mt-1 max-w-2xl text-sm leading-6 text-stone-600">
-            Nahrávka zůstává v tomto prohlížeči. Server ji při ověření uloží
-            pouze do dočasného soukromého souboru a hned jej smaže. Zatím se
-            nevytváří poznámka, přepis ani se nevolá AI.
+            Nahrávka zůstává v tomto prohlížeči. Server ji při ověření
+            a přepisu uloží pouze do dočasného soukromého souboru a hned jej
+            smaže. Přepis se spouští až po výslovném potvrzení ceny níže;
+            poznámka se zatím nevytváří.
           </p>
         </div>
         <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1 text-xs text-stone-600">
@@ -496,7 +507,7 @@ export function MeetingRecorder({
         <button
           className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900 disabled:cursor-not-allowed disabled:bg-stone-300"
           data-testid="meeting-start"
-          disabled={supported !== true || busy}
+          disabled={supported !== true || controlsLocked}
           onClick={() => void startRecording()}
           type="button"
         >
@@ -514,7 +525,7 @@ export function MeetingRecorder({
         <button
           className="rounded-lg border border-stone-300 px-3 py-2 text-sm font-semibold text-stone-800 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-50"
           data-testid="meeting-cancel"
-          disabled={!busy && !preview}
+          disabled={transcribing || (!busy && !preview)}
           onClick={cancelRecording}
           type="button"
         >
@@ -534,7 +545,7 @@ export function MeetingRecorder({
           accept="audio/*"
           className="mt-1 block w-full text-sm text-stone-700"
           data-testid="meeting-file"
-          disabled={busy || inspecting}
+          disabled={controlsLocked || inspecting}
           onChange={(event) => {
             chooseFile(event.target.files?.[0]);
             event.target.value = "";
@@ -579,7 +590,7 @@ export function MeetingRecorder({
           <button
             className="mt-3 rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900 disabled:cursor-not-allowed disabled:bg-stone-300"
             data-testid="meeting-inspect"
-            disabled={inspecting}
+            disabled={inspecting || transcribing}
             onClick={() => void inspectPreview()}
             type="button"
           >
@@ -598,6 +609,15 @@ export function MeetingRecorder({
           {formatBytes(inspected.bytes)}. {inspected.message}. Nahrávka byla ze
           serveru smazána.
         </p>
+      ) : null}
+
+      {preview && inspected ? (
+        <TranscriptReview
+          durationSeconds={inspected.durationSeconds}
+          key={preview.id}
+          onBusyChange={setTranscribing}
+          preview={preview}
+        />
       ) : null}
     </section>
   );

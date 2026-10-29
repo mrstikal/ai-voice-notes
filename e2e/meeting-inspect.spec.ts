@@ -130,6 +130,58 @@ test("validates a MediaRecorder-like headerless WebM using packet timestamps", a
   }
 });
 
+test("transcribes a validated meeting into an unsaved editable preview", async ({
+  page,
+}) => {
+  test.skip(!hasFfmpeg(), "FFmpeg is required for meeting transcription.");
+  const beforeNotes = await noteCount();
+  const media = await createSilentWav(1);
+
+  try {
+    await page.goto("/meetings");
+    await page.getByTestId("meeting-file").setInputFiles({
+      name: "schuzka.wav",
+      mimeType: "audio/wav",
+      buffer: await readFile(media.path),
+    });
+    await page.getByTestId("meeting-inspect").click();
+
+    await expect(page.getByTestId("meeting-inspected")).toContainText(
+      "Typ a délka ověřeny",
+    );
+    await expect(page.getByTestId("transcript-offer")).toContainText(
+      "elevenlabs",
+    );
+    await expect(page.getByTestId("transcript-start")).toBeDisabled();
+
+    await page.getByTestId("transcript-approve").check();
+    await page.getByTestId("transcript-start").click();
+
+    await expect(page.getByTestId("transcript-preview")).toBeVisible();
+    await expect(page.getByTestId("transcript-speaker-0")).toHaveValue(
+      "Mluvčí 1",
+    );
+    await expect(page.getByTestId("transcript-segment-0")).toHaveValue(
+      "Dobrý den, týme. ",
+    );
+    await expect(page.getByTestId("transcript-segment-1")).toHaveValue(
+      "Schůzka začíná v devět.",
+    );
+    await expect(page.getByTestId("transcript-unavailable")).toHaveCount(0);
+
+    await page.getByTestId("transcript-speaker-0").fill("Petra");
+    await expect(page.getByTestId("transcript-segment-0")).toBeVisible();
+
+    expect(await noteCount()).toBe(beforeNotes);
+    expect(await meetingTempFiles()).toEqual([]);
+
+    await page.getByTestId("transcript-dismiss").click();
+    await expect(page.getByTestId("transcript-preview")).toHaveCount(0);
+  } finally {
+    await cleanupMedia(media.directory);
+  }
+});
+
 test("rejects a spoofed .wav file based on real media bytes", async ({ page }) => {
   const beforeNotes = await noteCount();
 
