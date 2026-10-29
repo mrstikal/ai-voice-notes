@@ -44,6 +44,34 @@ Open <http://127.0.0.1:3000>. The health endpoint is
 `APP_ORIGIN` (default `127.0.0.1:3000`). The app is not reachable from another
 host by default and has no authentication, so do not expose it to a network.
 
+## Meetings and FFmpeg
+
+Meeting capture (`/meetings`) requires host FFmpeg executables on `PATH` from
+P41B onward. The server uses `ffprobe` against its own private temp file to
+verify the real container, audio codec and duration; a client filename or MIME
+label is never trusted. Missing or broken FFmpeg returns a Czech error before a
+file is accepted.
+
+Ubuntu / WSL installation and detection:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ffmpeg
+ffprobe -version
+ffmpeg -version
+```
+
+If the host has no package privileges, a static Linux build may be unpacked and
+its `ffmpeg`/`ffprobe` placed in a user `PATH` directory such as
+`~/.local/bin`; verify both commands the same way. Do not commit binaries.
+
+The accepted meeting inputs are MP3, WAV (PCM) and WebM-Opus. The direct
+ElevenLabs batch Scribe v2 documentation (checked 2026-10-29) lists MP3, WAV,
+WebM and Opus among supported audio formats; this app applies stricter local
+limits of 15 minutes and 25 MiB and rejects Matroska/other containers even when
+they contain Opus. Browser duration and size guards are UX only; `ffprobe`
+metadata is authoritative. P41B makes no provider call.
+
 ## Environment
 
 Copy `.env.example` to `.env.local`. Both `.env.local` and `.env.test.local` are

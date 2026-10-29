@@ -19,10 +19,10 @@ export default function MeetingsPage() {
         Zápis ze schůzky
       </h1>
       <p className="mt-3 max-w-2xl leading-7 text-stone-600">
-        Nahrajte schůzku mikrofonem nebo vyberte lokální audio soubor. V této
-        fázi jde pouze o bezpečné omezení velikosti a dočasné přijetí souboru;
-        přepis, ověření typu a délky i vytvoření poznámky přijdou v dalších
-        fázích.
+        Nahrajte schůzku mikrofonem nebo vyberte lokální audio soubor. Server
+        ověří skutečný typ a délku (MP3, WAV nebo WebM-Opus) a omezí nahrávku
+        na {config.meetingMaxMinutes} minut a 25 MiB. Přepis a vytvoření
+        poznámky přijdou v dalších fázích.
       </p>
       <MeetingRecorder
         maxBytes={MEETING_AUDIO_MAX_BYTES}

@@ -26,7 +26,10 @@ interface MeetingPreview {
 
 interface InspectResponse {
   readonly bytes: number;
-  readonly inspection: "unverified";
+  readonly format: "mp3" | "wav" | "webm";
+  readonly codec: string;
+  readonly durationSeconds: number;
+  readonly inspection: "validated";
   readonly message: string;
 }
 
@@ -569,7 +572,9 @@ export function MeetingRecorder({
             {formatBytes(preview.bytes)} · {preview.mimeType}
           </p>
           <p className="mt-1 text-xs font-medium text-amber-800">
-            Typ a délka dosud neověřeny
+            {inspected
+              ? "Typ a délka ověřeny"
+              : "Typ a délka dosud neověřeny"}
           </p>
           <button
             className="mt-3 rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900 disabled:cursor-not-allowed disabled:bg-stone-300"
@@ -588,8 +593,10 @@ export function MeetingRecorder({
           className="mt-3 rounded-lg border border-stone-200 bg-white p-3 text-sm text-stone-700"
           data-testid="meeting-inspected"
         >
-          Server přijal {formatBytes(inspected.bytes)}. {inspected.message}.
-          Nahrávka byla ze serveru smazána.
+          Server ověřil {inspected.format.toUpperCase()} / {inspected.codec},{" "}
+          {inspected.durationSeconds.toFixed(1)} s,{" "}
+          {formatBytes(inspected.bytes)}. {inspected.message}. Nahrávka byla ze
+          serveru smazána.
         </p>
       ) : null}
     </section>

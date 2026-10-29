@@ -2,7 +2,10 @@ import { unlink } from "node:fs/promises";
 
 import { loadConfig } from "@/lib/config";
 import {
+  MeetingMediaError,
   MeetingUploadError,
+  assertFfprobeAvailable,
+  inspectMeetingAudio,
   receiveMeetingAudioToTemp,
 } from "@/lib/meetings/audio";
 import {
@@ -17,6 +20,16 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function uploadErrorResponse(error: unknown): Response {
+  if (error instanceof MeetingMediaError) {
+    return jsonError(
+      error.status,
+      error.code,
+      error.message,
+      undefined,
+      error.details,
+    );
+  }
+
   if (error instanceof MeetingUploadError) {
     return jsonError(error.status, error.code, error.message);
   }
@@ -72,6 +85,12 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
+  try {
+    await assertFfprobeAvailable();
+  } catch (error) {
+    return uploadErrorResponse(error);
+  }
+
   let received: Awaited<ReturnType<typeof receiveMeetingAudioToTemp>> | null =
     null;
 
@@ -79,11 +98,18 @@ export async function POST(request: Request): Promise<Response> {
     received = await receiveMeetingAudioToTemp(request, {
       maxBytes: MEETING_AUDIO_MAX_BYTES,
     });
+    const inspected = await inspectMeetingAudio(received.path, {
+      maxDurationSeconds: config.meetingMaxMinutes * 60,
+      maxBytes: MEETING_AUDIO_MAX_BYTES,
+    });
 
     return jsonOk({
-      bytes: received.bytes,
-      inspection: "unverified",
-      message: "Typ a délka dosud neověřeny",
+      bytes: inspected.sizeBytes,
+      format: inspected.format,
+      codec: inspected.codec,
+      durationSeconds: inspected.durationSeconds,
+      inspection: "validated",
+      message: "Typ a délka ověřeny",
     });
   } catch (error) {
     return uploadErrorResponse(error);

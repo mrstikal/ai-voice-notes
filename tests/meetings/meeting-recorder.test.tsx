@@ -296,8 +296,11 @@ describe("MeetingRecorder", () => {
     resolveFetch(
       response({
         bytes: 3,
-        inspection: "unverified",
-        message: "Typ a délka dosud neověřeny",
+        format: "wav",
+        codec: "pcm_s16le",
+        durationSeconds: 1,
+        inspection: "validated",
+        message: "Typ a délka ověřeny",
       }),
     );
 
@@ -339,8 +342,11 @@ describe("MeetingRecorder", () => {
     fetchMock.mockImplementation(async () =>
       response({
         bytes: 3,
-        inspection: "unverified",
-        message: "Typ a délka dosud neověřeny",
+        format: "wav",
+        codec: "pcm_s16le",
+        durationSeconds: 1,
+        inspection: "validated",
+        message: "Typ a délka ověřeny",
       }),
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -365,6 +371,9 @@ describe("MeetingRecorder", () => {
     await user.click(screen.getByTestId("meeting-inspect"));
 
     expect(await screen.findByTestId("meeting-inspected")).toBeDefined();
+    expect(screen.getByTestId("meeting-inspected").textContent).toContain(
+      "WAV",
+    );
     expect(screen.getByTestId("meeting-inspected").textContent).toContain(
       "3 B",
     );

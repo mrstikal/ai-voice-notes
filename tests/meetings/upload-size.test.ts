@@ -184,15 +184,13 @@ describe("P41 meeting upload", () => {
     expect(typeResponse.status).toBe(415);
   });
 
-  it("returns an unverified byte count and deletes the temp file on the route", async () => {
+  it("rejects malformed media after streaming and deletes the temp file", async () => {
     const before = await meetingFiles(DEFAULT_MEETING_UPLOAD_DIR);
     const response = await inspectRoute(request(new Uint8Array([1, 2, 3])));
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(422);
     expect(await response.json()).toMatchObject({
-      bytes: 3,
-      inspection: "unverified",
-      message: "Typ a délka dosud neověřeny",
+      error: { code: "invalid_media" },
     });
     expect(await meetingFiles(DEFAULT_MEETING_UPLOAD_DIR)).toEqual(before);
   });

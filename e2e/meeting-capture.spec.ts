@@ -1,4 +1,4 @@
-import { readdir } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 
 import { expect, test } from "@playwright/test";
 import { Pool } from "pg";
@@ -8,6 +8,11 @@ import {
   loadTestEnvironment,
 } from "../scripts/test-db-guard";
 import { DEFAULT_MEETING_UPLOAD_DIR } from "../src/lib/meetings/audio";
+import {
+  cleanupMedia,
+  createSilentWav,
+  hasFfmpeg,
+} from "../tests/fixtures/media";
 
 test.setTimeout(120_000);
 
@@ -69,7 +74,9 @@ test("uploads and inspects a local file without creating a note or calling a pro
   page,
   request,
 }) => {
+  test.skip(!hasFfmpeg(), "FFmpeg is required for the validated media flow.");
   const beforeNotes = await noteCount();
+  const media = await createSilentWav(1);
   const providerRequests: string[] = [];
 
   page.on("request", (browserRequest) => {
@@ -84,45 +91,49 @@ test("uploads and inspects a local file without creating a note or calling a pro
   ).toBeVisible();
   await expect(page.getByTestId("meeting-recorder")).toBeVisible();
 
-  await page.getByTestId("meeting-file").setInputFiles({
-    name: "synteticka-schuzka.webm",
-    mimeType: "audio/webm",
-    buffer: Buffer.from("synthetic-audio-bytes"),
-  });
+  try {
+    await page.getByTestId("meeting-file").setInputFiles({
+      name: "synteticka-schuzka.wav",
+      mimeType: "audio/wav",
+      buffer: await readFile(media.path),
+    });
 
   await expect(page.getByTestId("meeting-preview")).toBeVisible();
-  await expect(page.getByTestId("meeting-preview")).toContainText(
-    "synteticka-schuzka.webm",
-  );
-  await expect(page.getByTestId("meeting-preview")).toContainText(
-    "Typ a délka dosud neověřeny",
-  );
-  await expect(page.getByTestId("meeting-inspected")).toHaveCount(0);
+    await expect(page.getByTestId("meeting-preview")).toContainText(
+      "synteticka-schuzka.wav",
+    );
+    await expect(page.getByTestId("meeting-preview")).toContainText(
+      "Typ a délka dosud neověřeny",
+    );
+    await expect(page.getByTestId("meeting-inspected")).toHaveCount(0);
 
-  await page.getByTestId("meeting-inspect").click();
+    await page.getByTestId("meeting-inspect").click();
 
-  await expect(page.getByTestId("meeting-inspected")).toBeVisible();
-  await expect(page.getByTestId("meeting-inspected")).toContainText(
-    "Server přijal",
-  );
-  await expect(page.getByTestId("meeting-inspected")).toContainText(
-    "Typ a délka dosud neověřeny",
-  );
+    await expect(page.getByTestId("meeting-inspected")).toBeVisible();
+    await expect(page.getByTestId("meeting-inspected")).toContainText(
+      "Server ověřil WAV",
+    );
+    await expect(page.getByTestId("meeting-inspected")).toContainText(
+      "Typ a délka ověřeny",
+    );
 
-  expect(await noteCount()).toBe(beforeNotes);
-  expect(await meetingTempFiles()).toEqual([]);
-  expect(providerRequests).toEqual([]);
+    expect(await noteCount()).toBe(beforeNotes);
+    expect(await meetingTempFiles()).toEqual([]);
+    expect(providerRequests).toEqual([]);
 
-  const wrongOrigin = await request.post("/api/meetings/inspect", {
-    headers: {
-      origin: "http://evil.example",
-      "content-type": "application/octet-stream",
-    },
-    data: Buffer.from("synthetic-audio"),
-  });
+    const wrongOrigin = await request.post("/api/meetings/inspect", {
+      headers: {
+        origin: "http://evil.example",
+        "content-type": "application/octet-stream",
+      },
+      data: Buffer.from("synthetic-audio"),
+    });
 
-  expect(wrongOrigin.status()).toBe(403);
-  expect(await meetingTempFiles()).toEqual([]);
+    expect(wrongOrigin.status()).toBe(403);
+    expect(await meetingTempFiles()).toEqual([]);
+  } finally {
+    await cleanupMedia(media.directory);
+  }
 });
 
 test("the meetings page links from the main navigation and keeps recording guidance visible", async ({
