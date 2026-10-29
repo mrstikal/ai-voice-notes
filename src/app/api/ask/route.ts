@@ -14,6 +14,7 @@ import {
   getEmbeddingService,
 } from "@/lib/search/embeddings";
 import {
+  GROUNDING_LLM_MAX_COST_USD,
   GroundingError,
   askGroundedQuestion,
   getGroundingLlm,
@@ -129,7 +130,7 @@ export const POST = createGuardedJsonRoute<AskRequest>({
         ? estimateEmbeddingMaxCostUsd([question])
         : 0;
       const estimatedMaxCostUsd = ceil6(
-        llmStatus.estimatedMaxCostUsd + queryEmbeddingUsd,
+        GROUNDING_LLM_MAX_COST_USD + queryEmbeddingUsd,
       );
 
       if (!data.confirmCost) {

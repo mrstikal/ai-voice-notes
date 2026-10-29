@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { POST as askRoute } from "@/app/api/ask/route";
-import { GroundingError } from "@/lib/search/grounding";
+import {
+  GROUNDING_LLM_MAX_COST_USD,
+  GroundingError,
+} from "@/lib/search/grounding";
 
 const APP_ORIGIN = "http://127.0.0.1:3000";
 const fakeDb = {};
@@ -191,8 +194,12 @@ describe("P39 ask API", () => {
     };
 
     expect(body.status).toBe("answered");
-    expect(body.approvalCeilingUsd).toBeGreaterThan(0.02);
-    expect(body.approvalCeilingUsd).toBeLessThan(0.021);
+    expect(body.approvalCeilingUsd).toBeGreaterThan(
+      GROUNDING_LLM_MAX_COST_USD,
+    );
+    expect(body.approvalCeilingUsd).toBeLessThan(
+      GROUNDING_LLM_MAX_COST_USD + 0.001,
+    );
   });
 
   it("uses text-only retrieval without an embedder when no vectors are ready", async () => {

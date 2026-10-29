@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { AskNotes } from "@/components/search/AskNotes";
 import { HybridSearch } from "@/components/search/HybridSearch";
 import { IndexControls } from "@/components/search/IndexControls";
 import { SearchResults } from "@/components/search/SearchResults";
@@ -16,7 +17,13 @@ import {
   normalizeSearchQuery,
   searchNotesFullText,
 } from "@/lib/search/fts";
-import { getEmbeddingProviderStatus } from "@/lib/search/embeddings";
+import {
+  EMBEDDING_MODEL_ID,
+  getEmbeddingProviderStatus,
+} from "@/lib/search/embeddings";
+import { getLlmProviderStatus } from "@/lib/ai/structured";
+import { GROUNDING_LLM_MAX_COST_USD } from "@/lib/search/grounding";
+import { getReindexStatus } from "@/lib/search/reindex";
 import { getIndexStatuses } from "@/lib/search/index-state";
 import { SEMANTIC_QUERY_APPROVAL_USD } from "@/lib/search/semantic";
 
@@ -88,6 +95,16 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
     mode: "hybrid",
     ...(rawQuery === "" ? {} : { q: rawQuery }),
   }).toString()}`;
+  const askDb = getDb();
+  const llmStatus = getLlmProviderStatus();
+  const embeddingStatus = getEmbeddingProviderStatus();
+  const askIndexStatus = await getReindexStatus(askDb, EMBEDDING_MODEL_ID);
+  const askSemanticAvailable =
+    askIndexStatus.chunks.ready > 0 && embeddingStatus.configured;
+  const askApprovalUsd =
+    Math.ceil(
+      (GROUNDING_LLM_MAX_COST_USD + SEMANTIC_QUERY_APPROVAL_USD) * 1e6,
+    ) / 1e6;
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-12">
@@ -140,6 +157,19 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
           Kombinovaně
         </Link>
       </nav>
+
+      <AskNotes
+        provider={{
+          configured: llmStatus.configured,
+          model: llmStatus.model,
+          blockedReason: llmStatus.blockedReason,
+          llmMaxUsd: GROUNDING_LLM_MAX_COST_USD,
+          approvalUsd: askApprovalUsd,
+          semanticAvailable: askSemanticAvailable,
+          embeddingModel: embeddingStatus.model,
+          readyChunks: askIndexStatus.chunks.ready,
+        }}
+      />
 
       <IndexControls />
 
@@ -212,6 +242,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
           )}
         </>
       )}
+
     </div>
   );
 }
