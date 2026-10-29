@@ -28,6 +28,8 @@ export class SemanticSearchError extends Error {
 
 export interface SemanticSearchItem {
   readonly id: string;
+  readonly chunkId: string;
+  readonly noteVersion: number;
   readonly title: string;
   readonly category: string | null;
   readonly tags: string[];
@@ -140,7 +142,9 @@ export async function searchNotesSemantic(
   const result = await db.execute(sql`
     WITH ranked AS (
       SELECT
+        c.id AS chunk_id,
         c.note_id,
+        c.note_version,
         c.text,
         c.embedding <=> ${literal}::vector AS distance,
         row_number() OVER (
@@ -160,6 +164,8 @@ export async function searchNotesSemantic(
     )
     SELECT
       r.note_id AS id,
+      r.chunk_id,
+      r.note_version,
       n.title,
       n.category,
       n.updated_at,
@@ -179,6 +185,8 @@ export async function searchNotesSemantic(
   `);
   const rows = result.rows as Array<{
     id: string;
+    chunk_id: string;
+    note_version: number;
     title: string;
     category: string | null;
     tags: string[];
@@ -206,6 +214,8 @@ export async function searchNotesSemantic(
     hasNext: offset + rows.length < total,
     items: rows.map((row) => ({
       id: row.id,
+      chunkId: row.chunk_id,
+      noteVersion: row.note_version,
       title: row.title,
       category: row.category,
       tags: row.tags,

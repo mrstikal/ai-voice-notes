@@ -54,3 +54,36 @@ threshold".
 - Text mode is offline and read-only: zero provider calls, no notes seeded or
   deleted by the evaluator. `NODE_ENV=test pnpm db:seed` is a separate explicit
   preparation step.
+
+## Stage 4 - Grounded answers (P39)
+
+- Automated checks only: the service accepts at most six claims, each with a
+  text of at most 400 graphemes and 1-3 citations. Every citation must match a
+  current-version, undeleted chunk retrieved for that question; the retrieved
+  chunks are version/text-rechecked after the model responds. Free-form answer
+  text, missing/foreign citations, excess claims/citations and truncated model
+  output are rejected rather than repaired.
+- Grounding requires a free lexical anchor in note **content** before any paid
+  call: exact P34 full-text first, then an OR over the question's significant
+  unaccented terms. The anchor uses the indexed `notes.search_vector` as a
+  first pass and re-checks the content-only predicate on those candidates, so
+  the note-content rule does not give up the GIN index. Terms of five or more letters use the first five letters
+  as a prefix (`běžecký`/`běžeckého`, `trénink`/`tréninku`); shorter terms must
+  match exactly, so a 3–4 letter term cannot open the paid path merely by
+  prefixing an unrelated word. The selected chunk is ranked with the same
+  prefix query, not with the exact query that already failed. Zero anchor
+  returns the exact insufficient-evidence sentence with zero query-embedding
+  and zero LLM requests, even when vectors are ready. Semantic-only evidence
+  with no shared lexical content anchor is still not used for grounded
+  answers; use the `Významově` search mode for that. This is an explicit
+  text-anchored safety contract, not a full semantic recall claim.
+- The model receives note text only as untrusted quoted JSON data with an
+  explicit instruction not to follow commands inside it. The validator can
+  reject invented links, but cannot prove that a claim is factually true.
+- **Manual factual-quality review: not performed / required.** The API returns
+  `manualFactualReview: "required"`; a valid citation is provenance, not a
+  truth proof. No accuracy score is claimed here.
+- No live LLM answer was run for P39. Tests use an injected LLM plus one
+  fake-transport `llm_grounded_answer` request; no note text was written to
+  `provider_usage` or logs. Provider cost remains `unknown` unless the provider
+  reports it, and the UI must show that state.

@@ -40,6 +40,8 @@ function semanticItem(
 ): SemanticSearchItem {
   return {
     id,
+    chunkId: `chunk-${id}`,
+    noteVersion: 1,
     title,
     category: null,
     tags: [],
