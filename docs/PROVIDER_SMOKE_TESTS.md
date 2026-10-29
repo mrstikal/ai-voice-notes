@@ -620,3 +620,47 @@ the user's headset verification, not on a recorded ten-trial aggregate.
   so the E2E proves the audio bytes reached the provider path. `e2e/meeting-inspect.spec.ts` uploads a validated WAV, confirms
   the cost, checks the mocked Czech transcript and speaker labels, edits a
   label, confirms zero notes and temp files, and dismisses the preview.
+
+## P42B reviewed transcript and atomic note creation
+
+- **No provider path:** `POST /api/meetings/save` is local-only. It uses the
+  guarded P04 JSON route (exact Host/Origin, `application/json`, rate limit) and
+  never resolves a provider key, calls ElevenLabs/OpenRouter, or writes P12
+  usage. Saving remains available when no provider key is configured.
+- **Body bound:** the route has its own **3 MiB streaming** cap
+  (`MEETING_SAVE_MAX_BYTES`), separate from the 1 MiB note-edit cap in P04. The
+  browser serializes the payload and computes its exact UTF-8 JSON byte length
+  before POST; over the cap it makes **no** request and immediately offers
+  `Stáhnout přepis (.txt)`. A forced direct POST over the cap returns
+  `413 payload_too_large` before any DB work.
+- **Content contract:** the server trims and canonicalizes the reviewed text,
+  escapes Markdown so literal `#`, `**`, links, HTML-like text, entities and
+  list markers are preserved as visible text, and revalidates every part through
+  P02 `prepareNoteContent`/`countGraphemes`. Speaker labels are persisted only
+  as the reviewed `**Label:** text` paragraphs, never as provider metadata.
+- **Split and transaction:** one part up to the configured note limit (default
+  20,000 visible graphemes) creates one note. A longer review is packed greedily
+  at paragraph/segment boundaries into at most three parts, each at most the
+  note limit, with titles `Název – část i/n`. If a single paragraph exceeds the
+  limit or four or more parts would be required, the route returns
+  `422 meeting_transcript_too_long` with details and never truncates; the UI
+  offers the local download. Every note insert, its `initial` revision,
+  search/chunk refresh and the `meeting_saves` row happen in **one** transaction;
+  an injected failure after the first note rolls everything back.
+- **Idempotency:** the browser assigns one UUID per reviewed preview. The server
+  stores `meeting_saves(request_id PK, input_hash, note_ids, created_at)` where
+  `input_hash` is SHA-256 of the normalized title plus canonical paragraphs, and
+  inserts the row with `ON CONFLICT DO NOTHING` inside the same transaction. A
+  retry with the same request id and hash returns the first note ids (HTTP 200,
+  `duplicate: true`); reusing the id with different reviewed content returns
+  `409 meeting_save_conflict`. Concurrent identical submits serialize to one
+  note set. The save UI locks Start/file/Cancel/Inspect and its own controls
+  while the request is in flight and disables editing/saving after success.
+- **Offline determinism:** `tests/db/meeting-save.test.ts` covers literal
+  Markdown preservation, one/two-part creation, numbered titles, initial
+  revisions, duplicate/conflicting request ids, concurrent idempotency,
+  rollback-on-error, too-long refusal, persistence through a fresh connection
+  and the forced 3 MiB 413 path. `e2e/meeting-save-mock.spec.ts` saves a mocked
+  diarized review into one note, asserts no additional `ai_usage` row, opens the
+  saved note, proves dismissal creates nothing and probes the direct 3 MiB
+  rejection. No live provider call is involved in P42B.

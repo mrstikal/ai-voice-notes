@@ -4,7 +4,7 @@ import { isLoopbackHostname, validateStartupEnvironment } from "../config.ts";
 
 export const NOTE_EDIT_MAX_BYTES = 1_048_576;
 export const TOKEN_TOOL_MAX_BYTES = 16 * 1024;
-export const MEETING_SAVE_MAX_BYTES = 3 * 1024 * 1024;
+export { MEETING_SAVE_MAX_BYTES } from "../meetings/save-shared.ts";
 export const MEETING_AUDIO_MAX_BYTES = 25 * 1024 * 1024;
 
 export type MutationMethod = "POST" | "PATCH" | "DELETE";

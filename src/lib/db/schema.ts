@@ -309,3 +309,24 @@ export const editProposals = pgTable(
     ),
   ],
 );
+
+export const meetingSaves = pgTable(
+  "meeting_saves",
+  {
+    requestId: uuid("request_id").primaryKey(),
+    inputHash: text("input_hash").notNull(),
+    noteIds: uuid("note_ids").array().notNull(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check(
+      "meeting_saves_input_hash_hex",
+      sql`${table.inputHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+  ],
+);

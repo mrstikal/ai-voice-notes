@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MeetingRecorder } from "../../src/components/meetings/MeetingRecorder";
+import { MEETING_SAVE_MAX_BYTES } from "../../src/lib/meetings/save-shared";
 import { resetMediaActivityForTests } from "../../src/lib/media/activity";
 import { MicrophoneLeaseError } from "../../src/lib/voice/microphone";
 
@@ -101,6 +102,84 @@ describe("MeetingRecorder", () => {
     vi.useRealTimers();
     resetMediaActivityForTests();
   });
+
+  const meetingOffer = {
+    provider: "elevenlabs",
+    model: "scribe_v2",
+    operation: "elevenlabs_scribe_batch",
+    languageCode: "cs",
+    maxMinutes: 15,
+    maxBytes: 25 * 1024 * 1024,
+    estimatedMaxCostUsd: 0.055,
+    transcriptMaxGraphemes: 60_000,
+    testMode: false,
+  };
+  const meetingInspection = {
+    bytes: 3,
+    format: "wav",
+    codec: "pcm_s16le",
+    durationSeconds: 1,
+    inspection: "validated",
+    message: "Typ a délka ověřeny",
+  };
+  const meetingTranscript = {
+    text: "Dobrý den.",
+    languageCode: "cs",
+    audioDurationSeconds: 1,
+    transcriptGraphemes: 10,
+    speakers: ["speaker_0"],
+    segments: [{ speakerId: "speaker_0", text: "Dobrý den." }],
+    diarization: "available",
+    model: "scribe_v2",
+    provider: "elevenlabs",
+    operation: "elevenlabs_scribe_batch",
+    durationSeconds: 1,
+    format: "wav",
+    bytes: 3,
+    testMode: false,
+  };
+
+  async function openTranscriptReview(
+    user: ReturnType<typeof userEvent.setup>,
+    fetchMock: ReturnType<typeof vi.fn>,
+  ): Promise<void> {
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MeetingRecorder maxBytes={1_024} maxMinutes={15} />);
+
+    fireEvent.change(screen.getByTestId("meeting-file"), {
+      target: {
+        files: [new File(["abc"], "schuzka.wav", { type: "audio/wav" })],
+      },
+    });
+    await user.click(screen.getByTestId("meeting-inspect"));
+    await screen.findByTestId("meeting-inspected");
+    await screen.findByTestId("transcript-approve");
+    await user.click(screen.getByTestId("transcript-approve"));
+    await user.click(screen.getByTestId("transcript-start"));
+    await screen.findByTestId("transcript-preview");
+  }
+
+  function meetingFetchMock(
+    transcript: unknown,
+    saveResponse: (init?: RequestInit) => Response | Promise<Response>,
+  ) {
+    return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.includes("/api/meetings/transcribe")) {
+        return init?.method === "POST"
+          ? response(transcript)
+          : response(meetingOffer);
+      }
+
+      if (url.includes("/api/meetings/save")) {
+        return saveResponse(init);
+      }
+
+      return response(meetingInspection);
+    });
+  }
 
   it("disables recording with Czech guidance when WebM/Opus is unsupported", async () => {
     FakeMediaRecorder.supported = false;
@@ -549,5 +628,214 @@ describe("MeetingRecorder", () => {
       "limit",
     );
     expect(screen.queryByTestId("meeting-preview")).toBeNull();
+  });
+  it("locks preview-changing controls while saving", async () => {
+    const user = userEvent.setup();
+    let resolveSave: (value: Response) => void = () => undefined;
+    const pendingSave = new Promise<Response>((resolve) => {
+      resolveSave = resolve;
+    });
+    const fetchMock = meetingFetchMock(meetingTranscript, () => pendingSave);
+
+    await openTranscriptReview(user, fetchMock);
+    await user.click(screen.getByTestId("transcript-save"));
+
+    await waitFor(() => {
+      expect(
+        (screen.getByTestId("meeting-start") as HTMLButtonElement).disabled,
+      ).toBe(true);
+    });
+    expect(
+      (screen.getByTestId("meeting-file") as HTMLInputElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByTestId("meeting-cancel") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByTestId("meeting-inspect") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByTestId("transcript-dismiss") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByTestId("transcript-save") as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    await act(async () => {
+      resolveSave(
+        response(
+          {
+            requestId: "66666666-6666-4666-8666-666666666666",
+            noteIds: ["77777777-7777-4777-8777-777777777777"],
+            count: 1,
+            duplicate: false,
+          },
+          201,
+        ),
+      );
+    });
+
+    await screen.findByTestId("transcript-saved");
+    expect(
+      (screen.getByTestId("meeting-start") as HTMLButtonElement).disabled,
+    ).toBe(false);
+  });
+
+  it("saves a reviewed transcript once and links the created note", async () => {
+    const user = userEvent.setup();
+    const noteId = "11111111-1111-4111-8111-111111111111";
+    const fetchMock = meetingFetchMock(meetingTranscript, () =>
+      response(
+        {
+          requestId: "22222222-2222-4222-8222-222222222222",
+          noteIds: [noteId],
+          count: 1,
+          duplicate: false,
+        },
+        201,
+      ),
+    );
+
+    await openTranscriptReview(user, fetchMock);
+    await user.click(screen.getByTestId("transcript-save"));
+
+    await screen.findByTestId("transcript-saved");
+    expect(
+      screen.getByRole("link", { name: "Poznámka 1" }).getAttribute("href"),
+    ).toBe(`/notes/${noteId}`);
+    expect(
+      (screen.getByTestId("transcript-title") as HTMLInputElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByTestId("transcript-save") as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    const saveCall = fetchMock.mock.calls.find(([url]) =>
+      String(url).includes("/api/meetings/save"),
+    );
+    expect(saveCall).toBeDefined();
+    const body = JSON.parse(String(saveCall?.[1]?.body)) as {
+      requestId: string;
+      title: string;
+      segments: { label: string; text: string }[];
+    };
+
+    expect(body.requestId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(body.title).toBe("Zápis ze schůzky");
+    expect(body.segments).toEqual([
+      { label: "Mluvčí 1", text: "Dobrý den." },
+    ]);
+  });
+
+  it("retries with the same request id after a network failure", async () => {
+    const user = userEvent.setup();
+    let attempt = 0;
+    const requestIds: string[] = [];
+    const fetchMock = meetingFetchMock(meetingTranscript, (init) => {
+      attempt += 1;
+      const body = JSON.parse(String(init?.body)) as { requestId: string };
+      requestIds.push(body.requestId);
+
+      if (attempt === 1) {
+        throw new Error("network down");
+      }
+
+      return response(
+        {
+          requestId: body.requestId,
+          noteIds: ["33333333-3333-4333-8333-333333333333"],
+          count: 1,
+          duplicate: true,
+        },
+        200,
+      );
+    });
+
+    await openTranscriptReview(user, fetchMock);
+    await user.click(screen.getByTestId("transcript-save"));
+    await screen.findByTestId("transcript-save-error");
+    await user.click(screen.getByTestId("transcript-save"));
+    await screen.findByTestId("transcript-saved");
+
+    expect(requestIds).toHaveLength(2);
+    expect(requestIds[0]).toBe(requestIds[1]);
+    expect(screen.getByTestId("transcript-saved").textContent).toContain(
+      "už byl uložen",
+    );
+  });
+
+  it("never POSTs a transcript over the 3 MiB cap and offers a download", async () => {
+    const user = userEvent.setup();
+    const hugeTranscript = {
+      ...meetingTranscript,
+      text: "x".repeat(MEETING_SAVE_MAX_BYTES),
+      transcriptGraphemes: MEETING_SAVE_MAX_BYTES,
+      speakers: null,
+      segments: null,
+      diarization: "unavailable",
+    };
+    const fetchMock = meetingFetchMock(hugeTranscript, () =>
+      response(
+        {
+          requestId: "44444444-4444-4444-8444-444444444444",
+          noteIds: [],
+          count: 0,
+          duplicate: false,
+        },
+        201,
+      ),
+    );
+
+    await openTranscriptReview(user, fetchMock);
+    await user.click(screen.getByTestId("transcript-save"));
+
+    expect(await screen.findByTestId("transcript-download-required")).toBeDefined();
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).includes("/api/meetings/save"),
+      ),
+    ).toBe(false);
+  }, 20_000);
+
+  it("offers a download when the server refuses an unsplittable transcript", async () => {
+    const user = userEvent.setup();
+    const fetchMock = meetingFetchMock(meetingTranscript, () =>
+      response(
+        {
+          error: {
+            code: "meeting_transcript_too_long",
+            message: "Přepis by vyžadoval příliš mnoho poznámek.",
+          },
+        },
+        422,
+      ),
+    );
+
+    await openTranscriptReview(user, fetchMock);
+    await user.click(screen.getByTestId("transcript-save"));
+
+    expect(await screen.findByTestId("transcript-download-required")).toBeDefined();
+    expect(screen.getByTestId("transcript-save-error").textContent).toContain(
+      "příliš mnoho poznámek",
+    );
+  });
+
+  it("dismissing a reviewed transcript makes no save request", async () => {
+    const user = userEvent.setup();
+    const fetchMock = meetingFetchMock(meetingTranscript, () =>
+      response({ noteIds: [] }, 201),
+    );
+
+    await openTranscriptReview(user, fetchMock);
+    await user.click(screen.getByTestId("transcript-dismiss"));
+
+    expect(screen.queryByTestId("transcript-preview")).toBeNull();
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).includes("/api/meetings/save"),
+      ),
+    ).toBe(false);
   });
 });

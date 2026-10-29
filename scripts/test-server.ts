@@ -171,6 +171,7 @@ async function main(): Promise<void> {
   });
 
   try {
+    await pool.query("TRUNCATE TABLE meeting_saves");
     await pool.query("TRUNCATE TABLE notes CASCADE");
     await pool.query("TRUNCATE TABLE ai_usage");
   } finally {
