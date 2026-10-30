@@ -574,8 +574,8 @@ describe("session-bound tool dispatch", () => {
     const next = sessionStore.createSession({
       expiresAt: new Date(NOW + 120_000),
     });
-    expect(sessionStore.endSession(next.sessionId)).toBe(true);
-    expect(sessionStore.endSession(next.sessionId)).toBe(false);
+    await expect(sessionStore.endSession(next.sessionId)).resolves.toBe(true);
+    await expect(sessionStore.endSession(next.sessionId)).resolves.toBe(false);
 
     await expect(
       sessionStore.dispatch({

@@ -78,11 +78,13 @@ export default function VoiceAgentPage() {
             vyhledávání použitelná; tento režim pouze zobrazí chybu.
           </li>
           <li>
-            Asistent má pouze dvě čtecí funkce: vyhledání poznámek a přečtení
-            jedné poznámky vybrané uživatelem. Náhledy výsledků a obsah vybrané
-            poznámky se v rámci relace odešlou Googlu; aplikace je neukládá.
-            Zápis, návrhy změn ani potvrzení úprav nejsou dostupné a asistent
-            nesmí tvrdit nepotvrzenou změnu poznámky.
+            Asistent má sedm nástrojů: hledání poznámek, čtení vybrané poznámky
+            nebo její části, shrnutí, návrh úkolu, návrh úpravy a ověření
+            návrhu. Náhledy výsledků a obsah vybrané poznámky se v rámci relace
+            odešlou Googlu; aplikace je neukládá. Návrhy jsou jen náhledy a nic
+            nemění. Teprve vaše kliknutí na Potvrdit v panelu zapíše nejvýše
+            jednu revizi ai, kterou lze vrátit v historii poznámky; model sám
+            nikdy nepotvrdí ani nezmění poznámku a zamítnutí obsah nemění.
           </li>
         </ul>
       </section>

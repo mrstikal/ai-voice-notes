@@ -1074,7 +1074,7 @@ describe("GeminiConversation", () => {
     expect(document.body.textContent).not.toContain(NONCE);
     expect(screen.getByRole("button", { name: "Potvrdit" })).toHaveProperty(
       "disabled",
-      true,
+      false,
     );
 
     fireEvent.click(screen.getByTestId("voice-agent-pending-reject"));
@@ -1084,6 +1084,15 @@ describe("GeminiConversation", () => {
     expect(
       toolBodies.some((value) => value.name === "add_todo"),
     ).toBe(true);
+
+    const rejectedTurn = socket.sent
+      .map((value) => JSON.parse(value) as Record<string, unknown>)
+      .find(
+        (value) =>
+          "clientContent" in value &&
+          JSON.stringify(value).includes("zaznamenal zamítnutí"),
+      ) as { clientContent?: { turnComplete?: boolean } } | undefined;
+    expect(rejectedTurn?.clientContent?.turnComplete).toBe(true);
 
     await act(async () => {
       socket.message({
@@ -1101,6 +1110,195 @@ describe("GeminiConversation", () => {
     expect(
       await screen.findByText(/Změnu nejde potvrdit hlasem/),
     ).toBeDefined();
+  });
+
+  it("forwards the actual applied result to the model only after the click", async () => {
+    const NONCE = "n".repeat(43);
+    const PROPOSAL_ID = "11111111-1111-4111-8111-111111111111";
+    const NOTE_ID = "22222222-2222-4222-8222-222222222222";
+    const confirmBodies: Array<Record<string, unknown>> = [];
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<
+        string,
+        unknown
+      >;
+
+      if (url.endsWith("/api/voice-agent/gemini-token")) {
+        tokenBodies.push(body as { voice: string });
+        return tokenResponse(body.voice as string);
+      }
+
+      if (url.endsWith("/api/voice-agent/confirm")) {
+        confirmBodies.push(body);
+
+        return jsonResponse(200, {
+          note: { id: NOTE_ID, version: 2 },
+          ok: true,
+          proposal: {
+            afterMd: "Ahoj světe.\n\n- [ ] Koupit mléko",
+            beforeMd: "Ahoj světe.",
+            createdAt: "2026-10-30T12:00:00.000Z",
+            diff: {
+              end: 11,
+              inserted: "\n\n- [ ] Koupit mléko",
+              prefix: "Ahoj světe.",
+              removed: "",
+              start: 11,
+              suffix: "",
+            },
+            expectedVersion: 1,
+            expiresAt: "2026-10-30T12:05:00.000Z",
+            id: PROPOSAL_ID,
+            noteId: NOTE_ID,
+            noteTitle: "Nákupní poznámka",
+            operation: {
+              text: "- [ ] Koupit mléko",
+              type: "append_bounded_section",
+            },
+            originalHash: "a".repeat(64),
+            selectedCandidate: null,
+            status: "applied",
+            updatedAt: "2026-10-30T12:00:00.000Z",
+          },
+        });
+      }
+
+      if (url.includes("/api/voice-agent/pending/")) {
+        return jsonResponse(200, {
+          ok: true,
+          proposal: {
+            afterMd: "Ahoj světe.\n\n- [ ] Koupit mléko",
+            beforeMd: "Ahoj světe.",
+            confirmationNonce: NONCE,
+            diff: {
+              end: 11,
+              inserted: "\n\n- [ ] Koupit mléko",
+              prefix: "Ahoj světe.",
+              removed: "",
+              start: 11,
+              suffix: "",
+            },
+            expectedVersion: 1,
+            expiresAt: "2026-10-30T12:05:00.000Z",
+            noteId: NOTE_ID,
+            noteTitle: "Nákupní poznámka",
+            operation: {
+              text: "- [ ] Koupit mléko",
+              type: "append_bounded_section",
+            },
+            proposalId: PROPOSAL_ID,
+            selectedCandidate: null,
+            status: "pending",
+          },
+        });
+      }
+
+      if (url.endsWith("/api/voice-agent/tool")) {
+        if (body.action === "select") {
+          return jsonResponse(200, {
+            ok: true,
+            selected: {
+              noteId: NOTE_ID,
+              preview: "Ahoj světe.",
+              previewTruncated: false,
+              title: "Nákupní poznámka",
+              version: 1,
+            },
+          });
+        }
+
+        if (body.name === "search_notes") {
+          return jsonResponse(200, {
+            ok: true,
+            response: {
+              empty: false,
+              query: "nákup",
+              results: [
+                {
+                  noteId: NOTE_ID,
+                  preview: "Ahoj světe.",
+                  title: "Nákupní poznámka",
+                },
+              ],
+              total: 1,
+            },
+          });
+        }
+
+        if (body.name === "add_todo") {
+          return jsonResponse(200, {
+            ok: true,
+            response: {
+              expectedVersion: 1,
+              expiresAt: "2026-10-30T12:05:00.000Z",
+              message: "Návrh je jen náhled.",
+              noteId: NOTE_ID,
+              noteTitle: "Nákupní poznámka",
+              operationType: "append_bounded_section",
+              proposalId: PROPOSAL_ID,
+              requiresUserClick: true,
+              status: "pending",
+              target: "Konec poznámky",
+            },
+          });
+        }
+      }
+
+      return jsonResponse(404, {
+        error: { code: "not_found", message: "Nenalezeno." },
+      });
+    });
+
+    render(createElement(GeminiConversation));
+    const { socket } = await connectGemini();
+
+    await act(async () => {
+      socket.message({
+        toolCall: {
+          functionCalls: [
+            { args: { query: "nákup" }, id: "call-search", name: "search_notes" },
+          ],
+        },
+      });
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Vybrat" }));
+
+    await act(async () => {
+      socket.message({
+        toolCall: {
+          functionCalls: [
+            {
+              args: { noteId: NOTE_ID, text: "Koupit mléko" },
+              id: "call-todo",
+              name: "add_todo",
+            },
+          ],
+        },
+      });
+    });
+
+    fireEvent.click(await screen.findByTestId("voice-agent-pending-confirm"));
+
+    expect(await screen.findByText("Aplikováno")).toBeDefined();
+    expect(confirmBodies).toHaveLength(1);
+    expect(confirmBodies[0]).toMatchObject({
+      confirmationNonce: NONCE,
+      proposalId: PROPOSAL_ID,
+    });
+    expect(confirmBodies[0]).not.toHaveProperty("expectedVersion");
+    expect(document.body.textContent).not.toContain(NONCE);
+
+    const appliedTurn = socket.sent
+      .map((value) => JSON.parse(value) as Record<string, unknown>)
+      .find(
+        (value) =>
+          "clientContent" in value &&
+          JSON.stringify(value).includes("skutečný serverový výsledek"),
+      ) as { clientContent?: { turnComplete?: boolean } } | undefined;
+    expect(appliedTurn?.clientContent?.turnComplete).toBe(true);
+    expect(JSON.stringify(appliedTurn)).toContain("verzi 2");
   });
 
   it("stops the mic and socket on unmount", async () => {

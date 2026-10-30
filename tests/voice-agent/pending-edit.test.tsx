@@ -7,9 +7,12 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { PendingEdit } from "../../src/components/voice-agent/PendingEdit";
+import {
+  PendingEdit,
+  type PendingEditResult,
+} from "../../src/components/voice-agent/PendingEdit";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -56,6 +59,12 @@ afterEach(() => {
 });
 
 describe("PendingEdit", () => {
+  let onResultRef: (result: PendingEditResult) => void;
+
+  beforeEach(() => {
+    onResultRef = vi.fn();
+  });
+
   it("shows the complete change, target, version and expiry without exposing the nonce", async () => {
     const fetchMock = vi.fn(async () =>
       jsonResponse({ ok: true, proposal: pendingProposal() }),
@@ -65,6 +74,7 @@ describe("PendingEdit", () => {
     const { container } = render(
       <PendingEdit
         onClose={() => undefined}
+        onResult={onResultRef}
         proposalId={PROPOSAL_ID}
         sessionId={SESSION_ID}
       />,
@@ -80,7 +90,7 @@ describe("PendingEdit", () => {
     );
     expect(screen.getByRole("button", { name: "Potvrdit" })).toHaveProperty(
       "disabled",
-      true,
+      false,
     );
     expect(screen.queryByRole("button", { name: "Zavřít" })).toBeNull();
     expect(container.textContent).not.toContain(NONCE);
@@ -119,6 +129,7 @@ describe("PendingEdit", () => {
     render(
       <PendingEdit
         onClose={() => undefined}
+        onResult={onResultRef}
         proposalId={PROPOSAL_ID}
         sessionId={SESSION_ID}
       />,
@@ -142,6 +153,12 @@ describe("PendingEdit", () => {
         );
       }),
     ).toBe(true);
+    expect(onResultRef).toHaveBeenCalledWith({
+      kind: "rejected",
+      noteId: NOTE_ID,
+      noteTitle: "Nákupní poznámka",
+      proposalId: PROPOSAL_ID,
+    });
     expect(
       screen.getByTestId("voice-agent-pending-reject"),
     ).toHaveProperty("disabled", true);
@@ -166,6 +183,7 @@ describe("PendingEdit", () => {
     render(
       <PendingEdit
         onClose={() => undefined}
+        onResult={onResultRef}
         proposalId={PROPOSAL_ID}
         sessionId={SESSION_ID}
       />,
@@ -178,6 +196,157 @@ describe("PendingEdit", () => {
       screen.getByTestId("voice-agent-pending-reject"),
     ).toHaveProperty("disabled", true);
     expect(screen.getByRole("button", { name: "Zavřít" })).toBeDefined();
+  });
+
+  it("confirms only from the click, sends the nonce once and accepts the actual applied version", async () => {
+    const onResult = vi.fn<(result: PendingEditResult) => void>();
+    const fetchMock = vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+      if (String(input) === "/api/voice-agent/confirm") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as Record<
+          string,
+          unknown
+        >;
+        expect(body).toMatchObject({
+          confirmationNonce: NONCE,
+          proposalId: PROPOSAL_ID,
+          sessionId: SESSION_ID,
+        });
+        expect(body).not.toHaveProperty("expectedVersion");
+
+        return jsonResponse({
+          note: { id: NOTE_ID, version: 4 },
+          ok: true,
+          proposal: { ...pendingProposal(), status: "applied" },
+        });
+      }
+
+      return jsonResponse({ ok: true, proposal: pendingProposal() });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <PendingEdit
+        onClose={() => undefined}
+        onResult={onResult}
+        proposalId={PROPOSAL_ID}
+        sessionId={SESSION_ID}
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId("voice-agent-pending-confirm"));
+
+    expect(await screen.findByText("Aplikováno")).toBeDefined();
+    expect(onResult).toHaveBeenCalledWith({
+      kind: "applied",
+      noteId: NOTE_ID,
+      noteTitle: "Nákupní poznámka",
+      noteVersion: 4,
+      proposalId: PROPOSAL_ID,
+    });
+    expect(document.body.textContent).not.toContain(NONCE);
+    expect(
+      screen.getByTestId("voice-agent-pending-confirm"),
+    ).toHaveProperty("disabled", true);
+  });
+
+  it("shows a conflict as a failure and never claims the edit was applied", async () => {
+    const onResult = vi.fn<(result: PendingEditResult) => void>();
+    const fetchMock = vi.fn(async (input: RequestInfo) => {
+      if (String(input) === "/api/voice-agent/confirm") {
+        return jsonResponse(
+          {
+            error: {
+              code: "proposal_stale",
+              message: "Poznámka byla mezitím změněna. Vytvořte nový návrh.",
+            },
+          },
+          409,
+        );
+      }
+
+      return jsonResponse({ ok: true, proposal: pendingProposal() });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <PendingEdit
+        onClose={() => undefined}
+        onResult={onResult}
+        proposalId={PROPOSAL_ID}
+        sessionId={SESSION_ID}
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId("voice-agent-pending-confirm"));
+
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Poznámka byla mezitím změněna.",
+    );
+    expect(screen.queryByText("Aplikováno")).toBeNull();
+    expect(screen.getByText("Nelze potvrdit")).toBeDefined();
+    expect(screen.queryByText("Čeká na potvrzení")).toBeNull();
+    expect(screen.getByRole("button", { name: "Zavřít" })).toBeDefined();
+    expect(
+      screen.getByTestId("voice-agent-pending-confirm"),
+    ).toHaveProperty("disabled", true);
+    expect(
+      screen.getByTestId("voice-agent-pending-reject"),
+    ).toHaveProperty("disabled", false);
+    expect(onResult).toHaveBeenCalledWith({
+      code: "proposal_stale",
+      kind: "failed",
+      message: "Poznámka byla mezitím změněna. Vytvořte nový návrh.",
+      noteId: NOTE_ID,
+      noteTitle: "Nákupní poznámka",
+      proposalId: PROPOSAL_ID,
+    });
+  });
+
+  it("starts a different proposal in a confirmable state after a terminal failure", async () => {
+    const onResult = vi.fn<(result: PendingEditResult) => void>();
+    const fetchMock = vi.fn(async (input: RequestInfo) => {
+      if (String(input) === "/api/voice-agent/confirm") {
+        return jsonResponse(
+          {
+            error: {
+              code: "proposal_stale",
+              message: "Poznámka byla mezitím změněna.",
+            },
+          },
+          409,
+        );
+      }
+
+      return jsonResponse({ ok: true, proposal: pendingProposal() });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { rerender } = render(
+      <PendingEdit
+        onClose={() => undefined}
+        onResult={onResult}
+        proposalId={PROPOSAL_ID}
+        sessionId={SESSION_ID}
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId("voice-agent-pending-confirm"));
+    expect(await screen.findByText("Nelze potvrdit")).toBeDefined();
+
+    rerender(
+      <PendingEdit
+        onClose={() => undefined}
+        onResult={onResult}
+        proposalId="33333333-3333-4333-8333-333333333333"
+        sessionId={SESSION_ID}
+      />,
+    );
+
+    expect(await screen.findByText("Čeká na potvrzení")).toBeDefined();
+    expect(
+      screen.getByTestId("voice-agent-pending-confirm"),
+    ).toHaveProperty("disabled", false);
+    expect(screen.queryByText("Nelze potvrdit")).toBeNull();
   });
 
   it("shows a server error when the wrong session asks for the pending detail", async () => {
@@ -199,6 +368,7 @@ describe("PendingEdit", () => {
     render(
       <PendingEdit
         onClose={() => undefined}
+        onResult={onResultRef}
         proposalId={PROPOSAL_ID}
         sessionId={"x".repeat(43)}
       />,

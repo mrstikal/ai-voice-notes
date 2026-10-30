@@ -91,6 +91,10 @@ async function setup() {
       createForSession: async () => created(),
       getForOwner: async () => created(),
       reject: async () => ({ ...created(), status: "rejected" }),
+      confirm: async () => ({
+        note: note(),
+        proposal: { ...created(), status: "applied" },
+      }),
     }),
   );
   const session = store.createSession({ expiresAt: new Date(NOW + 60_000) });

@@ -115,7 +115,7 @@ export function createVoiceAgentToolRouteHandler(
         }
 
         return jsonOk({
-          ended: store.endSession(data.sessionId),
+          ended: await store.endSession(data.sessionId),
           ok: true,
         });
       } catch (error) {

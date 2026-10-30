@@ -185,6 +185,56 @@ describe.skipIf(!hasTestDatabase)("P23 edit proposals", () => {
     expect(noteAfter.contentMd).toBe(note.contentMd);
   });
 
+  it("applies an agent-owned proposal once and writes exactly one ai revision", async () => {
+    const note = await createBaseNote();
+    const owner = "s".repeat(43);
+    const agent = await proposals.createForSession(
+      note.id,
+      { operation: replaceFirst },
+      owner,
+    );
+
+    const beforeClick = await noteService.getNote(note.id);
+    expect(beforeClick.version).toBe(note.version);
+    expect(beforeClick.contentMd).toBe(note.contentMd);
+
+    const applied = await proposals.confirm(note.id, agent.id, {
+      confirmationNonce: agent.confirmationNonce,
+      expectedVersion: note.version,
+    });
+
+    expect(applied.note.version).toBe(note.version + 1);
+    expect(applied.note.contentMd).toBe("Nová věta. Druhá věta.");
+    expect(applied.proposal.status).toBe("applied");
+
+    const revisions = await connection.pool.query<{
+      reason: string;
+      note_version: number;
+    }>(
+      "SELECT reason, note_version FROM note_revisions WHERE note_id = $1 ORDER BY note_version",
+      [note.id],
+    );
+    expect(revisions.rows.filter((row) => row.reason === "ai")).toEqual([
+      { reason: "ai", note_version: 2 },
+    ]);
+
+    const row = await connection.pool.query<{ owner_session_id: string | null }>(
+      "SELECT owner_session_id FROM edit_proposals WHERE id = $1",
+      [agent.id],
+    );
+    expect(row.rows[0]?.owner_session_id).toBe(owner);
+
+    await expect(
+      proposals.confirm(note.id, agent.id, {
+        confirmationNonce: agent.confirmationNonce,
+        expectedVersion: note.version,
+      }),
+    ).rejects.toMatchObject({ code: "proposal_already_applied" });
+
+    const after = await noteService.getNote(note.id);
+    expect(after.version).toBe(note.version + 1);
+  });
+
   it("returns numbered candidates for an ambiguous target and persists nothing", async () => {
     const note = await createBaseNote(
       "Stejná věta. Jiná věta. Stejná věta.",

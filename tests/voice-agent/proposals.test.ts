@@ -152,6 +152,10 @@ function harness(options: {
       getForOwner,
       reject: async (_noteId: string, proposalId: string) =>
         proposal(proposalId, "rejected"),
+      confirm: async (_noteId: string, proposalId: string) => ({
+        note: note({ version: 2 }),
+        proposal: proposal(proposalId, "applied"),
+      }),
     }),
   );
   const session = store.createSession({

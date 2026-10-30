@@ -2,6 +2,8 @@ import { randomBytes } from "node:crypto";
 
 import { z } from "zod";
 
+import { timingSafeEqual } from "node:crypto";
+
 import { ConfigurationError } from "../config.ts";
 import {
   llmOperationSchema,
@@ -9,6 +11,7 @@ import {
 } from "../ai/schemas.ts";
 import {
   EditProposalAmbiguousError,
+  EditProposalError,
   EditProposalInvalidError,
   EditProposalNoMatchError,
   EditProposalNotFoundError,
@@ -22,7 +25,7 @@ import {
 } from "../notes/proposals.ts";
 import { hashNoteSource } from "../notes/operations.ts";
 import { proposalTargetLabel } from "../notes/proposal-client.ts";
-import { NoteServiceError } from "../notes/service.ts";
+import { NoteServiceError, type NoteDetailDto } from "../notes/service.ts";
 import {
   READ_TOOL_SECTIONS,
   ReadToolError,
@@ -88,6 +91,11 @@ export interface VoiceProposalService {
     ownerSessionId: string,
   ): Promise<EditProposalDto>;
   reject(noteId: string, proposalId: string): Promise<EditProposalDto>;
+  confirm(
+    noteId: string,
+    proposalId: string,
+    input: { readonly confirmationNonce: string; readonly expectedVersion: number },
+  ): Promise<{ readonly proposal: EditProposalDto; readonly note: NoteDetailDto }>;
 }
 
 export interface PendingProposalView {
@@ -154,10 +162,12 @@ interface ToolSession {
   readonly id: string;
   readonly createdAt: number;
   readonly expiresAt: number;
+  ending: boolean;
   selectedNoteId: string | null;
   selectedNoteVersion: number | null;
   selection: MarkedSelection | null;
   readonly pendingProposals: Map<string, PendingProposalEntry>;
+  readonly confirmingProposals: Set<string>;
   pendingSummary: PendingSummary | null;
   cachedSummary: CachedSummary | null;
   summaryInFlight: boolean;
@@ -305,6 +315,13 @@ function readError(
   );
 }
 
+function nonceMatches(actual: string, expected: string): boolean {
+  const left = Buffer.from(actual, "utf8");
+  const right = Buffer.from(expected, "utf8");
+
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
 export class ToolSessionStore {
   private readonly sessions = new Map<string, ToolSession>();
   private proposalsService: VoiceProposalService | null = null;
@@ -343,10 +360,12 @@ export class ToolSessionStore {
     const session: ToolSession = {
       cachedSummary: null,
       createdAt: now,
+      ending: false,
       expiresAt,
       id: newSessionId(),
       lastSearchNoteIds: [],
       pendingProposals: new Map(),
+      confirmingProposals: new Set(),
       pendingSummary: null,
       seenCallIds: new Set(),
       selectedNoteId: null,
@@ -364,8 +383,28 @@ export class ToolSessionStore {
     };
   }
 
-  endSession(sessionId: string): boolean {
-    return this.sessions.delete(sessionId);
+  async endSession(sessionId: string): Promise<boolean> {
+    const session = this.sessions.get(sessionId);
+
+    if (!session) {
+      return false;
+    }
+
+    session.ending = true;
+    this.sessions.delete(sessionId);
+    const pending = [...session.pendingProposals.entries()];
+    session.pendingProposals.clear();
+    session.confirmingProposals.clear();
+
+    for (const [proposalId, entry] of pending) {
+      try {
+        await this.proposals().reject(entry.noteId, proposalId);
+      } catch {
+        // Session end must not be blocked by an already resolved proposal.
+      }
+    }
+
+    return true;
   }
 
   async selectNote(
@@ -706,6 +745,113 @@ export class ToolSessionStore {
       "unknown_tool",
       "Takový nástroj není dostupný.",
     );
+  }
+
+  async confirmProposal(
+    sessionId: string,
+    proposalId: string,
+    confirmationNonce: string,
+  ): Promise<{
+    readonly proposal: EditProposalDto;
+    readonly note: NoteDetailDto;
+  }> {
+    const session = this.requireSession(sessionId);
+    const entry = session.pendingProposals.get(proposalId);
+
+    if (!entry) {
+      throw new ToolSessionError(
+        404,
+        "proposal_not_found",
+        "Návrh v této relaci neexistuje.",
+      );
+    }
+
+    if (session.ending) {
+      throw new ToolSessionError(
+        409,
+        "tool_session_ended",
+        "Hlasová relace už se ukončuje. Návrh nelze potvrdit.",
+      );
+    }
+
+    if (entry.expiresAt <= nowMs(this.now)) {
+      session.pendingProposals.delete(proposalId);
+
+      throw new ToolSessionError(
+        409,
+        "proposal_expired",
+        "Návrh vypršel. Vytvořte nový návrh.",
+      );
+    }
+
+    if (session.confirmingProposals.has(proposalId)) {
+      throw new ToolSessionError(
+        409,
+        "confirm_in_progress",
+        "Potvrzení už probíhá. Počkejte na jeho výsledek.",
+      );
+    }
+
+    if (!nonceMatches(confirmationNonce, entry.confirmationNonce)) {
+      throw new ToolSessionError(
+        403,
+        "proposal_invalid_nonce",
+        "Potvrzovací nonce není platný. Návrh nebyl aplikován.",
+      );
+    }
+
+    session.confirmingProposals.add(proposalId);
+
+    try {
+      const result = await this.proposals().confirm(
+        entry.noteId,
+        proposalId,
+        {
+          confirmationNonce: entry.confirmationNonce,
+          expectedVersion: entry.expectedVersion,
+        },
+      );
+      session.pendingProposals.delete(proposalId);
+
+      if (session.selectedNoteId === result.note.id) {
+        session.selectedNoteVersion = result.note.version;
+        session.selection = null;
+        session.pendingSummary = null;
+        session.cachedSummary = null;
+      }
+
+      return result;
+    } catch (error) {
+      if (error instanceof EditProposalError) {
+        if (
+          error.code === "proposal_already_applied" ||
+          error.code === "proposal_expired" ||
+          error.code === "proposal_conflict"
+        ) {
+          session.pendingProposals.delete(proposalId);
+        }
+
+        throw new ToolSessionError(error.status, error.code, error.message);
+      }
+
+      if (error instanceof NoteServiceError) {
+        throw new ToolSessionError(
+          error.status === 404 ? 404 : 409,
+          error.status === 404 ? "note_not_found" : "note_unavailable",
+          error.status === 404
+            ? "Poznámka neexistuje nebo byla smazána."
+            : "Poznámku se nepodařilo načíst.",
+        );
+      }
+
+      throw new ToolSessionError(
+        503,
+        "proposal_confirm_failed",
+        "Návrh se nepodařilo potvrdit. Poznámka zůstala beze změny.",
+      );
+    } finally {
+      session.confirmingProposals.delete(proposalId);
+    }
   }
 
   async rejectPendingProposal(

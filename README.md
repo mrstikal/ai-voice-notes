@@ -3,7 +3,7 @@
 Local, single-user Czech voice-notes proof of concept. The UI, voice commands,
 and user-facing errors are Czech; code and documentation are English.
 
-This repository implements **P01-P47**, with P46 delivered as the approved Gemini Live replacement (P55/P55B implementation lineage) and P47 adding read-only tools, in five stages:
+This repository implements **P01-P50**, with P46 delivered as the approved Gemini Live replacement (P55/P55B implementation lineage) and P47-P50 adding read/preview tools, in five stages:
 
 1. **Typed notes:** Czech CRUD, versioning/history, Markdown source/visual
    editor, autosave/conflict recovery, Trash, DOCX/Markdown export and an
@@ -21,21 +21,27 @@ This repository implements **P01-P47**, with P46 delivered as the approved Gemin
 5. **Voice agent:** a separate `/voice-agent` mode that uses Google Gemini Live
    `gemini-3.8-live` over a direct browser WebSocket with a server-minted
    one-use ephemeral token. It provides two-way Czech audio, selectable Gemini
-   voices, an exclusive microphone, transient subtitles and two read-only tools:
-   bounded full-text search and reading one note the user explicitly selected.
-   It cannot write, propose edits or access notes without that selection. Czech
-   output is pinned through Czech-only `systemInstruction` plus a Czech ASR
-   hint, not the `languageCode` parameter. After a previously observed Spanish
-   switch, the user re-tested with a real microphone, confirmed Czech replies
-   and accepted P46; P47's live Gemini function-call path remains unverified.
+   voices, an exclusive microphone, transient subtitles and seven tools:
+   bounded full-text search, reading one explicitly selected note or section,
+   a paid-after-click summary, and preview-only task/edit proposals with a
+   confirmation check. It cannot access a note without that selection. A
+   proposal changes nothing until the user clicks Potvrdit in the panel; that
+   click delegates once to the P24 transaction and writes at most one `ai`
+   revision, undoable from note history. The model never applies or confirms a
+   proposal, and rejecting one leaves the note untouched. Czech output is
+   pinned through Czech-only `systemInstruction` plus a Czech ASR hint, not the
+   `languageCode` parameter. After a previously observed Spanish switch, the
+   user re-tested with a real microphone, confirmed Czech replies and accepted
+   P46; live Gemini tool-call and P50 approval paths remain unverified.
    Latency and formal multi-turn quality remain unmeasured.
 
 P44 adds the four-stage offline integration, privacy/recovery audit and this
 quality report. P45 added the OpenAI realtime bootstrap, which was retired; P46
 is delivered as the Gemini Live replacement (9-minute sessions, selectable
-voice, transient Czech audio/subtitles) and P47 adds session-bound read-only
-search and selected-note fetch. Note writes, proposals and approval tools remain
-out of scope.
+voice, transient Czech audio/subtitles), P47 adds session-bound search and
+selected-note fetch, P48 adds bounded sections and approved summaries, and
+P49-P50 add preview-only proposals plus an explicit on-screen confirmation that
+applies at most one undoable `ai` revision.
 Typed notes, search and exports work with **no AI keys** and no provider
 request; provider features are visibly disabled until a separately authorized
 live check. `AI_TEST_MODE=1` is test-only and refuses real credentials.
@@ -158,7 +164,7 @@ action.
 | Read aloud | The selected note text to OpenRouter TTS | Validated MP3 and technical metadata in the local `.data/tts` cache |
 | AI edits/summary/tasks/Ask | The selected note text or bounded excerpt to OpenRouter | Note revisions after explicit confirmation; P12 usage metadata without prompts or note bodies |
 | Semantic search | Note chunks or the query to OpenRouter embeddings | Vectors and technical index state in PostgreSQL |
-| Voice agent (P46/P47) | The browser sends live 16 kHz microphone PCM directly to Google Gemini Live over a short-lived constrained WebSocket token; 24 kHz PCM audio and Czech transcriptions come back. The token is minted server-side; no long-lived key is in the browser. The agent may run a bounded full-text search and, after the user clicks `Vybrat`, read one selected note; search previews and selected note text go to Google inside the session. No writes, proposals or unselected note reads. | The ephemeral token and tool `sessionId` exist only in browser/server memory; transient search results, selection and transcript in React state; no long-lived key, audio recording, conversation, tool-session note body or note change persisted |
+| Voice agent (P46-P50) | The browser sends live 16 kHz microphone PCM directly to Google Gemini Live over a short-lived constrained WebSocket token; 24 kHz PCM audio and Czech transcriptions come back. The token is minted server-side; no long-lived key is in the browser. The agent may run a bounded full-text search, read one selected note/section, prepare a summary only after a cost click, and create preview-only proposals. An explicit `Potvrdit` click in the same live session delegates once to the P24 transaction and writes at most one undoable `ai` revision; the model never applies or confirms, and no unselected note is read. | The ephemeral token and tool `sessionId` exist only in browser/server memory; transient search results, selection, transcript and proposal preview live in React state; the process-local session holds the raw proposal nonce and selected-note gate; no long-lived key, audio recording, conversation, tool-session note body or model-applied note change persisted. The only note change is the clicked P24 apply and its `ai` revision. |
 
 ElevenLabs and OpenRouter process requests under their own retention policies;
 zero retention depends on the account/plan. The app does not claim provider-side

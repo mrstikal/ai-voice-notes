@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { formatUsdAmount } from "@/lib/ai/usage-format";
-import { PendingEdit } from "./PendingEdit";
+import { describeProposalResult } from "@/lib/voice-agent/proposal-result";
+import { PendingEdit, type PendingEditResult } from "./PendingEdit";
 import {
   MicrophoneLeaseError,
   acquireMicrophoneLease,
@@ -1196,6 +1197,42 @@ export function GeminiConversation() {
     }
   }
 
+  function forwardProposalResult(result: PendingEditResult): void {
+    const messaging = describeProposalResult(result);
+    setToolNotice(messaging.notice);
+
+    if (result.kind === "applied") {
+      setSelectedNote((current) =>
+        current !== null && current.noteId === result.noteId
+          ? { ...current, version: result.noteVersion }
+          : current,
+      );
+      setSelectedPreview(null);
+      setMarkedSelection(null);
+      setSummary(null);
+      setSummaryOffer(null);
+    }
+
+    const socket = socketRef.current;
+
+    if (
+      socket === null ||
+      socket.readyState !== WebSocket.OPEN ||
+      socketRef.current !== socket
+    ) {
+      return;
+    }
+
+    socket.send(
+      JSON.stringify({
+        clientContent: {
+          turns: [{ parts: [{ text: messaging.text }], role: "user" }],
+          turnComplete: true,
+        },
+      }),
+    );
+  }
+
   async function markSelection(
     selection: MarkedSelection | null,
   ): Promise<void> {
@@ -2024,9 +2061,11 @@ export function GeminiConversation() {
 
       {pendingProposalId !== null && sessionId !== null ? (
         <PendingEdit
+          key={pendingProposalId}
           onClose={() => {
             setPendingProposalId(null);
           }}
+          onResult={forwardProposalResult}
           proposalId={pendingProposalId}
           sessionId={sessionId}
         />
