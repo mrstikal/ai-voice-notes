@@ -664,3 +664,78 @@ the user's headset verification, not on a recorded ten-trial aggregate.
   diarized review into one note, asserts no additional `ai_usage` row, opens the
   saved note, proves dismissal creates nothing and probes the direct 3 MiB
   rejection. No live provider call is involved in P42B.
+
+## P43 reviewed meeting summary, decisions and tasks
+
+- **No new provider contract:** P43 reuses the existing P29 summary call
+  (`llm_summary`), P31 task call (`llm_task_suggestions`) and the P22 edit
+  schema for a bounded `append_bounded_section` decisions proposal
+  (`llm_structured_edit`). No audio or full note is sent; only the explicitly
+  selected source excerpt is passed to OpenRouter. The panel discloses this.
+- **Saved-meeting gate:** `POST /api/notes/[id]/ai-suggest` with
+  `kind=meeting_summary_decisions` or `kind=meeting_tasks` first checks that the
+  note id appears in `meeting_saves.note_ids`; other notes get
+  `422 meeting_suggestion_not_saved`. The meetings page lists recent
+  `meeting_saves` with active note titles so the panel remains reachable after
+  reload.
+- **Bounds:** summary and decisions use the P29 8,000-grapheme source bound;
+  tasks use the P31 4,000-grapheme bound. The decisions section itself must be a
+  `## Rozhodnutí` heading plus at least one bullet, at most 2,000 graphemes, and
+  must resolve as an append-only P22 operation against the current note version.
+  An `unclear`, invalid or provider-failed decisions step is not applied and is
+  returned as an explicit `decisionsError` together with the already-paid
+  summary, so the summary stays usable without repeating its call. An invented
+  `Mluvčí/Speaker/Hlas N` label that is not in the source is rejected. Nothing
+  is truncated silently.
+- **Review and persistence:** the summary and decisions are unsaved artifacts;
+  tasks carry P31 duplicate flags. Each insertion goes through
+  `createEditProposal` (P22/P23) and `ChangePreview`, then the explicit P24
+  confirmation creates exactly one `ai` revision. Reject consumes the proposal
+  and leaves the note unchanged. All artifacts are bound to the note version and
+  become stale after any insertion; the user must regenerate the remaining
+  sections. The full transcript stays in `content_md`/`content_plain` and the
+  initial revision snapshot; suggestions never remove or rewrite it.
+- **Cost:** summary + decisions is two worst-case P12-reserved OpenRouter calls;
+  tasks is one. The UI displays the doubled/single estimate and the model. If
+  the decisions call fails after the summary succeeds, the summary is still
+  returned and can be reviewed/inserted; a provider failure leaves the saved
+  transcript readable and creates no revision.
+- **Live smoke (authorized and observed 2026-10-30, isolated test DB):** the
+  real app ran on `127.0.0.1:3001` against the test DB with the real OpenRouter
+  key, no `AI_TEST_MODE`, and the federated model
+  `deepseek/deepseek-v4.1-flash-1017`. A 215-character Czech meeting note
+  ("kickoff projektu", with an explicit decision, two tasks and a next meeting)
+  was saved through the local P42B API. The first summary/decisions attempt
+  generated the summary but the decisions call failed the strict edit schema
+  before the prompt was corrected; the UI showed the already-paid summary and
+  the decisions error (the partial-summary fix working live). After adding the
+  exact edit envelope `clarification:null` and normalizing an inline
+  `## Rozhodnutí  - ...` section, the retry produced
+  `## Rozhodnutí\n\n- Projekt začne v pondělí 3. listopadu.`; the task call
+  produced exactly the two explicit tasks. Applying decisions and tasks through
+  the UI produced note version 3 with revisions `initial`, `ai`, `ai`; the
+  transcript remained at the top and the two AI sections were appended. The
+  panel then reloaded from `/meetings` with the saved-note title, source and
+  "Otevřít poznámku" link. Usage rows for the two attempts were all `unknown`
+  with no reported cost: summary `0.004524` + failed edit `0.004605` (first
+  attempt), summary `0.004524` + edit `0.004618` + tasks `0.004431` (successful
+  attempt), total reserved `0.022702 USD`. No AI path wrote the note directly;
+  every section was applied by an explicit P24 confirmation. The note and
+  `meeting_saves` row were deleted after evidence collection. This validates the
+  live summary/decisions/tasks provider path and the partial-summary path; it
+  used a crafted Czech text, not a recorded meeting, so live transcription is
+  covered separately by P42.
+- **Deterministic evidence:** `tests/meetings/suggestions.test.ts` covers the
+  saved-meeting gate before provider calls, bounded summary, append-only
+  decisions, inline heading/bullet normalization, unclear and non-append
+  rejection, invented speaker-label rejection, over-limit source rejection,
+  provider failure without transcript changes, repeated-task duplicate flags and
+  task provider failure. `e2e/meeting-suggestions-mock.spec.ts` creates saved
+  meeting notes as isolated DB fixtures (note, initial revision,
+  `meeting_saves`), applies summary, decisions and tasks as exactly one revision
+  each, rejects a decision proposal with no change, reloads the meetings page to
+  find the saved note and its title/link, and shows that a mocked provider
+  failure leaves both the note and its revision count unchanged. The P42B save
+  E2E also asserts that the immediate post-save panel shows the saved note title
+  and its `Otevřít poznámku` link, and the suggestions E2E covers a failed
+  note-fetch that hides the loading label while keeping the link.

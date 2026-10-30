@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import type { LlmProviderStatus } from "@/lib/ai/structured";
 import { countGraphemes } from "@/lib/notes/limits";
+import { MeetingSuggestions } from "./MeetingSuggestions";
 import {
   MEETING_SAVE_DEFAULT_TITLE,
   MEETING_SAVE_LABEL_MAX_GRAPHEMES,
@@ -20,6 +22,8 @@ export interface TranscriptPreviewSource {
 interface TranscriptReviewProps {
   readonly preview: TranscriptPreviewSource;
   readonly durationSeconds: number;
+  readonly llmStatus?: LlmProviderStatus | null;
+  readonly llmError?: string | null;
   readonly onBusyChange?: (busy: boolean) => void;
 }
 
@@ -154,6 +158,8 @@ function parseOffer(value: unknown): TranscriptionOffer | null {
 export function TranscriptReview({
   preview,
   durationSeconds,
+  llmStatus = null,
+  llmError = null,
   onBusyChange,
 }: TranscriptReviewProps) {
   const [offer, setOffer] = useState<TranscriptionOffer | null>(null);
@@ -795,6 +801,20 @@ export function TranscriptReview({
               </div>
             ) : null}
           </div>
+
+          {saved && saved.noteIds.length > 0 ? (
+            <MeetingSuggestions
+              llmError={llmError}
+              llmStatus={llmStatus}
+              savedNotes={saved.noteIds.map((noteId, index) => ({
+                noteId,
+                label:
+                  saved.count > 1
+                    ? `Část ${index + 1}/${saved.count}`
+                    : "Uložený zápis",
+              }))}
+            />
+          ) : null}
         </div>
       ) : null}
     </section>

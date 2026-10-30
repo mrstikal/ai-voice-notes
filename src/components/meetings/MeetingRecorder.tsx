@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 
+import type { LlmProviderStatus } from "@/lib/ai/structured";
 import { setMicrophoneOwnerActive } from "@/lib/media/activity";
 import {
   MicrophoneLeaseError,
@@ -16,6 +17,8 @@ const RECORDING_MIME_TYPE = "audio/webm;codecs=opus";
 interface MeetingRecorderProps {
   readonly maxMinutes: number;
   readonly maxBytes: number;
+  readonly llmStatus?: LlmProviderStatus | null;
+  readonly llmError?: string | null;
 }
 
 interface MeetingPreview {
@@ -71,6 +74,8 @@ function recorderErrorMessage(error: unknown): string {
 export function MeetingRecorder({
   maxMinutes,
   maxBytes,
+  llmStatus = null,
+  llmError = null,
 }: MeetingRecorderProps) {
   const ownerId = useId();
   const [supported, setSupported] = useState<boolean | null>(null);
@@ -484,8 +489,8 @@ export function MeetingRecorder({
           <p className="mt-1 max-w-2xl text-sm leading-6 text-stone-600">
             Nahrávka zůstává v tomto prohlížeči. Server ji při ověření
             a přepisu uloží pouze do dočasného soukromého souboru a hned jej
-            smaže. Přepis se spouští až po výslovném potvrzení ceny níže;
-            poznámka se zatím nevytváří.
+            smaže. Přepis se spouští až po výslovném potvrzení ceny níže; po
+            kontrole jej můžete uložit jako poznámku.
           </p>
         </div>
         <span className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1 text-xs text-stone-600">
@@ -615,6 +620,8 @@ export function MeetingRecorder({
         <TranscriptReview
           durationSeconds={inspected.durationSeconds}
           key={preview.id}
+          llmError={llmError}
+          llmStatus={llmStatus}
           onBusyChange={setTranscribing}
           preview={preview}
         />

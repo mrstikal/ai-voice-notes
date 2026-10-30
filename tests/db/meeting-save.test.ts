@@ -27,6 +27,10 @@ import {
   type NoteService,
 } from "../../src/lib/notes/service";
 import { MEETING_SAVE_MAX_BYTES } from "../../src/lib/meetings/save-shared";
+import {
+  isSavedMeetingNote,
+  listSavedMeetingNotes,
+} from "../../src/lib/meetings/suggestions";
 import { createMeetingSaveHandler } from "../../src/app/api/meetings/save/route";
 
 const hasTestDatabase = Boolean(
@@ -299,6 +303,32 @@ describe.skipIf(!hasTestDatabase)("meeting save service", () => {
     expect(rows[0]?.noteIds).toHaveLength(3);
     expect(rows[0]?.noteIds).toEqual(result.noteIds);
     expect(await noteCount()).toBe(3);
+  });
+
+  it("lists only saved meeting notes and recognizes their membership", async () => {
+    const result = await service.saveMeeting({
+      requestId: uniqueRequestId(),
+      title: "Seznam schůzek",
+      segments: [
+        { label: "Petra", text: "x".repeat(40) },
+        { label: "Jan", text: "y".repeat(40) },
+      ],
+    });
+    const listed = await listSavedMeetingNotes({ db: connection.db });
+
+    expect(listed).toHaveLength(2);
+    expect(listed.map((note) => note.title)).toEqual([
+      "Seznam schůzek – část 1/2",
+      "Seznam schůzek – část 2/2",
+    ]);
+    expect(listed.map((note) => note.part)).toEqual([1, 2]);
+    expect(listed.every((note) => note.total === 2)).toBe(true);
+    expect(
+      await isSavedMeetingNote(result.noteIds[0]!, connection.db),
+    ).toBe(true);
+    expect(
+      await isSavedMeetingNote(randomUUID(), connection.db),
+    ).toBe(false);
   });
 
   it("returns the first note ids for a retry with the same request and content", async () => {

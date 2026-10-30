@@ -171,6 +171,13 @@ test("saves a reviewed mock transcript into one note without another provider ca
     .getAttribute("href");
 
   expect(href).toMatch(/^\/notes\/[0-9a-f-]{36}$/u);
+  await expect(page.getByTestId("meeting-suggestion-note-label")).toContainText(
+    "Zápis ze schůzky",
+  );
+  await expect(page.getByTestId("meeting-suggestion-open-note")).toHaveAttribute(
+    "href",
+    href ?? "",
+  );
 
   const noteId = href?.split("/").at(-1) ?? "";
   const note = await readNote(noteId);

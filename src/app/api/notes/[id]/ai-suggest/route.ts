@@ -24,6 +24,12 @@ import {
   getStructuredLlmService,
 } from "@/lib/ai/structured";
 import {
+  MeetingSuggestionError,
+  isSavedMeetingNote,
+  suggestMeetingSummaryDecisions,
+  suggestMeetingTasks,
+} from "@/lib/meetings/suggestions";
+import {
   UsageServiceError,
   toUsageErrorResponse,
 } from "@/lib/ai/usage";
@@ -119,12 +125,46 @@ const taskApplyRequestSchema = z
   })
   .strict();
 
+const meetingSuggestionRangeRequestSchema = z
+  .object({
+    kind: z.literal("meeting_summary_decisions"),
+    start: z.number().int().nonnegative(),
+    end: z.number().int().nonnegative(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.start >= value.end) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Vybraná pasáž vyžaduje platný začátek a konec.",
+      });
+    }
+  });
+
+const meetingTasksRequestSchema = z
+  .object({
+    kind: z.literal("meeting_tasks"),
+    start: z.number().int().nonnegative(),
+    end: z.number().int().nonnegative(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.start >= value.end) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Vybraná pasáž vyžaduje platný začátek a konec.",
+      });
+    }
+  });
+
 const suggestRequestSchema = z.union([
   cleanupRequestSchema,
   summaryRequestSchema,
   tagSuggestionsRequestSchema,
   taskSuggestionsRequestSchema,
   taskApplyRequestSchema,
+  meetingSuggestionRangeRequestSchema,
+  meetingTasksRequestSchema,
 ]);
 
 type SuggestRequest = z.infer<typeof suggestRequestSchema>;
@@ -144,6 +184,33 @@ export const POST = createGuardedJsonRoute<
     try {
       const { id } = await routeContext!.params;
       const note = await getNoteService().getNote(id);
+
+      if (data.kind === "meeting_summary_decisions") {
+        const suggestion = await suggestMeetingSummaryDecisions({
+          note,
+          start: data.start,
+          end: data.end,
+          llm: getStructuredLlmService(),
+          isSavedMeeting: () => isSavedMeetingNote(note.id),
+        });
+
+        return jsonOk({
+          kind: "meeting_summary_decisions",
+          ...suggestion,
+        });
+      }
+
+      if (data.kind === "meeting_tasks") {
+        const suggestion = await suggestMeetingTasks({
+          note,
+          start: data.start,
+          end: data.end,
+          llm: getStructuredLlmService(),
+          isSavedMeeting: () => isSavedMeetingNote(note.id),
+        });
+
+        return jsonOk({ kind: "meeting_tasks", ...suggestion });
+      }
 
       if (data.kind === "task_suggestions") {
         const suggestion = await suggestTasks({
@@ -239,6 +306,10 @@ export const POST = createGuardedJsonRoute<
         sourceHash: resolution.sourceHash,
       });
     } catch (error) {
+      if (error instanceof MeetingSuggestionError) {
+        return jsonError(error.status, error.code, error.message);
+      }
+
       if (error instanceof TaskSuggestionError) {
         return jsonError(error.status, error.code, error.message);
       }
@@ -272,7 +343,9 @@ export const POST = createGuardedJsonRoute<
       }
 
       const unavailable =
-        data.kind === "tag_suggestions"
+        data.kind === "meeting_summary_decisions" || data.kind === "meeting_tasks"
+          ? "Návrhy pro schůzku nejsou dostupné. Uložený přepis zůstává beze změny."
+          : data.kind === "tag_suggestions"
           ? "AI návrh tagů není dostupný. Ruční tagy lze dál upravovat."
           : data.kind === "task_suggestions" || data.kind === "task_apply"
             ? "Extrakce úkolů není dostupná. Úkoly lze dál upravovat ručně."
