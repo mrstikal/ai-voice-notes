@@ -1,12 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { VoiceAgentSession } from "@/components/voice-agent/VoiceAgentSession";
+import { GeminiConversation } from "@/components/voice-agent/GeminiConversation";
 import {
-  OPENAI_REALTIME_DEFAULT_VOICE,
-  OPENAI_REALTIME_MODEL_ID,
-  OPENAI_REALTIME_SESSION_MAX_SECONDS,
-} from "@/lib/voice-agent/openai-session";
+  GEMINI_LIVE_MODEL_ID,
+  GEMINI_LIVE_SESSION_MAX_SECONDS,
+} from "@/lib/voice-agent/gemini-session";
 
 export const metadata: Metadata = {
   title: "Konverzační asistent",
@@ -22,9 +21,10 @@ export default function VoiceAgentPage() {
         Konverzační asistent
       </h1>
       <p className="mt-4 max-w-2xl leading-7 text-stone-700">
-        Tento režim je oddělený od diktování a od poznámek. Vytváří přímou
-        hlasovou relaci OpenAI Realtime přes WebRTC. Zvuk se neukládá jako
-        poznámka a přepis se nepersistuje.
+        Tento režim je oddělený od diktování a od poznámek. Vytváří obousměrnou
+        českou hlasovou relaci Gemini Live přes WebSocket. Mikrofon je
+        výhradní, zvuk se neukládá a přepis zůstává jen dočasně v paměti
+        stránky.
       </p>
 
       <section
@@ -39,45 +39,52 @@ export default function VoiceAgentPage() {
         </h2>
         <ul className="mt-3 space-y-2 text-sm leading-6 text-amber-950">
           <li>
-            Provider: OpenAI Realtime, model{" "}
+            Provider: Google Gemini Live, model{" "}
             <code className="rounded bg-amber-100 px-1.5 py-0.5">
-              {OPENAI_REALTIME_MODEL_ID}
+              {GEMINI_LIVE_MODEL_ID}
             </code>
-            , výchozí hlas{" "}
-            <code className="rounded bg-amber-100 px-1.5 py-0.5">
-              {OPENAI_REALTIME_DEFAULT_VOICE}
-            </code>
-            .
+            , hlas vybíráte před připojením ze seznamu dostupných hlasů.
           </li>
           <li>
             Dlouhodobý klíč zůstává pouze na serveru. Prohlížeč dostane jen
-            SDP odpověď a neprůhledné ID relace.
+            krátkodobý jednorázový token relace; v prohlížeči není žádný
+            dlouhodobý provider klíč.
           </li>
           <li>
-            Maximální délka relace je {OPENAI_REALTIME_SESSION_MAX_SECONDS / 60}{" "}
-            minut. Prohlížeč relaci ukončí nejpozději v tomto limitu a server
-            po něm ID zneplatní. Ukončení samotné relace u OpenAI závisí na
-            uzavření WebRTC spojení prohlížečem; aplikace nedrží identifikátor
-            provider relace, kterým by ji ukončila sama.
+            Mikrofon se zapne až po kliknutí na Připojit a je výhradní. Pokud
+            diktování, čtení nahlas nebo monitor používá jiná karta, relace se
+            nezahájí a zobrazí se česká chyba. Před připojením tyto režimy
+            ukončete.
           </li>
           <li>
-            Cena je účtována OpenAI podle skutečného využití. Aplikace ji v této
+            Zvuk se neukládá, přepis se nepersistuje do databáze ani do
+            úložiště prohlížeče. Volitelné titulky jsou pouze dočasné a zmizí po
+            ukončení relace.
+          </li>
+          <li>
+            Maximální délka relace je {GEMINI_LIVE_SESSION_MAX_SECONDS / 60}{" "}
+            minut. Prohlížeč ji ukončí nejpozději v tomto limitu uzavřením
+            WebSocketu; token je jednorázový a aplikace jej znovu nepoužije.
+          </li>
+          <li>
+            Cena je účtována Google podle skutečného využití. Aplikace ji v této
             fázi neměří ani neomezuje pevným dolarovým stropem; může být
             neznámá. Relaci spouštějte jen vědomě.
           </li>
           <li>
-            Bez <code className="rounded bg-amber-100 px-1.5 py-0.5">OPENAI_API_KEY</code>{" "}
+            Bez <code className="rounded bg-amber-100 px-1.5 py-0.5">GEMINI_API_KEY</code>{" "}
             zůstává celá aplikace pro psané poznámky a offline full-textové
             vyhledávání použitelná; tento režim pouze zobrazí chybu.
           </li>
           <li>
-            Nástroje, čtení poznámek ani zápis do poznámek nejsou v této fázi
-            dostupné. Mikrofon se zapne až v navazující fázi.
+            Nástroje, čtení poznámek ani zápis do poznámek nejsou dostupné.
+            Asistent má jen české instrukce k přirozené, stručné konverzaci a
+            nesmí tvrdit nepotvrzenou změnu poznámky.
           </li>
         </ul>
       </section>
 
-      <VoiceAgentSession />
+      <GeminiConversation />
 
       <p className="mt-8 text-sm leading-6 text-stone-600">
         Potřebujete diktování?{" "}

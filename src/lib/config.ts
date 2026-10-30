@@ -10,12 +10,11 @@ export const DEFAULT_OPENROUTER_LLM_MODEL =
   "deepseek/deepseek-v4.1-flash-1017";
 export const DEFAULT_OPENROUTER_EMBEDDING_MODEL =
   "openai/text-embedding-3-small";
-export const DEFAULT_OPENAI_REALTIME_MODEL = "gpt-realtime-2.1-mini";
+export const DEFAULT_GEMINI_LIVE_MODEL = "gemini-3.8-live";
 
 export const TEST_MODE_PROVIDER_KEYS = {
   ELEVENLABS_API_KEY: "test-only-elevenlabs",
   OPENROUTER_API_KEY: "test-only-openrouter",
-  OPENAI_API_KEY: "test-only-openai",
   GEMINI_API_KEY: "test-only-gemini",
 } as const;
 
@@ -43,9 +42,8 @@ export interface AppConfig {
   openRouterApiKey: string | null;
   openRouterLlmModel: string;
   openRouterEmbeddingModel: string;
-  openAiApiKey: string | null;
-  openAiRealtimeModel: string;
   geminiApiKey: string | null;
+  geminiLiveModel: string;
   noteMaxCharacters: number;
   meetingMaxMinutes: number;
   aiRequestBudgetUsd: number;
@@ -347,7 +345,6 @@ function assertAiTestModeEnvironment(options: {
   testDatabaseUrl: string | null;
   elevenLabsApiKey: string | null;
   openRouterApiKey: string | null;
-  openAiApiKey: string | null;
   geminiApiKey: string | null;
 }): void {
   if (!options.databaseUrl) {
@@ -365,7 +362,6 @@ function assertAiTestModeEnvironment(options: {
   const keys = [
     ["ELEVENLABS_API_KEY", options.elevenLabsApiKey],
     ["OPENROUTER_API_KEY", options.openRouterApiKey],
-    ["OPENAI_API_KEY", options.openAiApiKey],
     ["GEMINI_API_KEY", options.geminiApiKey],
   ] as const;
 
@@ -383,7 +379,7 @@ function parseOptionalModelId(
   name:
     | "OPENROUTER_LLM_MODEL"
     | "OPENROUTER_EMBEDDING_MODEL"
-    | "OPENAI_REALTIME_MODEL",
+    | "GEMINI_LIVE_MODEL",
   fallback: string,
 ): string {
   const rawValue = env[name]?.trim();
@@ -513,13 +509,12 @@ export function loadConfig(
     "OPENROUTER_EMBEDDING_MODEL",
     DEFAULT_OPENROUTER_EMBEDDING_MODEL,
   );
-  const openAiApiKey = parseOptionalSecret(env, "OPENAI_API_KEY");
-  const openAiRealtimeModel = parseOptionalModelId(
-    env,
-    "OPENAI_REALTIME_MODEL",
-    DEFAULT_OPENAI_REALTIME_MODEL,
-  );
   const geminiApiKey = parseOptionalSecret(env, "GEMINI_API_KEY");
+  const geminiLiveModel = parseOptionalModelId(
+    env,
+    "GEMINI_LIVE_MODEL",
+    DEFAULT_GEMINI_LIVE_MODEL,
+  );
   const elevenLabsApiBaseUrl = parseElevenLabsApiBaseUrl(env, aiTestMode);
   const noteMaxCharacters = parsePositiveInteger(
     env,
@@ -539,7 +534,6 @@ export function loadConfig(
       testDatabaseUrl,
       elevenLabsApiKey,
       openRouterApiKey,
-      openAiApiKey,
       geminiApiKey,
     });
   }
@@ -554,9 +548,8 @@ export function loadConfig(
     openRouterApiKey,
     openRouterLlmModel,
     openRouterEmbeddingModel,
-    openAiApiKey,
-    openAiRealtimeModel,
     geminiApiKey,
+    geminiLiveModel,
     noteMaxCharacters,
     meetingMaxMinutes: parsePositiveInteger(
       env,

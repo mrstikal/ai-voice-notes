@@ -201,7 +201,6 @@ async function main(): Promise<void> {
         ELEVENLABS_API_KEY: MOCK_ELEVENLABS_API_KEY,
         ELEVENLABS_API_BASE_URL: MOCK_PROVIDER_ORIGIN,
         OPENROUTER_API_KEY: "test-only-openrouter",
-        OPENAI_API_KEY: "test-only-openai",
         GEMINI_API_KEY: "test-only-gemini",
         DATABASE_URL: targets.testUrl,
         TEST_DATABASE_URL: targets.testUrl,

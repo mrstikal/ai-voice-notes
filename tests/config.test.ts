@@ -25,7 +25,6 @@ const TEST_MODE_ENV: Environment = {
   ELEVENLABS_API_KEY: TEST_MODE_PROVIDER_KEYS.ELEVENLABS_API_KEY,
   ELEVENLABS_API_BASE_URL: "http://127.0.0.1:4010",
   OPENROUTER_API_KEY: TEST_MODE_PROVIDER_KEYS.OPENROUTER_API_KEY,
-  OPENAI_API_KEY: TEST_MODE_PROVIDER_KEYS.OPENAI_API_KEY,
   GEMINI_API_KEY: TEST_MODE_PROVIDER_KEYS.GEMINI_API_KEY,
 };
 
@@ -52,23 +51,21 @@ describe("loadConfig", () => {
       openRouterApiKey: null,
       openRouterLlmModel: "deepseek/deepseek-v4.1-flash-1017",
       openRouterEmbeddingModel: "openai/text-embedding-3-small",
-      openAiApiKey: null,
-      openAiRealtimeModel: "gpt-realtime-2.1-mini",
       geminiApiKey: null,
+      geminiLiveModel: "gemini-3.8-live",
       noteMaxCharacters: DEFAULT_NOTE_MAX_CHARACTERS,
       meetingMaxMinutes: DEFAULT_MEETING_MAX_MINUTES,
       aiRequestBudgetUsd: DEFAULT_AI_REQUEST_BUDGET_USD,
     });
   });
 
-  it("pins the OpenAI realtime model default and rejects a malformed id", () => {
-    expect(configWith().openAiRealtimeModel).toBe("gpt-realtime-2.1-mini");
+  it("pins the Gemini Live model default and rejects a malformed id", () => {
+    expect(configWith().geminiLiveModel).toBe("gemini-3.8-live");
     expect(
-      configWith({ OPENAI_REALTIME_MODEL: "gpt-realtime-2.1" })
-        .openAiRealtimeModel,
-    ).toBe("gpt-realtime-2.1");
+      configWith({ GEMINI_LIVE_MODEL: "gemini-3.8-live" }).geminiLiveModel,
+    ).toBe("gemini-3.8-live");
     expect(() =>
-      configWith({ OPENAI_REALTIME_MODEL: "bad model id" }),
+      configWith({ GEMINI_LIVE_MODEL: "bad model id" }),
     ).toThrow(ConfigurationError);
   });
 

@@ -793,7 +793,11 @@ the user's headset verification, not on a recorded ten-trial aggregate.
   `test:db`, `test:e2e`, `build`) runs with dummy keys, no dev seed and no
   provider call. A simulated provider outage loses no note.
 
-## P45 direct OpenAI Realtime WebRTC bootstrap
+## P45 direct OpenAI Realtime WebRTC bootstrap (retired by the P46 Gemini replacement)
+
+> Historical record only. The user approved replacing the OpenAI voice path
+> with Gemini Live on 2026-10-30; the OpenAI session/end routes and client were
+> removed. Typed notes and search were never dependent on them.
 
 | Item | Value |
 |---|---|
@@ -866,10 +870,9 @@ WebRTC peer connection. It verifies:
   OpenAI had already created the call, the app cannot close it because the
   documented SDP exchange does not return a separate call id. The provider-side
   lifetime of such an orphan is unknown and remains a cost residual.
-- If `POST /api/voice-agent/end` fails, the client now switches from
-  `Odpojeno` to `Chyba` with a Czech explanation; the local slot remains
-  occupied until a successful end or the 10-minute TTL. A 404 is treated as
-  already ended.
+- If `POST /api/voice-agent/end` fails, P46 retains the opaque id and offers
+  `Zkusit ukončit relaci`; the local slot remains occupied until a successful
+  retry or the 10-minute TTL. A 404 is treated as already ended.
 
 ### Live handshake evidence (2026-10-30)
 
@@ -895,3 +898,147 @@ contract is asserted against a mocked `fetch` with surrounding CRLF, and 400 is
 mapped to `openai_request_rejected` with safe `providerStatus`/`providerCode`
 details. No audio, microphone, transcript, note or tool call was involved; no
 provider cost was reported.
+
+## P46 two-way Czech audio with exclusive microphone (historical OpenAI variant, not implemented)
+
+> Historical record only. The planned OpenAI P46 transport was never
+> implemented. The user accepted the Gemini Live replacement as **P46** on
+> 2026-10-30; the microphone, cleanup, subtitle and exclusive-lock design below
+> was carried into the Gemini adapter, while the OpenAI transport was removed.
+> Use the Gemini section below for the current contract.
+
+| Item | Value |
+|---|---|
+| Installed package | None; native `getUserMedia`, `MediaStream`, `RTCPeerConnection`, `HTMLAudioElement` and Web Locks |
+| Official documentation checked | 2026-10-30: <https://developers.openai.com/api/docs/guides/realtime-conversations>, <https://developers.openai.com/api/docs/guides/realtime-transcription>, <https://developers.openai.com/api/reference/resources/realtime/subresources/client_secrets>, <https://developers.openai.com/api/docs/models/gpt-realtime-2.1-mini> |
+| Session configuration | `type: "realtime"`, `model: "gpt-realtime-2.1-mini"`, `output_modalities: ["audio"]`, Czech-native `instructions` with explicit NE/ANO examples (`povědět si` -> `promluvit si`, `udělal jsem rozhodnutí` -> `rozhodl jsem se`, `to dává pro mě smysl` -> `to mi dává smysl`), `audio.input.noise_reduction: {type:"near_field"}`, `audio.input.transcription: {model:"gpt-4o-mini-transcribe", language:"cs"}`, `audio.input.turn_detection: {type:"semantic_vad", eagerness:"medium", create_response:true, interrupt_response:true}`, `audio.output.voice: "marin"`. No `tools` and no note context. |
+| Browser audio | The Connect click calls `audio.play()` synchronously and the remote track replaces `srcObject`. A source-less `NotSupportedError` is ignored; only a policy rejection shows the `Zapnout zvuk` banner. The live smoke used `--autoplay-policy=no-user-gesture-required`, so strict-autoplay behaviour is mock-covered, not live-proven. |
+| Microphone | `acquireMicrophoneLease()` uses the existing exclusive lock `ai-voice-notes:microphone` before `getUserMedia`. A busy dictation, conventional TTS playback or experimental monitor in another tab prevents the session with a Czech explanation; concurrent voice-agent tabs cannot both capture. Tracks use echo cancellation, noise suppression and AGC. |
+| Stop / mode switch | Stop, unmount, session TTL, provider error and disconnect stop every local microphone track, release the Web Lock, pause audio and clear `srcObject` **before** the end request. A failed end never keeps the mic or speaker alive and no reconnect loop is started; the opaque id is retained, Connect stays disabled, and a `Zkusit ukončit relaci` button retries the end (the end fetch aborts after 8 s, so the button cannot stay stuck). |
+| Transcript / privacy | Input transcription and output transcript deltas exist only in React state. A `Zobrazit titulky` toggle shows transient user/assistant text. Tests assert no `/api/notes` request and no `localStorage`/`sessionStorage` write; the session/end route also succeeds with an unreachable `DATABASE_URL`, proving no database dependency. The long-lived key stays server-side. |
+| UI states | Connection `Připojuji`/`Připojeno`/`Odpojeno`/`Chyba`; microphone `aktivní`/`vypnutý`; turn `Připraveno k rozhovoru`/`Mluvíte`/`Čekám na odpověď`/`Asistent mluví`. Provider error events are shown as a generic Czech error, not raw provider text. |
+| Cost | Mini audio pricing is $10/1M input and $20/1M output tokens. P46 does not measure or cap provider usage; cost remains `unknown` in the UI. |
+| Live status | Verified 2026-10-30 with a fake Chromium microphone: local session 200, mic active, assistant audio/transcript produced, end 200. A real human Czech two-turn conversation and strict autoplay policy remain separately approved/unverified. |
+
+### Local mock verification
+
+`tests/voice-agent/conversation.test.tsx` uses the fake WebRTC peer, fake
+microphone/MediaStream, fake Web Locks and mocked audio element. It verifies:
+
+- `audio.play()` is called synchronously inside the Connect gesture and again
+  for the remote track; the remote stream becomes `srcObject`.
+- The mic lease is exclusive and `getUserMedia` receives echo cancellation,
+  noise suppression and AGC; the local track is added to the peer.
+- Two Czech turns (speech start/stop, input transcript completion,
+  `response.created`, output transcript deltas/done, `response.done`) drive the
+  speaking/waiting states and transient subtitles; the data channel sends
+  nothing (no tools/session commands).
+- Two panels cannot capture at once; after Stop/release the second panel can
+  connect, proving the mode switch.
+- A failing end request still stops the track, pauses audio, clears
+  `srcObject`, closes channel/peer and releases the lock without reconnecting;
+  the session id is retained, Connect stays disabled, and the
+  `Zkusit ukončit relaci` retry clears the error and reaches `Odpojeno`. A stale
+  failed end after a newer successful connect keeps the retry available without
+  overwriting the live `Připojeno`.
+- A non-OK session response shows its precise Czech server message rather than
+  a microphone error; a source-less `NotSupportedError` does not show the
+  autoplay banner, while a policy rejection does.
+- Microphone denial produces a Czech error, no session request and no stuck
+  lock; retry works.
+- Unmount stops mic/audio even when end fails; a provider error event stops and
+  cleans up; double Stop sends one end; captions hide/show; blocked autoplay
+  shows `Zapnout zvuk`.
+- No `/api/notes` request and no `localStorage`/`sessionStorage` write occurs;
+  session/end succeed with an unreachable database URL, proving no DB
+  dependency (there is no voice-agent transcript/table write path).
+
+### Live status and residual limitations
+
+The live check uses Playwright Chromium with
+`--use-fake-ui-for-media-stream --use-fake-device-for-media-stream` and
+`--autoplay-policy=no-user-gesture-required`. On 2026-10-30 the production
+build on `127.0.0.1:3015` with `.env.local` (mini, no override) showed
+`Připojeno`, `Mikrofon: aktivní`, local session HTTP 200 with
+`gpt-realtime-2.1-mini`/`marin`/600 s/43-char id, and the fake audio triggered
+one real provider response with an assistant audio transcript (transient Czech
+subtitle). A later post-fix run confirmed the same session/mic/end path but the
+fake audio was silent and produced no turn. `Ukončit` showed `Odpojeno`,
+`Mikrofon: vypnutý` and end HTTP 200; there was no console error. This validates
+the session schema, mic lease, track attachment, remote audio/transcript path
+and graceful end. It does **not**
+prove Czech speech-to-speech quality or a real human two-turn conversation;
+that remains a separately approved smoke with headphones. The synthetic turn
+created real provider usage; the exact cost was not reported. The live run
+removed the autoplay restriction with a Chromium flag, so strict autoplay is
+not proven live; the component test covers policy rejection and the manual
+unlock. The end-to-end transcript is advisory and may differ from what the
+audio model heard. Server-side semantic VAD may interrupt an assistant response
+on user speech; explicit mute, captions switch, 10-minute timeout controls and
+final usage handling are P51, not P46. The prompt is a mitigation, not a guarantee: Czech naturalness can still drift and must be judged by listening to a real human two-turn smoke. After the prompt change, a paid **text-input** smoke through the same session config (not voice) answered `Jasně, můžeme se klidně věnovat třeba úplně jinému tématu—co bys rád probral?`, avoiding the disfavoured `povědět si` wording; this is one observed example, not a quality guarantee.
+
+
+## P46 accepted Gemini Live replacement and two-way audio (P55/P55B implementation lineage)
+
+The user explicitly approved replacing the OpenAI voice path with
+`gemini-3.8-live` on 2026-10-30, including a voice selector, and accepted the
+result as **P46** after confirming real voice replies were Czech. P55/P55B are
+the implementation lineage, not separately accepted phases. This is the sole
+`/voice-agent` provider, not a silent fallback; the OpenAI session/end routes
+and client are removed. Typed notes, offline search and all other providers are
+unaffected.
+
+| Item | Value |
+|---|---|
+| Installed package | None; native browser `WebSocket`, Web Audio, `getUserMedia` and the server's built-in `fetch` |
+| Official documentation checked | 2026-10-30: <https://ai.google.dev/gemini-api/docs/models/gemini-3.8-live>, <https://ai.google.dev/gemini-api/docs/live-api>, <https://ai.google.dev/gemini-api/docs/live-api/get-started-websocket>, <https://ai.google.dev/gemini-api/docs/live-api/capabilities>, <https://ai.google.dev/gemini-api/docs/live-api/ephemeral-tokens>. The current AuthToken discovery schema uses `bidiGenerateContentSetup` (the older `liveConnectConstraints` shape returned `Unknown field`). |
+| Token | Server `POST /v1beta/auth_tokens` with `x-goog-api-key`, `uses: 1`, `newSessionExpireTime` 60 s, session `expireTime` 9 min + 1 min and `bidiGenerateContentSetup` locking model, `responseModalities: ["AUDIO"]`, selected prebuilt voice, Czech-only system instructions (language is pinned through the instruction, not `languageCode`; never switch to Spanish or another language), `inputAudioTranscription.languageCodes: ["cs"]`, output transcription; no tools. Response contains only `["expiresAt","maxSessionSeconds","model","token","voice"]`, with `cache-control: no-store`; the long-lived key never reaches the browser. |
+| WebSocket | Browser opens `BidiGenerateContentConstrained?access_token=…` directly to Google, sends `{"setup":{}}` because the token locks setup, and waits for `setupComplete` (15 s timeout). No `/v1/live/sessions`, no OpenAI SDP, no long-lived key. |
+| Voice selector | `GeminiConversation` exposes 30 documented prebuilt voices (Aoede default, Kore, Puck, Charon, Fenrir, Leda, Orus, Zephyr, …) with Czech descriptors. The selected voice is sent to the token route and locked in the token; the selector is disabled while connecting/connected because a voice change requires a new session. |
+| Audio | Microphone is 16 kHz mono PCM16 (`audio/pcm;rate=16000`) via a Web Audio `ScriptProcessor`; output is 24 kHz PCM16 decoded into sequential `AudioBufferSourceNode`s. The output context is created/resumed in the Connect gesture. `interrupted` stops and clears queued output. Input is resampled if the browser does not honor 16 kHz. |
+| Microphone / cleanup | The exclusive `ai-voice-notes:microphone` Web Lock is acquired before `getUserMedia`; busy dictation/TTS/monitor or another tab gets a Czech explanation. Stop/unmount/9-minute expiry/close stops all tracks, releases the lock, disconnects the processor, stops queued audio and closes the socket/contexts before updating the UI. No auto reconnect; each connect needs a new token. |
+| Transcript / privacy | `inputTranscription` and `outputTranscription` are transient React state only; captions can be hidden. No note request, database dependency or browser storage write; the token lives only in browser memory. No tools and no note context. |
+| UI | `Připojuji`/`Připojeno`/`Odpojeno`/`Chyba`, microphone `aktivní/vypnutý`, turn `Připraveno k rozhovoru`/`Mluvíte`/`Čekám na odpověď`/`Asistent mluví`, voice selector and transient subtitles. |
+| Cost | Google bills Gemini Live audio usage; P46 does not measure or cap it and the UI labels cost unknown. The voice selector changes the voice, not the price guarantee. |
+| Live status | Transport verified 2026-10-30 with a fake Chromium microphone on the production build at `127.0.0.1:3015`: token HTTP 200 with `gemini-3.8-live`/`Kore`/540 s, constrained WebSocket opened, `setupComplete`, UI `Připojeno` with `Mikrofon: aktivní`, `Ukončit` -> `Odpojeno`, no console error and no key in the response. The user then observed the second reply switching to Spanish on a real voice test; the token now relies on explicit Czech-only `systemInstruction` and biases Czech input transcription; `languageCode` is not used for native audio output because Google documents language control through system instructions. After this mitigation the user re-tested with a real microphone and confirmed all replies were Czech, then accepted P46. Formal latency and multi-turn quality remain unmeasured. |
+
+### Local mock verification
+
+`tests/voice-agent/gemini-session.test.ts` verifies the token request shape
+(`bidiGenerateContentSetup`, voice, Czech instructions, transcription, no
+tools), one-use fields, missing key, changed model, unknown voice, provider
+401/400/429/500 mapping, timeout, Host/Origin/content-type/rate-limit guards,
+no-store response and no database dependency.
+
+`tests/voice-agent/gemini-audio.test.tsx` uses fake WebSocket, AudioContext,
+MediaStream and Web Locks to verify:
+
+- selected voice reaches the token body and the selector is disabled while
+  connected,
+- 16 kHz PCM16 input frames with the documented MIME type and byte size,
+- 24 kHz output PCM becomes an `AudioBufferSourceNode` at the scheduled time,
+- two transient Czech turns and no `/api/notes`/storage writes,
+- Stop/unmount close the socket, stop tracks, release the lock and clear audio,
+- two tabs cannot capture simultaneously,
+- a precise token error opens no socket,
+- token expiry ends the session without reconnect.
+
+### Residual limitations
+
+- The fake-device run proves only the transport, setup, mic track, playback
+  queue and cleanup. Real voice was observed by the user, including one
+  second-turn Spanish switch before the language-lock mitigation; after the
+  Czech-only prompt the user confirmed Czech replies. That is one observed
+  session, not a guarantee: the prompt and Czech ASR hint are a mitigation, and
+  latency plus formal multi-turn quality remain unmeasured.
+- `ScriptProcessorNode` is deprecated; a future AudioWorklet can replace it
+  without changing the wire contract.
+- Gemini Live 3.8 can occasionally change voice timbre mid-session (reported
+  upstream); the selector cannot prevent that. Voice changes are not applied
+  mid-session.
+- Token expiry/close has no provider-side resumption; reconnect is user-driven
+  and mints a new token. The 9-minute app cap is below the documented ~10-minute
+  WebSocket lifetime.
+- Gemini cost/usage is not written to the app's usage ledger; the live spend is
+  unknown and should be checked in the Google console. The app does not claim
+  that a selected voice is best for Czech.

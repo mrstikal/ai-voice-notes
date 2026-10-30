@@ -120,7 +120,6 @@ describe("P44 privacy and offline audit", () => {
 
     expect(config.elevenLabsApiKey).toBeNull();
     expect(config.openRouterApiKey).toBeNull();
-    expect(config.openAiApiKey).toBeNull();
     expect(config.geminiApiKey).toBeNull();
     expect(config.aiRequestBudgetUsd).toBe(2);
     expect(estimateMeetingTranscriptionMaxCostUsd(15)).toBeLessThanOrEqual(

@@ -6,6 +6,12 @@ export type VoiceAgentConnectionStatus =
   | "disconnected"
   | "error";
 
+export type VoiceAgentConversationState =
+  | "idle"
+  | "user-speaking"
+  | "waiting"
+  | "assistant-speaking";
+
 const STATUS_LABELS: Record<VoiceAgentConnectionStatus, string> = {
   connecting: "Připojuji",
   connected: "Připojeno",
@@ -13,14 +19,25 @@ const STATUS_LABELS: Record<VoiceAgentConnectionStatus, string> = {
   error: "Chyba",
 };
 
+const CONVERSATION_LABELS: Record<VoiceAgentConversationState, string> = {
+  idle: "Připraveno k rozhovoru",
+  "user-speaking": "Mluvíte",
+  waiting: "Čekám na odpověď",
+  "assistant-speaking": "Asistent mluví",
+};
+
 export interface ConnectionStatusProps {
   readonly status: VoiceAgentConnectionStatus;
+  readonly conversation?: VoiceAgentConversationState;
+  readonly microphoneActive?: boolean;
   readonly error?: string | null;
   readonly detail?: string | null;
 }
 
 export function ConnectionStatus({
   status,
+  conversation = "idle",
+  microphoneActive = false,
   error = null,
   detail = null,
 }: ConnectionStatusProps) {
@@ -37,6 +54,18 @@ export function ConnectionStatus({
         Stav připojení:{" "}
         <strong className="font-semibold text-stone-950">
           {STATUS_LABELS[status]}
+        </strong>
+      </p>
+      <p className="mt-2 text-sm text-stone-700">
+        Mikrofon:{" "}
+        <strong className="font-semibold text-stone-950">
+          {microphoneActive ? "aktivní" : "vypnutý"}
+        </strong>
+      </p>
+      <p className="mt-1 text-sm text-stone-700" data-testid="voice-agent-turn-state">
+        Režim:{" "}
+        <strong className="font-semibold text-stone-950">
+          {CONVERSATION_LABELS[conversation]}
         </strong>
       </p>
       {detail ? (
