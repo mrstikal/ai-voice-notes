@@ -52,6 +52,7 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     openRouterLlmModel: "deepseek/deepseek-v4.1-flash-1017",
     openRouterEmbeddingModel: "openai/text-embedding-3-small",
     openAiApiKey: null,
+    openAiRealtimeModel: "gpt-realtime-2.1-mini",
     geminiApiKey: null,
     noteMaxCharacters: 20_000,
     meetingMaxMinutes: 15,

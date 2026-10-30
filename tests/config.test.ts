@@ -53,11 +53,23 @@ describe("loadConfig", () => {
       openRouterLlmModel: "deepseek/deepseek-v4.1-flash-1017",
       openRouterEmbeddingModel: "openai/text-embedding-3-small",
       openAiApiKey: null,
+      openAiRealtimeModel: "gpt-realtime-2.1-mini",
       geminiApiKey: null,
       noteMaxCharacters: DEFAULT_NOTE_MAX_CHARACTERS,
       meetingMaxMinutes: DEFAULT_MEETING_MAX_MINUTES,
       aiRequestBudgetUsd: DEFAULT_AI_REQUEST_BUDGET_USD,
     });
+  });
+
+  it("pins the OpenAI realtime model default and rejects a malformed id", () => {
+    expect(configWith().openAiRealtimeModel).toBe("gpt-realtime-2.1-mini");
+    expect(
+      configWith({ OPENAI_REALTIME_MODEL: "gpt-realtime-2.1" })
+        .openAiRealtimeModel,
+    ).toBe("gpt-realtime-2.1");
+    expect(() =>
+      configWith({ OPENAI_REALTIME_MODEL: "bad model id" }),
+    ).toThrow(ConfigurationError);
   });
 
   it("accepts an explicitly preflighted LLM model id and rejects a malformed one", () => {

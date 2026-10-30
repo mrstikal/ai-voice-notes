@@ -792,3 +792,106 @@ the user's headset verification, not on a recorded ten-trial aggregate.
 - **Gate result:** the isolated-DB suite (`pnpm lint`, `typecheck`, `test`,
   `test:db`, `test:e2e`, `build`) runs with dummy keys, no dev seed and no
   provider call. A simulated provider outage loses no note.
+
+## P45 direct OpenAI Realtime WebRTC bootstrap
+
+| Item | Value |
+|---|---|
+| Installed package | None for this phase; the server uses the built-in `fetch`/`FormData` multipart contract and the browser uses native WebRTC |
+| Official documentation checked | 2026-10-30: <https://developers.openai.com/api/docs/guides/voice-webrtc>, <https://developers.openai.com/api/docs/models/gpt-realtime-2.1-mini>, <https://developers.openai.com/api/docs/guides/realtime-conversations> |
+| Transport | Classic Realtime API, unified server-side SDP exchange: browser offer -> local `POST /api/voice-agent/session` -> server `POST https://api.openai.com/v1/realtime/calls` as `multipart/form-data` with `sdp` and `session`; the server returns only the SDP answer. `/v1/live/sessions` is **not** used (`gpt-realtime-2.1-mini` lists Live as not supported). |
+| Session configuration | `{"type":"realtime","model":"gpt-realtime-2.1-mini","audio":{"output":{"voice":"marin"}}}` |
+| Browser boundary | Native `RTCPeerConnection`, receive-only audio transceiver, `oai-events` data channel, no microphone until P46 and no tool calls. The long-lived `OPENAI_API_KEY` never reaches the browser. |
+| Opaque session id | 32 random bytes, base64url (43 characters). Stored only in a single-process TTL registry with a 10-minute expiry and at most one active entry; no conversation content, SDP or secret is retained. The expiry makes the app forget the id and admit a new session; it is not a provider-side kill. |
+| Guards | Exact loopback Host/Origin, JSON content type, 96 KiB request / 64 KiB SDP bounds, 5 starts per minute, 20 ends per minute, 15-second provider timeout, model pin and unmocked-egress block under `AI_TEST_MODE=1`. `POST /api/voice-agent/end` invalidates the id once; TTL covers browser death. |
+| Missing key / model change | `OPENAI_API_KEY` unset returns `openai_not_configured`; a non-empty `OPENAI_REALTIME_MODEL` other than `gpt-realtime-2.1-mini` returns `openai_realtime_model_blocked` and performs no request. |
+| Account entitlement | Verified on 2026-10-30: the account key created a realtime session with `gpt-realtime-2.1-mini` (local route 200 with an SDP answer from the provider). The earlier typo `gpt-realtime-2.1-minis` returned provider 404 `model_not_found`; the pinned mini id is required. Provider 401/403 maps to `openai_auth_failed`, model 404 to `openai_model_unavailable`, other 400 to `openai_request_rejected` and 429 to `openai_rate_limited`. |
+| Live call authorized / performed | Authorized (all paid tests) / Yes, 2026-10-30: WebRTC bootstrap handshake only, no microphone or audio turn |
+| Cost and uncertainty | The session creates real time-based OpenAI usage. Published mini audio pricing is $10/1M input and $20/1M output tokens, but P45 does not measure or cap the provider bill; the UI discloses unknown cost. Session initialization may itself be billed by OpenAI. No cost value was reported for the handshake, so live cost remains `unknown`. |
+| Status | Mock verified / live verified for the WebRTC bootstrap; microphone, audio, tools and cost accounting are not part of P45 |
+
+### Local mock verification
+
+`tests/voice-agent/session.test.ts` injects a fake Realtime transport and a fake
+WebRTC peer connection. It verifies:
+
+- exactly one multipart SDP exchange per explicit Connect with the documented
+  `POST /v1/realtime/calls`, `Authorization: Bearer`, `sdp`/`session` fields,
+  `gpt-realtime-2.1-mini`, `marin`, `type: "realtime"` and no note or prompt content,
+  with the SDP forwarded byte-for-byte including a non-trivial leading/trailing
+  CRLF so a future trim regression fails the suite,
+- success returns the SDP answer plus an opaque 43-character id and a
+  600-second expiry, without the long-lived key,
+- missing key, changed model, wrong Host/Origin, wrong content type, extra
+  note fields, malformed SDP, over-limit SDP and over-limit request bodies are
+  rejected before a provider call,
+- provider 400/404, 401/403 and 429 map to Czech errors and release capacity,
+- a hanging provider times out with `openai_timeout` and a malformed SDP answer
+  returns `openai_invalid_response`,
+- one active session, local 5-per-minute rate limiting and recovery after end,
+- one-use end (a second end is 404) and TTL expiry after 10 minutes,
+- unmocked egress is blocked in test mode,
+- the real session and end route factories share one process-wide registry
+  (end succeeds once, then 404), 
+- the browser shows `Připojuji`, `Připojeno`, `Odpojeno` and `Chyba`, creates
+  the `oai-events` channel without sending anything, never calls
+  `getUserMedia`, and calls end once on Stop or unmount,
+- a failed server-side end shows `Chyba` instead of claiming `Odpojeno`,
+  including when Stop cancels an in-flight start and the late session id then
+  fails to end; a stale failed end is ignored after a newer connect succeeds,
+  so it cannot overwrite a live `Připojeno` state.
+
+### Live handshake procedure (authorized paid check)
+
+1. Keep `OPENAI_API_KEY` in the gitignored `.env.local` and set
+   `OPENAI_REALTIME_MODEL=gpt-realtime-2.1-mini`; never pass secrets in CLI
+   arguments.
+2. Build and start the app on a loopback origin, open `/voice-agent` in
+   Chromium and click `Připojit`. No microphone permission is requested.
+3. Observe `Připojuji` -> `Připojeno`, the returned opaque session id (do not
+   log the key or SDP) and then click `Ukončit`; confirm `Odpojeno` and that a
+   second connect works only after the previous session ended or expired.
+4. Record the date, model, voice, observed HTTP status for
+   `/v1/realtime/calls`, any provider error code, session duration and whether
+   cost was reported or unknown.
+
+### Residual limitations
+
+- The server TTL only forgets the local opaque id. The OpenAI realtime session
+  ends when the browser closes the WebRTC peer; the app stores no provider call
+  identifier and cannot terminate it server-side. A suspended/throttled tab or
+  a non-browser caller could therefore keep a provider session beyond the
+  displayed 10-minute browser limit. The UI now states this explicitly.
+- A provider timeout aborts the HTTP exchange and frees the local slot. If
+  OpenAI had already created the call, the app cannot close it because the
+  documented SDP exchange does not return a separate call id. The provider-side
+  lifetime of such an orphan is unknown and remains a cost residual.
+- If `POST /api/voice-agent/end` fails, the client now switches from
+  `Odpojeno` to `Chyba` with a Czech explanation; the local slot remains
+  occupied until a successful end or the 10-minute TTL. A 404 is treated as
+  already ended.
+
+### Live handshake evidence (2026-10-30)
+
+A production build on `127.0.0.1:3015` using the `.env.local` value
+`OPENAI_REALTIME_MODEL=gpt-realtime-2.1-mini` (no model override) was opened in
+headless Chromium. Clicking `Připojit` produced a native receive-only offer, the local
+route returned HTTP 200 with `model: gpt-realtime-2.1-mini`, `voice: marin`,
+`maxSessionSeconds: 600`, a 43-character opaque session id and an SDP answer
+starting `v=0`; the browser reported `Připojeno` in about 0.8 s without asking
+for microphone permission. `Ukončit` closed the peer and reported `Odpojeno`;
+no console error occurred and no key appeared in the browser response or UI.
+
+Stopping issued exactly one `POST /api/voice-agent/end` with HTTP 200. An
+independent follow-up request with the same id returned 404
+`session_not_found`, proving that the real session and end route handlers share
+the process-wide registry and the id is one-use.
+
+The first attempt exposed two real contract defects that mocked tests did not:
+the server had trimmed the client SDP (OpenAI returned 400 `invalid_offer`,
+"failed to unmarshal SDP: EOF") and a non-model 400 was reported as a missing
+model entitlement. The SDP is now forwarded byte-for-byte, the multipart
+contract is asserted against a mocked `fetch` with surrounding CRLF, and 400 is
+mapped to `openai_request_rejected` with safe `providerStatus`/`providerCode`
+details. No audio, microphone, transcript, note or tool call was involved; no
+provider cost was reported.

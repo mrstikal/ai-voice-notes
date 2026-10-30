@@ -3,7 +3,7 @@
 Local, single-user Czech voice-notes proof of concept. The UI, voice commands,
 and user-facing errors are Czech; code and documentation are English.
 
-This repository implements **P01-P44** in four stages:
+This repository implements **P01-P45** in five stages:
 
 1. **Typed notes:** Czech CRUD, versioning/history, Markdown source/visual
    editor, autosave/conflict recovery, Trash, DOCX/Markdown export and an
@@ -18,9 +18,14 @@ This repository implements **P01-P44** in four stages:
 4. **Search and meetings:** offline Czech full-text search, optional semantic
    and hybrid search, direct batch Scribe v2 meeting transcription, reviewed
    meeting-note save and reviewed summary/decisions/tasks.
+5. **Voice agent bootstrap:** a separate `/voice-agent` mode that creates a
+   direct OpenAI Realtime `gpt-realtime-2.1-mini` WebRTC session through a
+   server-side SDP exchange. P45 has no microphone, tools or note access yet;
+   P46+ adds audio/tools behind the same boundaries.
 
 P44 adds the four-stage offline integration, privacy/recovery audit and this
-quality report. The separate **P45+ OpenAI voice agent is not implemented**.
+quality report. P45 adds the paid OpenAI WebRTC bootstrap only; it is not yet
+a working voice conversation.
 Typed notes, search and exports work with **no AI keys** and no provider
 request; provider features are visibly disabled until a separately authorized
 live check. `AI_TEST_MODE=1` is test-only and refuses real credentials.
@@ -107,7 +112,8 @@ live check is separately authorized.
 | `OPENROUTER_API_KEY` | Server-side OpenRouter key for structured AI, TTS and embeddings; empty disables those features | empty |
 | `OPENROUTER_LLM_MODEL` | P21 structured-output model; changing it requires a new preflight and approval | `deepseek/deepseek-v4.1-flash-1017` |
 | `OPENROUTER_EMBEDDING_MODEL` | P36 embedding model; pinned to the 1536-dimension column | `openai/text-embedding-3-small` |
-| `OPENAI_API_KEY` | Reserved for the not-yet-implemented P45+ realtime agent; empty | empty |
+| `OPENAI_API_KEY` | Server-side OpenAI key for the P45 realtime bootstrap; empty disables the voice-agent mode | empty |
+| `OPENAI_REALTIME_MODEL` | P45 pinned classic Realtime model; a different value blocks the mode with a Czech reason | `gpt-realtime-2.1-mini` |
 | `GEMINI_API_KEY` | Optional P55+ comparison; not required by the core | empty |
 | `ELEVENLABS_API_BASE_URL` | ElevenLabs API endpoint; test mode requires a loopback mock | `https://api.elevenlabs.io` |
 | `NOTE_MAX_CHARACTERS` | Maximum visible note characters | `20000` |
@@ -143,7 +149,7 @@ action.
 | Read aloud | The selected note text to OpenRouter TTS | Validated MP3 and technical metadata in the local `.data/tts` cache |
 | AI edits/summary/tasks/Ask | The selected note text or bounded excerpt to OpenRouter | Note revisions after explicit confirmation; P12 usage metadata without prompts or note bodies |
 | Semantic search | Note chunks or the query to OpenRouter embeddings | Vectors and technical index state in PostgreSQL |
-| Voice agent (P45+) | Not implemented | Nothing |
+| Voice agent (P45) | The browser SDP offer to the local server, then the server posts the SDP plus session config (`gpt-realtime-2.1-mini`, voice `marin`) to OpenAI Realtime; no microphone, transcript, note or tool call in P45 | Only an opaque session id and expiry in process memory; no key, SDP, conversation or note text |
 
 ElevenLabs and OpenRouter process requests under their own retention policies;
 zero retention depends on the account/plan. The app does not claim provider-side

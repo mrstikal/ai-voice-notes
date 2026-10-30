@@ -10,6 +10,7 @@ export const DEFAULT_OPENROUTER_LLM_MODEL =
   "deepseek/deepseek-v4.1-flash-1017";
 export const DEFAULT_OPENROUTER_EMBEDDING_MODEL =
   "openai/text-embedding-3-small";
+export const DEFAULT_OPENAI_REALTIME_MODEL = "gpt-realtime-2.1-mini";
 
 export const TEST_MODE_PROVIDER_KEYS = {
   ELEVENLABS_API_KEY: "test-only-elevenlabs",
@@ -43,6 +44,7 @@ export interface AppConfig {
   openRouterLlmModel: string;
   openRouterEmbeddingModel: string;
   openAiApiKey: string | null;
+  openAiRealtimeModel: string;
   geminiApiKey: string | null;
   noteMaxCharacters: number;
   meetingMaxMinutes: number;
@@ -378,7 +380,10 @@ function assertAiTestModeEnvironment(options: {
 
 function parseOptionalModelId(
   env: Environment,
-  name: "OPENROUTER_LLM_MODEL" | "OPENROUTER_EMBEDDING_MODEL",
+  name:
+    | "OPENROUTER_LLM_MODEL"
+    | "OPENROUTER_EMBEDDING_MODEL"
+    | "OPENAI_REALTIME_MODEL",
   fallback: string,
 ): string {
   const rawValue = env[name]?.trim();
@@ -392,7 +397,7 @@ function parseOptionalModelId(
     rawValue.includes("..")
   ) {
     throw new ConfigurationError(
-      `${name} musí být platné ID modelu OpenRouter.`,
+      `${name} musí být platné ID modelu.`,
     );
   }
 
@@ -509,6 +514,11 @@ export function loadConfig(
     DEFAULT_OPENROUTER_EMBEDDING_MODEL,
   );
   const openAiApiKey = parseOptionalSecret(env, "OPENAI_API_KEY");
+  const openAiRealtimeModel = parseOptionalModelId(
+    env,
+    "OPENAI_REALTIME_MODEL",
+    DEFAULT_OPENAI_REALTIME_MODEL,
+  );
   const geminiApiKey = parseOptionalSecret(env, "GEMINI_API_KEY");
   const elevenLabsApiBaseUrl = parseElevenLabsApiBaseUrl(env, aiTestMode);
   const noteMaxCharacters = parsePositiveInteger(
@@ -545,6 +555,7 @@ export function loadConfig(
     openRouterLlmModel,
     openRouterEmbeddingModel,
     openAiApiKey,
+    openAiRealtimeModel,
     geminiApiKey,
     noteMaxCharacters,
     meetingMaxMinutes: parsePositiveInteger(
