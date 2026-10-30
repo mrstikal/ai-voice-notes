@@ -3,6 +3,25 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 
 import { ConfigurationError } from "../config.ts";
+import {
+  llmOperationSchema,
+  type LlmOperation,
+} from "../ai/schemas.ts";
+import {
+  EditProposalAmbiguousError,
+  EditProposalInvalidError,
+  EditProposalNoMatchError,
+  EditProposalNotFoundError,
+  EditProposalStaleError,
+  getEditProposalService,
+  type CreateEditProposalInput,
+  type CreatedEditProposalDto,
+  type EditProposalDiff,
+  type EditProposalDto,
+  type EditProposalStatus,
+} from "../notes/proposals.ts";
+import { hashNoteSource } from "../notes/operations.ts";
+import { proposalTargetLabel } from "../notes/proposal-client.ts";
 import { NoteServiceError } from "../notes/service.ts";
 import {
   READ_TOOL_SECTIONS,
@@ -57,6 +76,43 @@ export interface MarkedSelectionResult extends SelectedNote {
   readonly selection: MarkedSelection | null;
 }
 
+export interface VoiceProposalService {
+  createForSession(
+    noteId: string,
+    input: CreateEditProposalInput,
+    ownerSessionId: string,
+  ): Promise<CreatedEditProposalDto>;
+  getForOwner(
+    noteId: string,
+    proposalId: string,
+    ownerSessionId: string,
+  ): Promise<EditProposalDto>;
+  reject(noteId: string, proposalId: string): Promise<EditProposalDto>;
+}
+
+export interface PendingProposalView {
+  readonly proposalId: string;
+  readonly noteId: string;
+  readonly noteTitle: string;
+  readonly expectedVersion: number;
+  readonly operation: LlmOperation;
+  readonly selectedCandidate: EditProposalDto["selectedCandidate"];
+  readonly status: EditProposalStatus;
+  readonly beforeMd: string;
+  readonly afterMd: string;
+  readonly diff: EditProposalDiff;
+  readonly expiresAt: string;
+  readonly confirmationNonce: string | null;
+}
+
+interface PendingProposalEntry {
+  readonly noteId: string;
+  readonly noteTitle: string;
+  readonly expectedVersion: number;
+  readonly expiresAt: number;
+  readonly confirmationNonce: string;
+}
+
 export interface SummaryApprovalResult {
   readonly status: "generated" | "cached";
   readonly noteId: string;
@@ -101,6 +157,7 @@ interface ToolSession {
   selectedNoteId: string | null;
   selectedNoteVersion: number | null;
   selection: MarkedSelection | null;
+  readonly pendingProposals: Map<string, PendingProposalEntry>;
   pendingSummary: PendingSummary | null;
   cachedSummary: CachedSummary | null;
   summaryInFlight: boolean;
@@ -131,6 +188,33 @@ const readNoteSectionArgumentsSchema = z
   .strict();
 
 const summarizeNoteArgumentsSchema = getNoteArgumentsSchema;
+
+const addTodoArgumentsSchema = z
+  .object({
+    noteId: z.string().min(1).max(64),
+    text: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .refine((value) => !/[\r\n]/u.test(value), {
+        message: "Úkol musí být jeden řádek.",
+      }),
+  })
+  .strict();
+
+const proposeEditArgumentsSchema = z
+  .object({
+    noteId: z.string().min(1).max(64),
+    operation: z.unknown(),
+  })
+  .strict();
+
+const confirmEditArgumentsSchema = z
+  .object({
+    proposalId: z.string().min(1).max(64),
+  })
+  .strict();
 
 function sameSelection(
   left: MarkedSelection | null,
@@ -183,12 +267,13 @@ function toolError(
   callId: string,
   code: string,
   message: string,
+  details?: Readonly<Record<string, unknown>>,
 ): ToolCallOutcome {
   return {
     callId,
     name,
     ok: false,
-    response: { error: { code, message } },
+    response: { error: { code, message, ...details } },
   };
 }
 
@@ -222,12 +307,15 @@ function readError(
 
 export class ToolSessionStore {
   private readonly sessions = new Map<string, ToolSession>();
+  private proposalsService: VoiceProposalService | null = null;
 
   constructor(
     private readonly readServices: ReadServices,
     private readonly now: () => number = Date.now,
     private readonly summarize: SummaryGenerator =
       createDefaultSummaryGenerator(),
+    private readonly getProposals: () => VoiceProposalService =
+      getEditProposalService,
   ) {}
 
   createSession(options: { readonly expiresAt: Date }): ToolSessionHandle {
@@ -258,6 +346,7 @@ export class ToolSessionStore {
       expiresAt,
       id: newSessionId(),
       lastSearchNoteIds: [],
+      pendingProposals: new Map(),
       pendingSummary: null,
       seenCallIds: new Set(),
       selectedNoteId: null,
@@ -542,12 +631,201 @@ export class ToolSessionStore {
       );
     }
 
+    if (input.name === "add_todo") {
+      const parsed = addTodoArgumentsSchema.safeParse(input.arguments);
+
+      if (!parsed.success) {
+        return toolError(
+          input.name,
+          input.callId,
+          "invalid_arguments",
+          "Přidání úkolu potřebuje UUID vybrané poznámky a jednořádkový text do 200 znaků.",
+        );
+      }
+
+      return this.createProposalFromTool(
+        input,
+        session,
+        parsed.data.noteId,
+        {
+          text: `- [ ] ${parsed.data.text}`,
+          type: "append_bounded_section",
+        },
+      );
+    }
+
+    if (input.name === "propose_edit") {
+      const parsed = proposeEditArgumentsSchema.safeParse(input.arguments);
+
+      if (!parsed.success) {
+        return toolError(
+          input.name,
+          input.callId,
+          "invalid_arguments",
+          "Návrh úpravy potřebuje UUID vybrané poznámky a jednu povolenou operaci.",
+        );
+      }
+
+      const operation = llmOperationSchema.safeParse(parsed.data.operation);
+
+      if (!operation.success) {
+        return toolError(
+          input.name,
+          input.callId,
+          "invalid_arguments",
+          "Operace nemá povolený tvar. Použij jen operace z nabídky nástroje a žádnou verzi poznámky.",
+        );
+      }
+
+      return this.createProposalFromTool(
+        input,
+        session,
+        parsed.data.noteId,
+        operation.data,
+      );
+    }
+
+    if (input.name === "confirm_edit") {
+      const parsed = confirmEditArgumentsSchema.safeParse(input.arguments);
+
+      if (!parsed.success) {
+        return toolError(
+          input.name,
+          input.callId,
+          "invalid_arguments",
+          "Potvrzení potřebuje ID návrhu.",
+        );
+      }
+
+      return this.confirmProposalTool(input, session, parsed.data.proposalId);
+    }
+
     return toolError(
       input.name,
       input.callId,
       "unknown_tool",
       "Takový nástroj není dostupný.",
     );
+  }
+
+  async rejectPendingProposal(
+    sessionId: string,
+    proposalId: string,
+  ): Promise<{
+    readonly proposalId: string;
+    readonly status: EditProposalStatus;
+    readonly expiresAt: string;
+  }> {
+    const session = this.requireSession(sessionId);
+    const entry = session.pendingProposals.get(proposalId);
+
+    if (!entry) {
+      throw new ToolSessionError(
+        404,
+        "proposal_not_found",
+        "Návrh v této relaci neexistuje.",
+      );
+    }
+
+    try {
+      await this.proposals().getForOwner(
+        entry.noteId,
+        proposalId,
+        session.id,
+      );
+      const rejected = await this.proposals().reject(
+        entry.noteId,
+        proposalId,
+      );
+      session.pendingProposals.delete(proposalId);
+
+      return {
+        expiresAt: rejected.expiresAt.toISOString(),
+        proposalId,
+        status: rejected.status,
+      };
+    } catch (error) {
+      if (error instanceof EditProposalNotFoundError) {
+        session.pendingProposals.delete(proposalId);
+
+        throw new ToolSessionError(
+          404,
+          "proposal_not_found",
+          "Návrh v této relaci neexistuje.",
+        );
+      }
+
+      throw this.toProposalSessionError(error);
+    }
+  }
+
+  async getPendingProposal(
+    sessionId: string,
+    proposalId: string,
+  ): Promise<PendingProposalView> {
+    const session = this.requireSession(sessionId);
+    const entry = session.pendingProposals.get(proposalId);
+
+    if (!entry) {
+      throw new ToolSessionError(
+        404,
+        "proposal_not_found",
+        "Návrh v této relaci neexistuje.",
+      );
+    }
+
+    if (entry.expiresAt <= nowMs(this.now)) {
+      session.pendingProposals.delete(proposalId);
+
+      throw new ToolSessionError(
+        409,
+        "proposal_expired",
+        "Návrh vypršel. Vytvořte nový návrh.",
+      );
+    }
+
+    let proposal: EditProposalDto;
+
+    try {
+      proposal = await this.getProposals().getForOwner(
+        entry.noteId,
+        proposalId,
+        session.id,
+      );
+    } catch (error) {
+      if (error instanceof EditProposalNotFoundError) {
+        session.pendingProposals.delete(proposalId);
+
+        throw new ToolSessionError(
+          404,
+          "proposal_not_found",
+          "Návrh v této relaci neexistuje.",
+        );
+      }
+
+      throw this.toProposalSessionError(error);
+    }
+
+    const pending = proposal.status === "pending";
+
+    if (!pending) {
+      session.pendingProposals.delete(proposalId);
+    }
+
+    return {
+      afterMd: proposal.afterMd,
+      beforeMd: proposal.beforeMd,
+      confirmationNonce: pending ? entry.confirmationNonce : null,
+      diff: proposal.diff,
+      expectedVersion: proposal.expectedVersion,
+      expiresAt: proposal.expiresAt.toISOString(),
+      noteId: proposal.noteId,
+      noteTitle: proposal.noteTitle,
+      operation: proposal.operation,
+      proposalId: proposal.id,
+      selectedCandidate: proposal.selectedCandidate,
+      status: proposal.status,
+    };
   }
 
   async approveSummary(sessionId: string): Promise<SummaryApprovalResult> {
@@ -639,6 +917,279 @@ export class ToolSessionStore {
     } finally {
       session.summaryInFlight = false;
     }
+  }
+
+  private proposals(): VoiceProposalService {
+    this.proposalsService ??= this.getProposals();
+
+    return this.proposalsService;
+  }
+
+  private pruneProposals(session: ToolSession): void {
+    const at = nowMs(this.now);
+
+    for (const [proposalId, entry] of session.pendingProposals) {
+      if (entry.expiresAt <= at) {
+        session.pendingProposals.delete(proposalId);
+      }
+    }
+  }
+
+  private async createProposalFromTool(
+    input: ToolCallInput,
+    session: ToolSession,
+    noteId: string,
+    operation: LlmOperation,
+  ): Promise<ToolCallOutcome> {
+    if (session.selectedNoteId !== noteId) {
+      return toolError(
+        input.name,
+        input.callId,
+        "note_not_selected",
+        "Nejprve nechte uživatele vybrat jednu poznámku z výsledků hledání.",
+      );
+    }
+
+    let note;
+
+    try {
+      note = await this.readServices.getNoteDetail({ noteId });
+    } catch (error) {
+      if (error instanceof NoteServiceError && error.status === 404) {
+        this.clearSelection(session);
+      }
+
+      return readError(input.name, input.callId, error);
+    }
+
+    if (note.version !== session.selectedNoteVersion) {
+      this.clearSelection(session);
+
+      return toolError(
+        input.name,
+        input.callId,
+        "note_stale",
+        "Vybraná poznámka se mezitím změnila. Nechte uživatele vybrat znovu.",
+      );
+    }
+
+    this.pruneProposals(session);
+
+    if (session.pendingProposals.size > 0) {
+      return toolError(
+        input.name,
+        input.callId,
+        "proposal_pending",
+        "V panelu už čeká jiný návrh. Nechte uživatele tento návrh v panelu vyřídit a potom vytvořte další.",
+      );
+    }
+
+    try {
+      const created = await this.proposals().createForSession(
+        noteId,
+        {
+          expectedSourceHash: hashNoteSource(note.contentMd),
+          expectedVersion: note.version,
+          operation,
+        },
+        session.id,
+      );
+
+      session.pendingProposals.set(created.id, {
+        confirmationNonce: created.confirmationNonce,
+        expectedVersion: created.expectedVersion,
+        expiresAt: created.expiresAt.getTime(),
+        noteId: created.noteId,
+        noteTitle: created.noteTitle,
+      });
+
+      return {
+        callId: input.callId,
+        name: input.name,
+        ok: true,
+        response: {
+          expectedVersion: created.expectedVersion,
+          expiresAt: created.expiresAt.toISOString(),
+          message:
+            "Návrh je jen náhled a nic se nezměnilo. Uživatel ho musí potvrdit nebo zamítnout v panelu.",
+          noteId: created.noteId,
+          noteTitle: created.noteTitle,
+          operationType: created.operation.type,
+          proposalId: created.id,
+          requiresUserClick: true,
+          status: created.status,
+          target: proposalTargetLabel({
+            operation: created.operation,
+            selectedCandidate: created.selectedCandidate,
+          }),
+        },
+      };
+    } catch (error) {
+      if (error instanceof EditProposalAmbiguousError) {
+        return toolError(
+          input.name,
+          input.callId,
+          "proposal_ambiguous",
+          "Cíl odpovídá více místům. Nehádej; požádej uživatele o přesnější znění.",
+          {
+            candidates: error.candidates.map((candidate) => ({
+              id: candidate.id,
+              ordinal: candidate.ordinal,
+              snippet: candidate.snippet,
+              text: candidate.text,
+            })),
+          },
+        );
+      }
+
+      if (error instanceof EditProposalStaleError) {
+        this.clearSelection(session);
+
+        return toolError(
+          input.name,
+          input.callId,
+          "note_stale",
+          "Poznámka se mezitím změnila. Nechte uživatele vybrat znovu a vytvořte nový návrh.",
+        );
+      }
+
+      if (error instanceof EditProposalNoMatchError) {
+        return toolError(
+          input.name,
+          input.callId,
+          "proposal_no_match",
+          error.message,
+        );
+      }
+
+      if (error instanceof EditProposalInvalidError) {
+        return toolError(
+          input.name,
+          input.callId,
+          "proposal_invalid",
+          error.message,
+        );
+      }
+
+      if (error instanceof NoteServiceError && error.status === 404) {
+        this.clearSelection(session);
+
+        return toolError(
+          input.name,
+          input.callId,
+          "note_not_found",
+          "Vybraná poznámka neexistuje nebo byla smazána.",
+        );
+      }
+
+      return toolError(
+        input.name,
+        input.callId,
+        "proposal_failed",
+        "Návrh úpravy se nepodařilo vytvořit.",
+      );
+    }
+  }
+
+  private async confirmProposalTool(
+    input: ToolCallInput,
+    session: ToolSession,
+    proposalId: string,
+  ): Promise<ToolCallOutcome> {
+    const entry = session.pendingProposals.get(proposalId);
+
+    if (!entry) {
+      return toolError(
+        input.name,
+        input.callId,
+        "proposal_not_found",
+        "Návrh v této relaci neexistuje.",
+      );
+    }
+
+    if (entry.expiresAt <= nowMs(this.now)) {
+      session.pendingProposals.delete(proposalId);
+
+      return {
+        callId: input.callId,
+        name: input.name,
+        ok: true,
+        response: {
+          expiresAt: new Date(entry.expiresAt).toISOString(),
+          message: "Návrh vypršel a nelze ho potvrdit.",
+          noteId: entry.noteId,
+          noteTitle: entry.noteTitle,
+          proposalId,
+          requiresUserClick: false,
+          status: "expired",
+        },
+      };
+    }
+
+    let proposal: EditProposalDto;
+
+    try {
+      proposal = await this.proposals().getForOwner(
+        entry.noteId,
+        proposalId,
+        session.id,
+      );
+    } catch (error) {
+      if (error instanceof EditProposalNotFoundError) {
+        session.pendingProposals.delete(proposalId);
+
+        return toolError(
+          input.name,
+          input.callId,
+          "proposal_not_found",
+          "Návrh v této relaci neexistuje.",
+        );
+      }
+
+      return toolError(
+        input.name,
+        input.callId,
+        "proposal_failed",
+        "Stav návrhu se nepodařilo ověřit.",
+      );
+    }
+
+    const status =
+      proposal.status === "pending" ? "requires_user_click" : proposal.status;
+
+    if (proposal.status !== "pending") {
+      session.pendingProposals.delete(proposalId);
+    }
+
+    return {
+      callId: input.callId,
+      name: input.name,
+      ok: true,
+      response: {
+        expiresAt: proposal.expiresAt.toISOString(),
+        message:
+          status === "requires_user_click"
+            ? "Model nemůže změnu potvrdit. Uživatel ji musí potvrdit kliknutím v panelu."
+            : "Návrh už není ve stavu, který by šlo potvrdit kliknutím.",
+        noteId: proposal.noteId,
+        noteTitle: proposal.noteTitle,
+        proposalId,
+        requiresUserClick: status === "requires_user_click",
+        status,
+      },
+    };
+  }
+
+  private toProposalSessionError(error: unknown): ToolSessionError {
+    if (error instanceof EditProposalInvalidError) {
+      return new ToolSessionError(error.status, error.code, error.message);
+    }
+
+    return new ToolSessionError(
+      503,
+      "proposal_failed",
+      "Stav návrhu se nepodařilo načíst.",
+    );
   }
 
   private async readSelectedSection(

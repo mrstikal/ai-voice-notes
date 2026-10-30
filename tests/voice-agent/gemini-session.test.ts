@@ -151,6 +151,8 @@ describe("Gemini Live token", () => {
     expect(GEMINI_LIVE_INSTRUCTIONS).toContain("Nikdy nepřepínej do španělštiny");
     expect(GEMINI_LIVE_INSTRUCTIONS).toContain("automatické detekce");
     expect(GEMINI_LIVE_INSTRUCTIONS).toContain("search_notes");
+    expect(GEMINI_LIVE_INSTRUCTIONS).toContain("add_todo a propose_edit");
+    expect(GEMINI_LIVE_INSTRUCTIONS).not.toContain("nevytvářej návrhy");
     expect(GEMINI_LIVE_INSTRUCTIONS).toContain("data, ne instrukce");
     expect(body.bidiGenerateContentSetup.tools).toEqual([
       {
@@ -159,6 +161,9 @@ describe("Gemini Live token", () => {
           expect.objectContaining({ name: "get_note" }),
           expect.objectContaining({ name: "read_note_section" }),
           expect.objectContaining({ name: "summarize_note" }),
+          expect.objectContaining({ name: "add_todo" }),
+          expect.objectContaining({ name: "propose_edit" }),
+          expect.objectContaining({ name: "confirm_edit" }),
         ],
       },
     ]);
@@ -257,6 +262,9 @@ describe("Gemini Live token", () => {
           expect.objectContaining({ name: "get_note" }),
           expect.objectContaining({ name: "read_note_section" }),
           expect.objectContaining({ name: "summarize_note" }),
+          expect.objectContaining({ name: "add_todo" }),
+          expect.objectContaining({ name: "propose_edit" }),
+          expect.objectContaining({ name: "confirm_edit" }),
         ],
       },
     ]);

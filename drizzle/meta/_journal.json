@@ -43,6 +43,13 @@
       "when": 1793297838359,
       "tag": "0005_meeting_saves",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793389615114,
+      "tag": "0006_proposal_sessions",
+      "breakpoints": true
     }
   ]
 }

@@ -1,22 +1,12 @@
 "use client";
 
 import { formatCzechDateTime } from "@/lib/notes/client";
-import type {
-  EditProposal,
-  EditProposalStatus,
+import {
+  proposalOperationLabel,
+  proposalTargetLabel,
+  type EditProposal,
+  type EditProposalStatus,
 } from "@/lib/notes/proposal-client";
-
-const operationLabels: Record<EditProposal["operation"]["type"], string> = {
-  replace_sentence: "Nahradit větu",
-  insert_before_sentence: "Vložit před větu",
-  insert_after_sentence: "Vložit za větu",
-  delete_sentence: "Smazat větu",
-  insert_heading_before_sentence: "Vložit nadpis před větu",
-  replace_last_sentence: "Nahradit poslední větu",
-  set_task_checked: "Změnit stav úkolu",
-  replace_paragraph: "Nahradit odstavec",
-  append_bounded_section: "Připojit omezenou sekci",
-};
 
 const statusLabels: Record<EditProposalStatus, string> = {
   pending: "Čeká na potvrzení",
@@ -24,25 +14,6 @@ const statusLabels: Record<EditProposalStatus, string> = {
   applied: "Aplikováno",
   expired: "Vypršelo",
 };
-
-function operationTarget(proposal: EditProposal): string {
-  if (proposal.selectedCandidate) {
-    return proposal.selectedCandidate.snippet;
-  }
-
-  const operation = proposal.operation;
-
-  switch (operation.type) {
-    case "set_task_checked":
-      return `Úkol: ${operation.taskText}`;
-    case "replace_last_sentence":
-      return "Poslední věta poznámky";
-    case "append_bounded_section":
-      return "Konec poznámky";
-    default:
-      return `„${operation.target.startPhrase}“ … „${operation.target.endPhrase}“`;
-  }
-}
 
 export interface ChangePreviewProps {
   readonly proposal: EditProposal;
@@ -75,11 +46,11 @@ export function ChangePreview({
             className="text-lg font-semibold text-stone-950"
             id="proposal-preview-heading"
           >
-            Navržená úprava: {operationLabels[proposal.operation.type]}
+            Navržená úprava: {proposalOperationLabel(proposal.operation.type)}
           </h3>
           <p className="mt-1 text-sm leading-6 text-stone-600">
             Poznámka: <strong>{proposal.noteTitle}</strong> · verze{" "}
-            {proposal.expectedVersion} · cíl: {operationTarget(proposal)}
+            {proposal.expectedVersion} · cíl: {proposalTargetLabel(proposal)}
           </p>
         </div>
         <span className="rounded-full bg-stone-100 px-3 py-1 text-xs font-semibold text-stone-700">

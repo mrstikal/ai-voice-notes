@@ -256,6 +256,7 @@ export const editProposals = pgTable(
       withTimezone: true,
       mode: "date",
     }),
+    ownerSessionId: text("owner_session_id"),
     expiresAt: timestamp("expires_at", {
       withTimezone: true,
       mode: "date",
@@ -291,6 +292,10 @@ export const editProposals = pgTable(
       sql`${table.status} in ('pending', 'rejected', 'applied', 'expired')`,
     ),
     check(
+      "edit_proposals_owner_session_len",
+      sql`${table.ownerSessionId} is null or (char_length(${table.ownerSessionId}) between 20 and 128)`,
+    ),
+    check(
       "edit_proposals_operation_object",
       sql`jsonb_typeof(${table.operation}) = 'object'`,
     ),
@@ -307,6 +312,9 @@ export const editProposals = pgTable(
       table.status,
       table.expiresAt,
     ),
+    index("edit_proposals_owner_session_id_idx")
+      .on(table.ownerSessionId)
+      .where(sql`${table.ownerSessionId} is not null`),
   ],
 );
 

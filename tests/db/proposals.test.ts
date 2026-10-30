@@ -141,6 +141,50 @@ describe.skipIf(!hasTestDatabase)("P23 edit proposals", () => {
     expect(await revisionCount(note.id)).toBe(1);
   });
 
+  it("stores owner session only for agent proposals and scopes reads to it", async () => {
+    const note = await createBaseNote();
+    const owner = "s".repeat(43);
+    const manual = await proposals.create(note.id, {
+      operation: replaceFirst,
+    });
+    const agent = await proposals.createForSession(
+      note.id,
+      { operation: replaceFirst },
+      owner,
+    );
+
+    const rows = await connection.pool.query<{
+      id: string;
+      owner_session_id: string | null;
+    }>(
+      "SELECT id, owner_session_id FROM edit_proposals WHERE id = ANY($1::uuid[])",
+      [[manual.id, agent.id]],
+    );
+    const owners = new Map(
+      rows.rows.map((row) => [row.id, row.owner_session_id]),
+    );
+    expect(owners.get(manual.id)).toBeNull();
+    expect(owners.get(agent.id)).toBe(owner);
+
+    await expect(
+      proposals.getForOwner(note.id, agent.id, "x".repeat(43)),
+    ).rejects.toMatchObject({ code: "proposal_not_found", status: 404 });
+    await expect(
+      proposals.getForOwner(note.id, agent.id, owner),
+    ).resolves.toMatchObject({ id: agent.id, status: "pending" });
+    await expect(
+      proposals.createForSession(
+        note.id,
+        { operation: replaceFirst },
+        "short",
+      ),
+    ).rejects.toBeInstanceOf(EditProposalInvalidError);
+
+    const noteAfter = await noteService.getNote(note.id);
+    expect(noteAfter.version).toBe(note.version);
+    expect(noteAfter.contentMd).toBe(note.contentMd);
+  });
+
   it("returns numbered candidates for an ambiguous target and persists nothing", async () => {
     const note = await createBaseNote(
       "Stejná věta. Jiná věta. Stejná věta.",

@@ -907,6 +907,202 @@ describe("GeminiConversation", () => {
     expect(setItem).not.toHaveBeenCalled();
   });
 
+  it("shows an agent proposal as a preview, rejects it and never confirms from the model", async () => {
+    const NONCE = "n".repeat(43);
+    const PROPOSAL_ID = "11111111-1111-4111-8111-111111111111";
+    const NOTE_ID = "22222222-2222-4222-8222-222222222222";
+    const toolBodies: Array<Record<string, unknown>> = [];
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<
+        string,
+        unknown
+      >;
+
+      if (url.endsWith("/api/voice-agent/gemini-token")) {
+        tokenBodies.push(body as { voice: string });
+        return tokenResponse(body.voice as string);
+      }
+
+      if (url.includes("/api/voice-agent/pending/")) {
+        if (body.action === "reject") {
+          return jsonResponse(200, {
+            expiresAt: "2026-10-30T12:05:00.000Z",
+            ok: true,
+            proposalId: PROPOSAL_ID,
+            status: "rejected",
+          });
+        }
+
+        return jsonResponse(200, {
+          ok: true,
+          proposal: {
+            afterMd: "Ahoj světe.\n\n- [ ] Koupit mléko",
+            beforeMd: "Ahoj světe.",
+            confirmationNonce: NONCE,
+            diff: {
+              end: 11,
+              inserted: "\n\n- [ ] Koupit mléko",
+              prefix: "Ahoj světe.",
+              removed: "",
+              start: 11,
+              suffix: "",
+            },
+            expectedVersion: 1,
+            expiresAt: "2026-10-30T12:05:00.000Z",
+            noteId: NOTE_ID,
+            noteTitle: "Nákupní poznámka",
+            operation: {
+              text: "- [ ] Koupit mléko",
+              type: "append_bounded_section",
+            },
+            proposalId: PROPOSAL_ID,
+            selectedCandidate: null,
+            status: "pending",
+          },
+        });
+      }
+
+      if (url.endsWith("/api/voice-agent/tool")) {
+        toolBodies.push(body);
+
+        if (body.action === "select") {
+          return jsonResponse(200, {
+            ok: true,
+            selected: {
+              noteId: NOTE_ID,
+              preview: "Ahoj světe.",
+              previewTruncated: false,
+              title: "Nákupní poznámka",
+              version: 1,
+            },
+          });
+        }
+
+        if (body.name === "search_notes") {
+          return jsonResponse(200, {
+            ok: true,
+            response: {
+              empty: false,
+              query: "nákup",
+              results: [
+                {
+                  noteId: NOTE_ID,
+                  preview: "Ahoj světe.",
+                  title: "Nákupní poznámka",
+                },
+              ],
+              total: 1,
+            },
+          });
+        }
+
+        if (body.name === "add_todo") {
+          return jsonResponse(200, {
+            ok: true,
+            response: {
+              expectedVersion: 1,
+              expiresAt: "2026-10-30T12:05:00.000Z",
+              message: "Návrh je jen náhled.",
+              noteId: NOTE_ID,
+              noteTitle: "Nákupní poznámka",
+              operationType: "append_bounded_section",
+              proposalId: PROPOSAL_ID,
+              requiresUserClick: true,
+              status: "pending",
+              target: "Konec poznámky",
+            },
+          });
+        }
+
+        if (body.name === "confirm_edit") {
+          return jsonResponse(200, {
+            ok: true,
+            response: {
+              expiresAt: "2026-10-30T12:05:00.000Z",
+              message: "Uživatel musí kliknout.",
+              noteId: NOTE_ID,
+              noteTitle: "Nákupní poznámka",
+              proposalId: PROPOSAL_ID,
+              requiresUserClick: true,
+              status: "requires_user_click",
+            },
+          });
+        }
+      }
+
+      return jsonResponse(404, {
+        error: { code: "not_found", message: "Nenalezeno." },
+      });
+    });
+
+    render(createElement(GeminiConversation));
+    const { socket } = await connectGemini();
+
+    await act(async () => {
+      socket.message({
+        toolCall: {
+          functionCalls: [
+            { args: { query: "nákup" }, id: "call-search", name: "search_notes" },
+          ],
+        },
+      });
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Vybrat" }));
+
+    await act(async () => {
+      socket.message({
+        toolCall: {
+          functionCalls: [
+            {
+              args: { noteId: NOTE_ID, text: "Koupit mléko" },
+              id: "call-todo",
+              name: "add_todo",
+            },
+          ],
+        },
+      });
+    });
+
+    const panel = await screen.findByTestId("voice-agent-pending-edit");
+    expect(panel.textContent).toContain("Nákupní poznámka");
+    expect(panel.textContent).toContain("Konec poznámky");
+    expect(screen.getByTestId("voice-agent-pending-diff").textContent).toContain(
+      "- [ ] Koupit mléko",
+    );
+    expect(document.body.textContent).not.toContain(NONCE);
+    expect(screen.getByRole("button", { name: "Potvrdit" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+
+    fireEvent.click(screen.getByTestId("voice-agent-pending-reject"));
+    await waitFor(() =>
+      expect(screen.getByText("Zamítnuto")).toBeDefined(),
+    );
+    expect(
+      toolBodies.some((value) => value.name === "add_todo"),
+    ).toBe(true);
+
+    await act(async () => {
+      socket.message({
+        toolCall: {
+          functionCalls: [
+            {
+              args: { proposalId: PROPOSAL_ID },
+              id: "call-confirm",
+              name: "confirm_edit",
+            },
+          ],
+        },
+      });
+    });
+    expect(
+      await screen.findByText(/Změnu nejde potvrdit hlasem/),
+    ).toBeDefined();
+  });
+
   it("stops the mic and socket on unmount", async () => {
     const view = render(createElement(GeminiConversation));
     const { socket, localTrack } = await connectGemini();

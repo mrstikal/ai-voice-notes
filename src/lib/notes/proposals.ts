@@ -298,7 +298,17 @@ export interface EditProposalService {
     noteId: string,
     input: CreateEditProposalInput,
   ): Promise<CreatedEditProposalDto>;
+  createForSession(
+    noteId: string,
+    input: CreateEditProposalInput,
+    ownerSessionId: string,
+  ): Promise<CreatedEditProposalDto>;
   get(noteId: string, proposalId: string): Promise<EditProposalDto>;
+  getForOwner(
+    noteId: string,
+    proposalId: string,
+    ownerSessionId: string,
+  ): Promise<EditProposalDto>;
   reject(noteId: string, proposalId: string): Promise<EditProposalDto>;
   confirm(
     noteId: string,
@@ -313,6 +323,15 @@ const PROPOSAL_UUID_PATTERN =
 function assertProposalId(id: string): void {
   if (!PROPOSAL_UUID_PATTERN.test(id)) {
     throw new EditProposalNotFoundError();
+  }
+}
+
+function assertOwnerSessionId(id: string): void {
+  if (id.length < 20 || id.length > 128) {
+    throw new EditProposalInvalidError(
+      "invalid_owner_session",
+      "Návrh nemá platnou relaci, ke které patří.",
+    );
   }
 }
 
@@ -458,62 +477,77 @@ export function createEditProposalService(
   const expiryMs = options.expiryMs ?? PROPOSAL_EXPIRY_MS;
   const limits = options.limits ?? DEFAULT_PROPOSAL_LIMITS;
 
+  const createProposal = async (
+    noteId: string,
+    input: CreateEditProposalInput,
+    ownerSessionId: string | null,
+  ): Promise<CreatedEditProposalDto> => {
+    assertNoteId(noteId);
+    const createdAt = now();
+    await expirePending(db, createdAt);
+
+    const note = await options.noteService.getNote(noteId);
+    const resolution = resolveOperation({
+      contentMd: note.contentMd,
+      operation: input.operation,
+      noteVersion: note.version,
+      deletedAt: note.deletedAt,
+      expectedVersion: input.expectedVersion,
+      expectedSourceHash: input.expectedSourceHash,
+      candidateId: input.candidateId,
+    });
+
+    if (resolution.status !== "resolved") {
+      throw resolveFailureToProposalError(resolution);
+    }
+
+    const confirmationNonce = nonceFactory();
+    const expiresAt = new Date(createdAt.getTime() + expiryMs);
+
+    const rows = await db
+      .insert(editProposals)
+      .values({
+        noteId,
+        noteTitle: note.title,
+        expectedVersion: note.version,
+        originalHash: resolution.sourceHash,
+        operation: resolution.operation,
+        beforeMd: resolution.beforeMd,
+        afterMd: resolution.afterMd,
+        selectedCandidate: resolution.candidate,
+        status: "pending",
+        ownerSessionId,
+        confirmationNonceHash: hashConfirmationNonce(confirmationNonce),
+        expiresAt,
+        createdAt,
+        updatedAt: createdAt,
+      })
+      .returning();
+    const row = rows[0];
+
+    if (!row) {
+      throw new EditProposalError(
+        500,
+        "proposal_create_failed",
+        "Návrh úpravy se nepodařilo uložit.",
+      );
+    }
+
+    return {
+      ...toDto(row),
+      confirmationNonce,
+    };
+};
+
   return {
-    async create(noteId, input) {
-      assertNoteId(noteId);
-      const createdAt = now();
-      await expirePending(db, createdAt);
+    create(noteId, input) {
+      return createProposal(noteId, input, null);
+    },
 
-      const note = await options.noteService.getNote(noteId);
-      const resolution = resolveOperation({
-        contentMd: note.contentMd,
-        operation: input.operation,
-        noteVersion: note.version,
-        deletedAt: note.deletedAt,
-        expectedVersion: input.expectedVersion,
-        expectedSourceHash: input.expectedSourceHash,
-        candidateId: input.candidateId,
-      });
+    async createForSession(noteId, input, ownerSessionId) {
+      assertOwnerSessionId(ownerSessionId);
 
-      if (resolution.status !== "resolved") {
-        throw resolveFailureToProposalError(resolution);
-      }
-
-      const confirmationNonce = nonceFactory();
-      const expiresAt = new Date(createdAt.getTime() + expiryMs);
-
-      const rows = await db
-        .insert(editProposals)
-        .values({
-          noteId,
-          noteTitle: note.title,
-          expectedVersion: note.version,
-          originalHash: resolution.sourceHash,
-          operation: resolution.operation,
-          beforeMd: resolution.beforeMd,
-          afterMd: resolution.afterMd,
-          selectedCandidate: resolution.candidate,
-          status: "pending",
-          confirmationNonceHash: hashConfirmationNonce(confirmationNonce),
-          expiresAt,
-          createdAt,
-          updatedAt: createdAt,
-        })
-        .returning();
-      const row = rows[0];
-
-      if (!row) {
-        throw new EditProposalError(
-          500,
-          "proposal_create_failed",
-          "Návrh úpravy se nepodařilo uložit.",
-        );
-      }
-
-      return {
-        ...toDto(row),
-        confirmationNonce,
-      };
+      return createProposal(noteId, input, ownerSessionId);
     },
 
     async get(noteId, proposalId) {
@@ -528,6 +562,32 @@ export function createEditProposalService(
           and(
             eq(editProposals.id, proposalId),
             eq(editProposals.noteId, noteId),
+          ),
+        )
+        .limit(1);
+      const row = rows[0];
+
+      if (!row) {
+        throw new EditProposalNotFoundError();
+      }
+
+      return toDto(row);
+    },
+
+    async getForOwner(noteId, proposalId, ownerSessionId) {
+      assertNoteId(noteId);
+      assertProposalId(proposalId);
+      assertOwnerSessionId(ownerSessionId);
+      await expirePending(db, now());
+
+      const rows = await db
+        .select()
+        .from(editProposals)
+        .where(
+          and(
+            eq(editProposals.id, proposalId),
+            eq(editProposals.noteId, noteId),
+            eq(editProposals.ownerSessionId, ownerSessionId),
           ),
         )
         .limit(1);

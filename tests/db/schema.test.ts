@@ -286,6 +286,7 @@ describe.skipIf(!hasTestDatabase)("isolated database schema", () => {
       "ai_usage_started_at_idx",
       "ai_usage_status_idx",
       "edit_proposals_note_status_expires_idx",
+      "edit_proposals_owner_session_id_idx",
       "edit_proposals_status_expires_idx",
       "note_chunks_note_version_chunk_unique",
       "note_chunks_note_version_idx",
@@ -308,6 +309,11 @@ describe.skipIf(!hasTestDatabase)("isolated database schema", () => {
     expect(
       indexes.rows.find((row) => row.indexname === "notes_active_created_at_id_idx")
         ?.indexdef,
+    ).toContain("WHERE");
+    expect(
+      indexes.rows.find(
+        (row) => row.indexname === "edit_proposals_owner_session_id_idx",
+      )?.indexdef,
     ).toContain("WHERE");
   });
 
@@ -347,6 +353,17 @@ describe.skipIf(!hasTestDatabase)("isolated database schema", () => {
           (note_id, note_title, expected_version, original_hash, operation,
            before_md, after_md, status, confirmation_nonce_hash, expires_at)
          VALUES ($1, 'Návrh', 1, $2, '[]'::jsonb, 'Před', 'Po', 'pending', $2, now() + interval '5 minutes')`,
+        [note.id, "a".repeat(64)],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      connection.pool.query(
+        `INSERT INTO edit_proposals
+          (note_id, note_title, expected_version, original_hash, operation,
+           before_md, after_md, status, confirmation_nonce_hash, owner_session_id,
+           expires_at)
+         VALUES ($1, 'Návrh', 1, $2, '{}'::jsonb, 'Před', 'Po', 'pending', $2, 'short',
+                 now() + interval '5 minutes')`,
         [note.id, "a".repeat(64)],
       ),
     ).rejects.toMatchObject({ code: "23514" });

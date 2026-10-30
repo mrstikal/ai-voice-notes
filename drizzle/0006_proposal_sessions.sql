@@ -1,0 +1,3 @@
+ALTER TABLE "edit_proposals" ADD COLUMN "owner_session_id" text;--> statement-breakpoint
+CREATE INDEX "edit_proposals_owner_session_id_idx" ON "edit_proposals" USING btree ("owner_session_id") WHERE "edit_proposals"."owner_session_id" is not null;--> statement-breakpoint
+ALTER TABLE "edit_proposals" ADD CONSTRAINT "edit_proposals_owner_session_len" CHECK ("edit_proposals"."owner_session_id" is null or (char_length("edit_proposals"."owner_session_id") between 20 and 128));

@@ -17,6 +17,44 @@ export interface EditProposalDiff {
   readonly suffix: string;
 }
 
+const operationLabels: Record<LlmOperation["type"], string> = {
+  replace_sentence: "Nahradit větu",
+  insert_before_sentence: "Vložit před větu",
+  insert_after_sentence: "Vložit za větu",
+  delete_sentence: "Smazat větu",
+  insert_heading_before_sentence: "Vložit nadpis před větu",
+  replace_last_sentence: "Nahradit poslední větu",
+  set_task_checked: "Změnit stav úkolu",
+  replace_paragraph: "Nahradit odstavec",
+  append_bounded_section: "Připojit omezenou sekci",
+};
+
+export function proposalOperationLabel(type: LlmOperation["type"]): string {
+  return operationLabels[type];
+}
+
+export function proposalTargetLabel(proposal: {
+  readonly operation: LlmOperation;
+  readonly selectedCandidate: OperationCandidate | null;
+}): string {
+  if (proposal.selectedCandidate) {
+    return proposal.selectedCandidate.snippet;
+  }
+
+  const operation = proposal.operation;
+
+  switch (operation.type) {
+    case "set_task_checked":
+      return `Úkol: ${operation.taskText}`;
+    case "replace_last_sentence":
+      return "Poslední věta poznámky";
+    case "append_bounded_section":
+      return "Konec poznámky";
+    default:
+      return `„${operation.target.startPhrase}“ … „${operation.target.endPhrase}“`;
+  }
+}
+
 export interface EditProposal {
   readonly id: string;
   readonly noteId: string;

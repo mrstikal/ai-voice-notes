@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { formatUsdAmount } from "@/lib/ai/usage-format";
+import { PendingEdit } from "./PendingEdit";
 import {
   MicrophoneLeaseError,
   acquireMicrophoneLease,
@@ -196,6 +197,25 @@ function readErrorCode(value: unknown): string | null {
   const code = (error as { code?: unknown }).code;
 
   return typeof code === "string" ? code : null;
+}
+
+function readProposalToolResult(
+  value: unknown,
+): { readonly proposalId: string; readonly status: string } | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const result = value as Record<string, unknown>;
+
+  if (
+    typeof result.proposalId !== "string" ||
+    typeof result.status !== "string"
+  ) {
+    return null;
+  }
+
+  return { proposalId: result.proposalId, status: result.status };
 }
 
 function capTranscript(text: string): string {
@@ -521,6 +541,9 @@ export function GeminiConversation() {
     useState<MarkedSelection | null>(null);
   const [summaryOffer, setSummaryOffer] =
     useState<NoteSummaryOffer | null>(null);
+  const [pendingProposalId, setPendingProposalId] = useState<string | null>(
+    null,
+  );
   const [summary, setSummary] = useState<NoteSummary | null>(null);
   const [summaryBusy, setSummaryBusy] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
@@ -639,6 +662,7 @@ export function GeminiConversation() {
       setSummary(null);
       setSummaryBusy(false);
       setSummaryError(null);
+      setPendingProposalId(null);
       setToolNotice(null);
       setSelectingNoteId(null);
       cancelledToolIdsRef.current.clear();
@@ -957,6 +981,39 @@ export function GeminiConversation() {
           setSummaryOffer(null);
           setToolNotice(`Shrnutí poznámky „${cached.noteTitle}“ je hotové.`);
         }
+      }
+    }
+
+    if (
+      outcome.ok &&
+      (call.name === "add_todo" || call.name === "propose_edit") &&
+      attemptRef.current === attempt
+    ) {
+      const proposal = readProposalToolResult(outcome.response);
+
+      if (proposal) {
+        setPendingProposalId(proposal.proposalId);
+        setToolNotice(
+          "Návrh je připravený v panelu. Poznámka se nezměnila; návrh musíte potvrdit nebo zamítnout.",
+        );
+      }
+    }
+
+    if (
+      outcome.ok &&
+      call.name === "confirm_edit" &&
+      attemptRef.current === attempt
+    ) {
+      const proposal = readProposalToolResult(outcome.response);
+
+      if (proposal) {
+        setToolNotice(
+          proposal.status === "requires_user_click"
+            ? "Změnu nejde potvrdit hlasem ani asistentem. Potvrďte ji tlačítkem v panelu."
+            : proposal.status === "expired"
+              ? "Návrh vypršel a nelze ho potvrdit."
+              : `Návrh už není čekající (${proposal.status}).`,
+        );
       }
     }
 
@@ -1608,6 +1665,7 @@ export function GeminiConversation() {
       setSummary(null);
       setSummaryBusy(false);
       setSummaryError(null);
+      setPendingProposalId(null);
       setToolNotice(null);
       setSelectingNoteId(null);
       cancelledToolIdsRef.current.clear();
@@ -1962,6 +2020,16 @@ export function GeminiConversation() {
             </>
           ) : null}
         </section>
+      ) : null}
+
+      {pendingProposalId !== null && sessionId !== null ? (
+        <PendingEdit
+          onClose={() => {
+            setPendingProposalId(null);
+          }}
+          proposalId={pendingProposalId}
+          sessionId={sessionId}
+        />
       ) : null}
 
       {summaryOffer !== null ? (
