@@ -12,6 +12,7 @@ import {
   createNoteService,
   type NoteService,
 } from "../../src/lib/notes/service";
+import { parseNoteMarkdown } from "../../src/lib/notes/markdown";
 import { searchNotesFullText } from "../../src/lib/search/fts";
 import {
   READ_TOOL_NOTE_MAX_GRAPHEMES,
@@ -105,6 +106,57 @@ describe.skipIf(!hasTestDatabase)("P47 voice read services", () => {
 
     expect(detail.content).toHaveLength(READ_TOOL_NOTE_MAX_GRAPHEMES);
     expect(detail.truncated).toBe(true);
+  });
+
+  it("reads bounded sections from the saved note without changing it", async () => {
+    const contentMd = [
+      "# Migrace",
+      "",
+      "První odstavec o databázi.",
+      "",
+      "- [ ] Ověřit kompatibilitu",
+      "",
+      "Poslední odstavec o API.",
+    ].join("\n");
+    const created = await notes.createNote({
+      title: "Sekce migrace",
+      contentMd,
+    });
+    const plainText = parseNoteMarkdown(contentMd).plainText;
+    const start = plainText.indexOf("První odstavec");
+    const end = start + "První odstavec o databázi.".length;
+
+    await expect(
+      services.readNoteSection({ noteId: created.id, section: "last_paragraph" }),
+    ).resolves.toMatchObject({
+      noteId: created.id,
+      section: "last_paragraph",
+      status: "ok",
+      text: "Poslední odstavec o API.",
+      title: "Sekce migrace",
+      version: created.version,
+    });
+
+    await expect(
+      services.readNoteSection({ noteId: created.id, section: "tasks" }),
+    ).resolves.toMatchObject({ status: "ok", text: "Ověřit kompatibilitu" });
+
+    await expect(
+      services.readNoteSection({
+        noteId: created.id,
+        section: "selection",
+        selection: { end, start },
+      }),
+    ).resolves.toMatchObject({ status: "ok", text: "První odstavec o databázi." });
+
+    await expect(
+      services.readNoteSection({ noteId: created.id, section: "selection" }),
+    ).resolves.toMatchObject({ status: "ambiguous", text: "" });
+
+    await expect(notes.getNote(created.id)).resolves.toMatchObject({
+      contentMd,
+      version: created.version,
+    });
   });
 
   it("does not return a deleted note", async () => {

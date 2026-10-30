@@ -8,6 +8,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import {
   afterEach,
@@ -490,7 +491,9 @@ describe("GeminiConversation", () => {
         toolBodies.some((body) => body.action === "select"),
       ).toBe(true),
     );
-    expect(await screen.findByText(/Vybraná poznámka: Druhá/)).toBeTruthy();
+    expect(
+      await screen.findByText(/Vybraná poznámka: Druhá\. Nyní/),
+    ).toBeTruthy();
     const selectionMessage = socket.sent
       .map((value) => JSON.parse(value) as Record<string, unknown>)
       .find((value) => "clientContent" in value) as
@@ -549,6 +552,358 @@ describe("GeminiConversation", () => {
       name: "get_note",
       response: { content: "Druhý text.", noteId: "note-b" },
     });
+    expect(setItem).not.toHaveBeenCalled();
+  });
+
+  it("marks a passage, keeps the paid summary blocked and approves it only on click", async () => {
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+    const toolBodies: Array<Record<string, unknown>> = [];
+    let markCalls = 0;
+    let approveCalls = 0;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<
+        string,
+        unknown
+      >;
+
+      if (url.endsWith("/api/voice-agent/gemini-token")) {
+        tokenBodies.push(body as { voice: string });
+        return tokenResponse(body.voice as string);
+      }
+
+      if (url.endsWith("/api/voice-agent/tool")) {
+        toolBodies.push(body);
+
+        if (body.action === "select") {
+          return jsonResponse(200, {
+            ok: true,
+            selected: {
+              noteId: "note-b",
+              preview: "Druhý text pro shrnutí.",
+              previewTruncated: false,
+              title: "Druhá",
+              version: 2,
+            },
+          });
+        }
+
+        if (body.action === "mark") {
+          markCalls += 1;
+
+          if (markCalls === 2) {
+            return jsonResponse(409, {
+              error: {
+                code: "note_stale",
+                message: "Vybraná poznámka se mezitím změnila.",
+              },
+            });
+          }
+
+          return jsonResponse(200, {
+            marked: body.selection !== null,
+            ok: true,
+            selected: {
+              noteId: "note-b",
+              preview: "Druhý text pro shrnutí.",
+              previewTruncated: false,
+              selection: body.selection,
+              title: "Druhá",
+              version: 2,
+            },
+          });
+        }
+
+        if (body.action === "approve_summary") {
+          approveCalls += 1;
+
+          if (approveCalls === 2) {
+            return jsonResponse(409, {
+              error: {
+                code: "note_stale",
+                message: "Vybraná poznámka se mezitím změnila.",
+              },
+            });
+          }
+
+          return jsonResponse(200, {
+            ok: true,
+            summary: {
+              noteId: "note-b",
+              noteTitle: "Druhá",
+              noteVersion: 2,
+              sourceGraphemes: 6,
+              status: "generated",
+              summaryText: "Shrnutí druhé poznámky.",
+            },
+          });
+        }
+
+        if (body.name === "search_notes") {
+          return jsonResponse(200, {
+            ok: true,
+            response: {
+              empty: false,
+              query: "ahoj",
+              results: [
+                {
+                  noteId: "note-a",
+                  preview: "Ahoj z první poznámky.",
+                  title: "První",
+                },
+                {
+                  noteId: "note-b",
+                  preview: "Ahoj z druhé poznámky.",
+                  title: "Druhá",
+                },
+              ],
+              total: 2,
+            },
+          });
+        }
+
+        if (body.name === "get_note") {
+          return jsonResponse(200, {
+            ok: false,
+            response: {
+              error: {
+                code: "note_stale",
+                message: "Vybraná poznámka se mezitím změnila.",
+              },
+            },
+          });
+        }
+
+        if (body.name === "summarize_note") {
+          return jsonResponse(200, {
+            ok: true,
+            response: {
+              blockedReason: null,
+              configured: true,
+              estimatedMaxCostUsd: 0.004,
+              message: "Shrnutí čeká na povolení.",
+              model: "deepseek/test",
+              noteId: "note-b",
+              noteTitle: "Druhá",
+              noteVersion: 2,
+              selection: { end: 6, start: 0 },
+              sourceGraphemes: 6,
+              status: "needs_user_cost_confirmation",
+            },
+          });
+        }
+
+        if (body.name === "read_note_section") {
+          return jsonResponse(200, {
+            ok: true,
+            response: {
+              message: null,
+              noteId: "note-b",
+              section: "tasks",
+              status: "ok",
+              text: "Ověřit databázi",
+              title: "Druhá",
+              truncated: false,
+              version: 2,
+            },
+          });
+        }
+      }
+
+      return jsonResponse(404, {
+        error: { code: "not_found", message: "Nenalezeno." },
+      });
+    });
+
+    render(createElement(GeminiConversation));
+    const { socket } = await connectGemini();
+
+    await act(async () => {
+      socket.message({
+        toolCall: {
+          functionCalls: [
+            { args: { query: "ahoj" }, id: "call-search", name: "search_notes" },
+          ],
+        },
+      });
+    });
+    expect(await screen.findByText("První")).toBeTruthy();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Vybrat" })[1]!);
+    const preview = (await screen.findByTestId(
+      "voice-agent-selected-preview",
+    )) as HTMLTextAreaElement;
+    expect(preview.value).toBe("Druhý text pro shrnutí.");
+
+    preview.setSelectionRange(0, 6);
+    fireEvent.click(screen.getByTestId("voice-agent-mark-selection"));
+
+    await waitFor(() =>
+      expect(
+        toolBodies.some(
+          (body) =>
+            body.action === "mark" &&
+            (body.selection as { start: number; end: number }).start === 0 &&
+            (body.selection as { start: number; end: number }).end === 6,
+        ),
+      ).toBe(true),
+    );
+    expect(
+      await screen.findByText(/Označená pasáž \(6 znaků\)/),
+    ).toBeTruthy();
+
+    await act(async () => {
+      socket.message({
+        toolCall: {
+          functionCalls: [
+            {
+              args: { noteId: "note-b" },
+              id: "call-summary",
+              name: "summarize_note",
+            },
+          ],
+        },
+      });
+    });
+
+    const consent = await screen.findByTestId("voice-agent-summary-consent");
+    expect(consent.textContent).toContain("Druhá");
+    expect(consent.textContent).toContain("deepseek/test");
+    expect(consent.textContent).toContain("0,00");
+    expect(screen.queryByTestId("voice-agent-summary")).toBeNull();
+    expect(
+      toolBodies.some((body) => body.action === "approve_summary"),
+    ).toBe(false);
+
+    fireEvent.click(screen.getByTestId("voice-agent-approve-summary"));
+
+    expect(await screen.findByTestId("voice-agent-summary")).toBeTruthy();
+    expect(screen.getByText("Shrnutí druhé poznámky.")).toBeTruthy();
+    expect(
+      toolBodies.some((body) => body.action === "approve_summary"),
+    ).toBe(true);
+
+    const summaryTurn = socket.sent
+      .map((value) => JSON.parse(value) as Record<string, unknown>)
+      .find(
+        (value) =>
+          "clientContent" in value &&
+          JSON.stringify(value).includes("Shrnutí druhé poznámky."),
+      ) as { clientContent?: { turnComplete?: boolean } } | undefined;
+    expect(summaryTurn?.clientContent?.turnComplete).toBe(false);
+
+    await act(async () => {
+      socket.message({
+        toolCall: {
+          functionCalls: [
+            {
+              args: { noteId: "note-b", section: "tasks" },
+              id: "call-section",
+              name: "read_note_section",
+            },
+          ],
+        },
+      });
+    });
+    expect(await screen.findByText(/Přečtená část \(úkoly\)/)).toBeTruthy();
+
+    await act(async () => {
+      socket.message({
+        toolCall: {
+          functionCalls: [
+            { args: { noteId: "note-b" }, id: "call-stale", name: "get_note" },
+          ],
+        },
+      });
+    });
+
+    expect(
+      await screen.findByText("Vybraná poznámka se mezitím změnila."),
+    ).toBeTruthy();
+    expect(screen.queryByTestId("voice-agent-selected-note")).toBeNull();
+    const secondItem = screen.getByText("Druhá").closest("li");
+    expect(secondItem).not.toBeNull();
+    expect(
+      within(secondItem as HTMLElement).getByRole("button", { name: "Vybrat" }),
+    ).toBeTruthy();
+
+    fireEvent.click(
+      within(secondItem as HTMLElement).getByRole("button", { name: "Vybrat" }),
+    );
+    const previewAgain = (await screen.findByTestId(
+      "voice-agent-selected-preview",
+    )) as HTMLTextAreaElement;
+    previewAgain.setSelectionRange(0, 6);
+    fireEvent.click(screen.getByTestId("voice-agent-mark-selection"));
+
+    await waitFor(() =>
+      expect(
+        toolBodies.filter((body) => body.action === "mark"),
+      ).toHaveLength(2),
+    );
+    await waitFor(() =>
+      expect(screen.queryByTestId("voice-agent-selected-note")).toBeNull(),
+    );
+    expect(
+      await screen.findByText("Vybraná poznámka se mezitím změnila."),
+    ).toBeTruthy();
+
+    const secondItemAfterMark = screen.getByText("Druhá").closest("li");
+    expect(secondItemAfterMark).not.toBeNull();
+    fireEvent.click(
+      within(secondItemAfterMark as HTMLElement).getByRole("button", {
+        name: "Vybrat",
+      }),
+    );
+    const previewThird = (await screen.findByTestId(
+      "voice-agent-selected-preview",
+    )) as HTMLTextAreaElement;
+    previewThird.setSelectionRange(0, 6);
+    fireEvent.click(screen.getByTestId("voice-agent-mark-selection"));
+
+    await waitFor(() =>
+      expect(
+        toolBodies.filter((body) => body.action === "mark"),
+      ).toHaveLength(3),
+    );
+
+    await act(async () => {
+      socket.message({
+        toolCall: {
+          functionCalls: [
+            {
+              args: { noteId: "note-b" },
+              id: "call-summary-2",
+              name: "summarize_note",
+            },
+          ],
+        },
+      });
+    });
+    await screen.findByTestId("voice-agent-summary-consent");
+    fireEvent.click(screen.getByTestId("voice-agent-approve-summary"));
+
+    await waitFor(() =>
+      expect(
+        toolBodies.filter((body) => body.action === "approve_summary"),
+      ).toHaveLength(2),
+    );
+    await waitFor(() =>
+      expect(screen.queryByTestId("voice-agent-selected-note")).toBeNull(),
+    );
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Vybraná poznámka se mezitím změnila.",
+    );
+    expect(screen.queryByTestId("voice-agent-summary-consent")).toBeNull();
+    expect(screen.queryByTestId("voice-agent-summary")).toBeNull();
+
+    const secondItemAfterApprove = screen.getByText("Druhá").closest("li");
+    expect(secondItemAfterApprove).not.toBeNull();
+    expect(
+      within(secondItemAfterApprove as HTMLElement).getByRole("button", {
+        name: "Vybrat",
+      }),
+    ).toBeTruthy();
     expect(setItem).not.toHaveBeenCalled();
   });
 

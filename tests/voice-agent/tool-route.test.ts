@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { NoteDetailDto } from "../../src/lib/notes/service";
 import type { SearchResult } from "../../src/lib/search/fts";
@@ -49,13 +49,19 @@ function searchResult(): SearchResult {
   };
 }
 
-function setup() {
+function setup(
+  summarize = async () => ({
+    sourceGraphemes: 11,
+    summaryText: "Shrnutí první poznámky.",
+  }),
+) {
   const store = new ToolSessionStore(
     createReadServices({
       getNote: async (noteId) => note(noteId, "První", "Ahoj světe."),
       searchNotes: async () => searchResult(),
     }),
     () => NOW,
+    summarize,
   );
   const session = store.createSession({
     expiresAt: new Date(NOW + 60_000),
@@ -144,6 +150,145 @@ describe("POST /api/voice-agent/tool", () => {
         title: "První",
       },
     });
+  });
+
+  it("marks a genuine selection and reads only that bounded section", async () => {
+    const { route, session } = setup();
+
+    await route(
+      request({
+        action: "call",
+        arguments: { query: "ahoj" },
+        callId: "call-search",
+        name: "search_notes",
+        sessionId: session.sessionId,
+        turnId: "turn-1",
+      }),
+    );
+    await route(
+      request({
+        action: "select",
+        noteId: "note-a",
+        sessionId: session.sessionId,
+      }),
+    );
+
+    const invalid = await route(
+      request({
+        action: "mark",
+        noteId: "note-a",
+        selection: { end: 2, start: 2 },
+        sessionId: session.sessionId,
+      }),
+    );
+    expect(invalid.status).toBe(400);
+
+    const mark = await route(
+      request({
+        action: "mark",
+        noteId: "note-a",
+        selection: { end: 4, start: 0 },
+        sessionId: session.sessionId,
+      }),
+    );
+    expect(mark.status).toBe(200);
+    await expect(mark.json()).resolves.toMatchObject({
+      marked: true,
+      ok: true,
+      selected: { noteId: "note-a", selection: { end: 4, start: 0 } },
+    });
+
+    const section = await route(
+      request({
+        action: "call",
+        arguments: { noteId: "note-a", section: "selection" },
+        callId: "call-section",
+        name: "read_note_section",
+        sessionId: session.sessionId,
+        turnId: "turn-2",
+      }),
+    );
+    expect(section.status).toBe(200);
+    await expect(section.json()).resolves.toMatchObject({
+      ok: true,
+      response: {
+        noteId: "note-a",
+        section: "selection",
+        status: "ok",
+        text: "Ahoj",
+      },
+    });
+  });
+
+  it("offers the paid summary only after a request and approves it once", async () => {
+    const summarize = vi.fn(async () => ({
+      sourceGraphemes: 11,
+      summaryText: "Shrnutí první poznámky.",
+    }));
+    const { route, session } = setup(summarize);
+
+    const withoutRequest = await route(
+      request({ action: "approve_summary", sessionId: session.sessionId }),
+    );
+    expect(withoutRequest.status).toBe(409);
+
+    await route(
+      request({
+        action: "call",
+        arguments: { query: "ahoj" },
+        callId: "call-search",
+        name: "search_notes",
+        sessionId: session.sessionId,
+        turnId: "turn-1",
+      }),
+    );
+    await route(
+      request({
+        action: "select",
+        noteId: "note-a",
+        sessionId: session.sessionId,
+      }),
+    );
+
+    const pending = await route(
+      request({
+        action: "call",
+        arguments: { noteId: "note-a" },
+        callId: "call-summary",
+        name: "summarize_note",
+        sessionId: session.sessionId,
+        turnId: "turn-2",
+      }),
+    );
+    expect(pending.status).toBe(200);
+    await expect(pending.json()).resolves.toMatchObject({
+      ok: true,
+      response: {
+        noteId: "note-a",
+        status: "needs_user_cost_confirmation",
+      },
+    });
+    expect(summarize).not.toHaveBeenCalled();
+
+    const approved = await route(
+      request({ action: "approve_summary", sessionId: session.sessionId }),
+    );
+    expect(approved.status).toBe(200);
+    await expect(approved.json()).resolves.toMatchObject({
+      ok: true,
+      summary: {
+        noteId: "note-a",
+        status: "generated",
+        summaryText: "Shrnutí první poznámky.",
+      },
+    });
+    expect(summarize).toHaveBeenCalledTimes(1);
+
+    const repeated = await route(
+      request({ action: "approve_summary", sessionId: session.sessionId }),
+    );
+    expect(repeated.status).toBe(409);
+    expect(summarize).toHaveBeenCalledTimes(1);
   });
 
   it("returns an unknown session as a 404 and ends idempotently", async () => {

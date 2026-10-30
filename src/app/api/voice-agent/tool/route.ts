@@ -35,6 +35,26 @@ export const voiceAgentToolRequestSchema = z.discriminatedUnion("action", [
     .strict(),
   z
     .object({
+      action: z.literal("mark"),
+      noteId: z.string().min(1).max(64),
+      selection: z
+        .object({
+          end: z.number().int().nonnegative(),
+          start: z.number().int().nonnegative(),
+        })
+        .strict()
+        .nullable(),
+      sessionId: sessionIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("approve_summary"),
+      sessionId: sessionIdSchema,
+    })
+    .strict(),
+  z
+    .object({
       action: z.literal("end"),
       sessionId: sessionIdSchema,
     })
@@ -72,6 +92,25 @@ export function createVoiceAgentToolRouteHandler(
           return jsonOk({
             ok: true,
             selected: await store.selectNote(data.sessionId, data.noteId),
+          });
+        }
+
+        if (data.action === "mark") {
+          return jsonOk({
+            marked: data.selection !== null,
+            ok: true,
+            selected: await store.markSelection(
+              data.sessionId,
+              data.noteId,
+              data.selection,
+            ),
+          });
+        }
+
+        if (data.action === "approve_summary") {
+          return jsonOk({
+            ok: true,
+            summary: await store.approveSummary(data.sessionId),
           });
         }
 

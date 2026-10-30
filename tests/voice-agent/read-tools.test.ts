@@ -237,6 +237,8 @@ describe("session-bound tool dispatch", () => {
       sessionStore.selectNote(session.sessionId, "note-a"),
     ).resolves.toEqual({
       noteId: "note-a",
+      preview: "První obsah.",
+      previewTruncated: false,
       title: "První",
       version: 1,
     });

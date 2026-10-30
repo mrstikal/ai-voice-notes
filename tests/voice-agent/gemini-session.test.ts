@@ -157,6 +157,8 @@ describe("Gemini Live token", () => {
         functionDeclarations: [
           expect.objectContaining({ name: "search_notes" }),
           expect.objectContaining({ name: "get_note" }),
+          expect.objectContaining({ name: "read_note_section" }),
+          expect.objectContaining({ name: "summarize_note" }),
         ],
       },
     ]);
@@ -253,6 +255,8 @@ describe("Gemini Live token", () => {
         functionDeclarations: [
           expect.objectContaining({ name: "search_notes" }),
           expect.objectContaining({ name: "get_note" }),
+          expect.objectContaining({ name: "read_note_section" }),
+          expect.objectContaining({ name: "summarize_note" }),
         ],
       },
     ]);
