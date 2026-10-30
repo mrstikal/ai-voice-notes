@@ -30,10 +30,12 @@ import {
 } from "./ConnectionStatus";
 
 export const GEMINI_TOKEN_ENDPOINT = "/api/voice-agent/gemini-token";
+export const GEMINI_TOOL_ENDPOINT = "/api/voice-agent/tool";
 export const GEMINI_WEBSOCKET_URL =
   "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained";
 const SETUP_TIMEOUT_MS = 15_000;
 const MAX_TRANSCRIPT_CHARACTERS = 2_000;
+const MAX_SEARCH_RESULTS = 5;
 const MICROPHONE_CONSTRAINTS: MediaTrackConstraints = {
   echoCancellation: true,
   noiseSuppression: true,
@@ -42,6 +44,7 @@ const MICROPHONE_CONSTRAINTS: MediaTrackConstraints = {
 
 interface GeminiTokenResponse {
   readonly token: string;
+  readonly sessionId: string;
   readonly model: string;
   readonly voice: GeminiVoice;
   readonly maxSessionSeconds: number;
@@ -51,6 +54,42 @@ interface GeminiTokenResponse {
 interface Transcript {
   readonly user: string;
   readonly assistant: string;
+}
+
+interface SearchResultItem {
+  readonly noteId: string;
+  readonly title: string;
+  readonly preview: string;
+}
+
+interface SearchNotesResponse {
+  readonly query: string;
+  readonly results: readonly SearchResultItem[];
+  readonly total: number;
+  readonly empty: boolean;
+}
+
+interface SelectedNote {
+  readonly noteId: string;
+  readonly title: string;
+  readonly version: number;
+}
+
+interface ToolCall {
+  readonly id: string;
+  readonly name: string;
+  readonly args: unknown;
+}
+
+interface ToolCallResponse {
+  readonly id: string;
+  readonly name: string;
+  readonly response: unknown;
+}
+
+interface ToolOutcome {
+  readonly ok: boolean;
+  readonly response: unknown;
 }
 
 type AudioContextConstructor = new (options?: AudioContextOptions) => AudioContext;
@@ -74,6 +113,8 @@ function isTokenResponse(value: unknown): value is GeminiTokenResponse {
   return (
     typeof candidate.token === "string" &&
     candidate.token.length > 0 &&
+    typeof candidate.sessionId === "string" &&
+    candidate.sessionId.length > 0 &&
     typeof candidate.model === "string" &&
     isGeminiVoice(candidate.voice) &&
     typeof candidate.maxSessionSeconds === "number" &&
@@ -137,6 +178,126 @@ function websocketUrl(token: string): string {
   return `${GEMINI_WEBSOCKET_URL}?access_token=${encodeURIComponent(token)}`;
 }
 
+async function endVoiceAgentToolSession(
+  sessionId: string | null,
+): Promise<void> {
+  if (!sessionId) {
+    return;
+  }
+
+  try {
+    await fetch(GEMINI_TOOL_ENDPOINT, {
+      body: JSON.stringify({ action: "end", sessionId }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+  } catch {
+    // The server-side TTL is the fallback.
+  }
+}
+
+function newTurnId(): string {
+  if (
+    typeof globalThis.crypto === "object" &&
+    typeof globalThis.crypto.randomUUID === "function"
+  ) {
+    return globalThis.crypto.randomUUID();
+  }
+
+  return `turn-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function readToolCall(value: unknown): ToolCall | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const call = value as Record<string, unknown>;
+  const id = call.id;
+  const name = call.name;
+
+  if (
+    typeof id !== "string" ||
+    id.trim() === "" ||
+    typeof name !== "string" ||
+    name.trim() === ""
+  ) {
+    return null;
+  }
+
+  return {
+    args: call.args ?? {},
+    id,
+    name,
+  };
+}
+
+function readSearchNotesResponse(value: unknown): SearchNotesResponse | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const result = value as Record<string, unknown>;
+  const results = result.results;
+
+  if (!Array.isArray(results) || results.length > MAX_SEARCH_RESULTS) {
+    return null;
+  }
+
+  const items: SearchResultItem[] = [];
+
+  for (const entry of results) {
+    if (typeof entry !== "object" || entry === null) {
+      return null;
+    }
+
+    const item = entry as Record<string, unknown>;
+
+    if (
+      typeof item.noteId !== "string" ||
+      typeof item.title !== "string" ||
+      typeof item.preview !== "string"
+    ) {
+      return null;
+    }
+
+    items.push({
+      noteId: item.noteId,
+      preview: item.preview,
+      title: item.title,
+    });
+  }
+
+  return {
+    empty: result.empty === true,
+    query: typeof result.query === "string" ? result.query : "",
+    results: items,
+    total: typeof result.total === "number" ? result.total : items.length,
+  };
+}
+
+function readSelectedNote(value: unknown): SelectedNote | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const note = value as Record<string, unknown>;
+
+  if (
+    typeof note.noteId !== "string" ||
+    typeof note.title !== "string" ||
+    typeof note.version !== "number"
+  ) {
+    return null;
+  }
+
+  return {
+    noteId: note.noteId,
+    title: note.title,
+    version: note.version,
+  };
+}
+
 export function GeminiConversation() {
   const [status, setStatus] =
     useState<VoiceAgentConnectionStatus>("disconnected");
@@ -154,6 +315,13 @@ export function GeminiConversation() {
   });
   const [showCaptions, setShowCaptions] = useState(true);
   const [audioBlocked, setAudioBlocked] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [searchResults, setSearchResults] = useState<readonly SearchResultItem[]>(
+    [],
+  );
+  const [selectedNote, setSelectedNote] = useState<SelectedNote | null>(null);
+  const [toolNotice, setToolNotice] = useState<string | null>(null);
+  const [selectingNoteId, setSelectingNoteId] = useState<string | null>(null);
 
   const socketRef = useRef<WebSocket | null>(null);
   const microphoneStreamRef = useRef<MediaStream | null>(null);
@@ -171,6 +339,9 @@ export function GeminiConversation() {
   const mountedRef = useRef(true);
   const streamingRef = useRef(false);
   const stoppingRef = useRef(false);
+  const sessionIdRef = useRef<string | null>(null);
+  const turnIdRef = useRef(newTurnId());
+  const cancelledToolIdsRef = useRef<Set<string>>(new Set());
 
   const stopPlayback = useCallback(() => {
     for (const source of sourcesRef.current) {
@@ -242,6 +413,10 @@ export function GeminiConversation() {
         }
       }
 
+      const toolSession = sessionIdRef.current;
+      sessionIdRef.current = null;
+      void endVoiceAgentToolSession(toolSession);
+
       releaseAudio();
       setMicrophoneActive(false);
       setConnecting(false);
@@ -250,6 +425,12 @@ export function GeminiConversation() {
       setError(message);
       setDetail(detailText);
       setExpiresAt(null);
+      setSessionId(null);
+      setSearchResults([]);
+      setSelectedNote(null);
+      setToolNotice(null);
+      setSelectingNoteId(null);
+      cancelledToolIdsRef.current.clear();
       setTranscript({ user: "", assistant: "" });
     },
     [releaseAudio],
@@ -284,6 +465,10 @@ export function GeminiConversation() {
           // Ignore close races.
         }
       }
+
+      const toolSession = sessionIdRef.current;
+      sessionIdRef.current = null;
+      void endVoiceAgentToolSession(toolSession);
 
       releaseAudio();
     };
@@ -405,6 +590,271 @@ export function GeminiConversation() {
     };
   }
 
+  async function executeToolCall(
+    call: ToolCall,
+    attempt: number,
+    socket: WebSocket,
+    session: string,
+  ): Promise<ToolCallResponse | null> {
+    if (cancelledToolIdsRef.current.has(call.id)) {
+      return null;
+    }
+
+    let response: Response;
+
+    try {
+      response = await fetch(GEMINI_TOOL_ENDPOINT, {
+        body: JSON.stringify({
+          action: "call",
+          arguments: call.args,
+          callId: call.id,
+          name: call.name,
+          sessionId: session,
+          turnId: turnIdRef.current,
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+    } catch {
+      return {
+        id: call.id,
+        name: call.name,
+        response: {
+          error: {
+            code: "tool_unavailable",
+            message: "Čtecí nástroj se nepodařilo spojit se serverem.",
+          },
+        },
+      };
+    }
+
+    const payload: unknown = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      return {
+        id: call.id,
+        name: call.name,
+        response: {
+          error: {
+            code: "tool_request_failed",
+            message: readErrorMessage(payload),
+          },
+        },
+      };
+    }
+
+    if (typeof payload !== "object" || payload === null) {
+      return {
+        id: call.id,
+        name: call.name,
+        response: {
+          error: {
+            code: "tool_invalid_response",
+            message: "Server vrátil neplatný výsledek nástroje.",
+          },
+        },
+      };
+    }
+
+    const outcome = payload as ToolOutcome;
+
+    if (typeof outcome.ok !== "boolean") {
+      return {
+        id: call.id,
+        name: call.name,
+        response: {
+          error: {
+            code: "tool_invalid_response",
+            message: "Server vrátil neplatný výsledek nástroje.",
+          },
+        },
+      };
+    }
+
+    if (
+      outcome.ok &&
+      call.name === "search_notes" &&
+      attemptRef.current === attempt
+    ) {
+      const result = readSearchNotesResponse(outcome.response);
+
+      if (result) {
+        setSearchResults(result.results);
+        setSelectedNote(null);
+        setToolNotice(
+          result.empty
+            ? "Hledání nenašlo žádnou poznámku."
+            : "Vyberte jednu poznámku, se kterou má asistent pracovat.",
+        );
+      }
+    }
+
+    if (outcome.ok && call.name === "get_note" && attemptRef.current === attempt) {
+      const note = readSelectedNote(outcome.response);
+
+      if (note) {
+        setSelectedNote(note);
+        setToolNotice(`Přečtená poznámka: ${note.title}.`);
+      }
+    }
+
+    if (!outcome.ok) {
+      const message = readErrorMessage(outcome.response);
+
+      if (attemptRef.current === attempt) {
+        setToolNotice(message);
+      }
+    }
+
+    return {
+      id: call.id,
+      name: call.name,
+      response:
+        outcome.response ?? {
+          error: {
+            code: "tool_invalid_response",
+            message: "Server vrátil prázdný výsledek nástroje.",
+          },
+        },
+    };
+  }
+
+  async function handleToolCalls(
+    value: unknown,
+    attempt: number,
+  ): Promise<void> {
+    if (typeof value !== "object" || value === null) {
+      return;
+    }
+
+    const functionCalls = (value as { functionCalls?: unknown }).functionCalls;
+    const socket = socketRef.current;
+    const session = sessionIdRef.current;
+
+    if (
+      !Array.isArray(functionCalls) ||
+      functionCalls.length === 0 ||
+      !socket ||
+      socket.readyState !== WebSocket.OPEN ||
+      !session ||
+      attemptRef.current !== attempt
+    ) {
+      return;
+    }
+
+    const responses: ToolCallResponse[] = [];
+
+    for (const raw of functionCalls) {
+      const call = readToolCall(raw);
+
+      if (!call) {
+        continue;
+      }
+
+      const result = await executeToolCall(call, attempt, socket, session);
+
+      if (
+        result &&
+        !cancelledToolIdsRef.current.has(call.id) &&
+        attemptRef.current === attempt &&
+        socketRef.current === socket
+      ) {
+        responses.push(result);
+      }
+    }
+
+    if (
+      responses.length > 0 &&
+      socket.readyState === WebSocket.OPEN &&
+      attemptRef.current === attempt &&
+      socketRef.current === socket
+    ) {
+      socket.send(
+        JSON.stringify({
+          toolResponse: { functionResponses: responses },
+        }),
+      );
+    }
+  }
+
+  async function selectSearchResult(noteId: string): Promise<void> {
+    const session = sessionIdRef.current;
+
+    if (!session || selectingNoteId !== null) {
+      return;
+    }
+
+    setSelectingNoteId(noteId);
+    setToolNotice(null);
+
+    try {
+      const response = await fetch(GEMINI_TOOL_ENDPOINT, {
+        body: JSON.stringify({ action: "select", noteId, sessionId: session }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      const payload: unknown = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(readErrorMessage(payload));
+      }
+
+      const selected =
+        typeof payload === "object" && payload !== null
+          ? readSelectedNote((payload as { selected?: unknown }).selected)
+          : null;
+
+      if (!selected) {
+        throw new Error("Server nepotvrdil výběr poznámky.");
+      }
+
+      const socket = socketRef.current;
+
+      if (
+        socket &&
+        socket.readyState === WebSocket.OPEN &&
+        socketRef.current === socket
+      ) {
+        socket.send(
+          JSON.stringify({
+            clientContent: {
+              turns: [
+                {
+                  parts: [
+                    {
+                      text: `Uživatel výslovně vybral poznámku s ID ${selected.noteId}. Nepředčítej ji, dokud o to nepožádá.`,
+                    },
+                  ],
+                  role: "user",
+                },
+              ],
+              turnComplete: false,
+            },
+          }),
+        );
+      }
+
+      if (mountedRef.current) {
+        setSelectedNote(selected);
+        setToolNotice(
+          `Vybraná poznámka: ${selected.title}. Nyní řekněte, co s ní má asistent udělat.`,
+        );
+      }
+    } catch (caught) {
+      if (mountedRef.current) {
+        setToolNotice(
+          caught instanceof Error
+            ? caught.message
+            : "Poznámku se nepodařilo vybrat. Zkuste to znovu.",
+        );
+      }
+    } finally {
+      if (mountedRef.current) {
+        setSelectingNoteId(null);
+      }
+    }
+  }
+
   async function handleServerMessage(
     raw: string,
     attempt: number,
@@ -424,6 +874,25 @@ export function GeminiConversation() {
 
       message = parsed as Record<string, unknown>;
     } catch {
+      return;
+    }
+
+    if (message.toolCall) {
+      await handleToolCalls(message.toolCall, attempt);
+      return;
+    }
+
+    if (message.toolCallCancellation) {
+      const ids = (message.toolCallCancellation as { ids?: unknown }).ids;
+
+      if (Array.isArray(ids)) {
+        for (const id of ids) {
+          if (typeof id === "string") {
+            cancelledToolIdsRef.current.add(id);
+          }
+        }
+      }
+
       return;
     }
 
@@ -543,6 +1012,7 @@ export function GeminiConversation() {
     }
 
     if (content.turnComplete === true) {
+      turnIdRef.current = newTurnId();
       setConversation("idle");
     }
   }
@@ -655,9 +1125,18 @@ export function GeminiConversation() {
       }
 
       if (attemptRef.current !== attempt || !mountedRef.current) {
+        void endVoiceAgentToolSession(payload.sessionId);
         return;
       }
 
+      sessionIdRef.current = payload.sessionId;
+      setSessionId(payload.sessionId);
+      setSearchResults([]);
+      setSelectedNote(null);
+      setToolNotice(null);
+      setSelectingNoteId(null);
+      cancelledToolIdsRef.current.clear();
+      turnIdRef.current = newTurnId();
       setExpiresAt(payload.expiresAt);
       const socket = new WebSocket(websocketUrl(payload.token));
       socketRef.current = socket;
@@ -790,7 +1269,8 @@ export function GeminiConversation() {
       <p className="mt-3 max-w-2xl text-sm leading-6 text-stone-600">
         Po kliknutí na Připojit aplikace požádá o výhradní mikrofon. Diktování,
         čtení nahlas i monitor ve jiné kartě musí být ukončené; mikrofon
-        současně použít nelze. Zvuk ani přepis se neukládají.
+        současně použít nelze. Zvuk ani přepis se neukládají. Náhledy hledání a
+        obsah vybrané poznámky se odesílají Googlu jen v rámci relace.
       </p>
 
       <label className="mt-5 block max-w-sm text-sm font-medium text-stone-800">
@@ -885,6 +1365,77 @@ export function GeminiConversation() {
             </p>
           ) : null}
         </div>
+      ) : null}
+
+      {sessionId !== null && searchResults.length > 0 ? (
+        <section
+          aria-labelledby="voice-agent-search-title"
+          className="mt-4 rounded-xl border border-stone-200 bg-stone-50 p-4"
+          data-testid="voice-agent-search-results"
+        >
+          <h3
+            id="voice-agent-search-title"
+            className="text-sm font-semibold text-stone-800"
+          >
+            Nalezené poznámky
+          </h3>
+          <p className="mt-1 text-xs leading-5 text-stone-600">
+            Asistent smí přečíst jen poznámku, kterou zde výslovně vyberete.
+            Náhledy jsou dočasné a neukládají se.
+          </p>
+          <ul className="mt-3 space-y-3">
+            {searchResults.map((item) => {
+              const isSelected = selectedNote?.noteId === item.noteId;
+              const isSelecting = selectingNoteId === item.noteId;
+
+              return (
+                <li
+                  className="rounded-lg border border-stone-200 bg-white p-3"
+                  key={item.noteId}
+                >
+                  <p className="text-sm font-semibold text-stone-900">
+                    {item.title}
+                  </p>
+                  <p className="mt-1 text-sm leading-6 text-stone-600">
+                    {item.preview}
+                  </p>
+                  <button
+                    className="mt-2 rounded-lg border border-stone-300 px-3 py-1.5 text-sm font-semibold text-stone-800 hover:bg-stone-100 disabled:cursor-not-allowed disabled:border-stone-200 disabled:text-stone-400"
+                    disabled={selectingNoteId !== null || isSelected}
+                    onClick={() => {
+                      void selectSearchResult(item.noteId);
+                    }}
+                    type="button"
+                  >
+                    {isSelected
+                      ? "Vybráno"
+                      : isSelecting
+                        ? "Vybírám…"
+                        : "Vybrat"}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
+
+      {toolNotice !== null ? (
+        <p
+          className="mt-3 rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm leading-6 text-stone-700"
+          role="status"
+        >
+          {toolNotice}
+        </p>
+      ) : null}
+
+      {selectedNote !== null ? (
+        <p className="mt-2 text-sm text-stone-600">
+          Vybraná poznámka:{" "}
+          <strong className="font-semibold text-stone-900">
+            {selectedNote.title}
+          </strong>
+        </p>
       ) : null}
 
       {expiresAt !== null && status === "connected" ? (

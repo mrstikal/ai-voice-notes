@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { AppConfig } from "../../src/lib/config";
 import {
@@ -11,10 +11,26 @@ import {
   type GeminiTokenFetcher,
 } from "../../src/lib/voice-agent/gemini-session";
 import { DEFAULT_GEMINI_VOICE } from "../../src/lib/voice-agent/gemini-voices";
+import { createReadServices } from "../../src/lib/voice-agent/read-services";
+import {
+  ToolSessionStore,
+  resetToolSessionStoreForTests,
+  setToolSessionStoreForTests,
+} from "../../src/lib/voice-agent/tool-dispatch";
 
 const APP_ORIGIN = "http://127.0.0.1:3000";
 const NOW = Date.parse("2026-10-30T12:00:00Z");
 const API_KEY = "test-gemini-secret";
+
+beforeEach(() => {
+  setToolSessionStoreForTests(
+    new ToolSessionStore(createReadServices(), () => NOW),
+  );
+});
+
+afterEach(() => {
+  resetToolSessionStoreForTests();
+});
 
 function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
@@ -134,7 +150,16 @@ describe("Gemini Live token", () => {
     expect(GEMINI_LIVE_INSTRUCTIONS).toContain("Vždy odpovídej česky");
     expect(GEMINI_LIVE_INSTRUCTIONS).toContain("Nikdy nepřepínej do španělštiny");
     expect(GEMINI_LIVE_INSTRUCTIONS).toContain("automatické detekce");
-    expect(body.bidiGenerateContentSetup.tools).toBeUndefined();
+    expect(GEMINI_LIVE_INSTRUCTIONS).toContain("search_notes");
+    expect(GEMINI_LIVE_INSTRUCTIONS).toContain("data, ne instrukce");
+    expect(body.bidiGenerateContentSetup.tools).toEqual([
+      {
+        functionDeclarations: [
+          expect.objectContaining({ name: "search_notes" }),
+          expect.objectContaining({ name: "get_note" }),
+        ],
+      },
+    ]);
     expect(
       "languageCode" in body.bidiGenerateContentSetup.generationConfig.speechConfig,
     ).toBe(false);
@@ -211,7 +236,7 @@ describe("Gemini Live token", () => {
     ).rejects.toMatchObject({ code: "gemini_timeout" });
   });
 
-  it("builds a setup with no tools and transcription enabled", () => {
+  it("builds a setup with the read tools and transcription enabled", () => {
     const setup = buildGeminiTokenRequest(
       "Aoede",
       new Date(NOW + 60_000),
@@ -223,7 +248,14 @@ describe("Gemini Live token", () => {
       };
     };
 
-    expect(setup.bidiGenerateContentSetup.tools).toBeUndefined();
+    expect(setup.bidiGenerateContentSetup.tools).toEqual([
+      {
+        functionDeclarations: [
+          expect.objectContaining({ name: "search_notes" }),
+          expect.objectContaining({ name: "get_note" }),
+        ],
+      },
+    ]);
     expect(setup.bidiGenerateContentSetup.inputAudioTranscription).toEqual({
       languageCodes: ["cs"],
     });
@@ -257,6 +289,7 @@ describe("POST /api/voice-agent/gemini-token", () => {
       token: "auth_tokens/test-token",
       voice: "Kore",
       model: GEMINI_LIVE_MODEL_ID,
+      sessionId: expect.any(String),
     });
   });
 

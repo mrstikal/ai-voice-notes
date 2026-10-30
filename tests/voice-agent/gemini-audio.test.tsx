@@ -56,6 +56,7 @@ function jsonResponse(status: number, body: unknown): Response {
 function tokenResponse(voice = "Aoede"): Response {
   return jsonResponse(200, {
     token: "fake-token",
+    sessionId: "fake-tool-session",
     model: GEMINI_LIVE_MODEL_ID,
     voice,
     maxSessionSeconds: GEMINI_LIVE_SESSION_MAX_SECONDS,
@@ -367,6 +368,190 @@ describe("GeminiConversation", () => {
     );
   });
 
+  it("round-trips search and selected read tool calls without persisting notes", async () => {
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+    const toolBodies: Array<Record<string, unknown>> = [];
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<
+        string,
+        unknown
+      >;
+
+      if (url.endsWith("/api/voice-agent/gemini-token")) {
+        tokenBodies.push(body as { voice: string });
+        return tokenResponse(body.voice as string);
+      }
+
+      if (url.endsWith("/api/voice-agent/tool")) {
+        toolBodies.push(body);
+
+        if (body.action === "select") {
+          return jsonResponse(200, {
+            ok: true,
+            selected: { noteId: "note-b", title: "Druhá", version: 2 },
+          });
+        }
+
+        if (body.name === "search_notes") {
+          return jsonResponse(200, {
+            ok: true,
+            response: {
+              empty: false,
+              query: "ahoj",
+              results: [
+                {
+                  noteId: "note-a",
+                  preview: "Ahoj z první poznámky.",
+                  title: "První",
+                },
+                {
+                  noteId: "note-b",
+                  preview: "Ahoj z druhé poznámky.",
+                  title: "Druhá",
+                },
+              ],
+              total: 2,
+            },
+          });
+        }
+
+        if (body.name === "get_note") {
+          return jsonResponse(200, {
+            ok: true,
+            response: {
+              content: "Druhý text.",
+              empty: false,
+              noteId: "note-b",
+              title: "Druhá",
+              truncated: false,
+              version: 2,
+            },
+          });
+        }
+      }
+
+      return jsonResponse(404, {
+        error: { code: "not_found", message: "Nenalezeno." },
+      });
+    });
+
+    render(createElement(GeminiConversation));
+    const { socket } = await connectGemini();
+
+    await act(async () => {
+      socket.message({
+        toolCall: {
+          functionCalls: [
+            { args: { query: "ahoj" }, id: "call-1", name: "search_notes" },
+          ],
+        },
+      });
+    });
+
+    expect(await screen.findByText("První")).toBeTruthy();
+    expect(screen.getByText("Druhá")).toBeTruthy();
+    expect(screen.getByText("Ahoj z první poznámky.")).toBeTruthy();
+    expect(screen.getByText("Ahoj z druhé poznámky.")).toBeTruthy();
+    expect(toolBodies[0]).toMatchObject({
+      action: "call",
+      callId: "call-1",
+      name: "search_notes",
+      sessionId: "fake-tool-session",
+      turnId: expect.any(String),
+    });
+
+    const searchResponse = socket.sent
+      .map((value) => JSON.parse(value) as Record<string, unknown>)
+      .find((value) => "toolResponse" in value) as
+      | {
+          toolResponse: {
+            functionResponses: Array<{
+              id: string;
+              name: string;
+              response: unknown;
+            }>;
+          };
+        }
+      | undefined;
+
+    expect(searchResponse?.toolResponse.functionResponses[0]).toMatchObject({
+      id: "call-1",
+      name: "search_notes",
+      response: {
+        results: [{ noteId: "note-a" }, { noteId: "note-b" }],
+      },
+    });
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Vybrat" })[1]!);
+
+    await waitFor(() =>
+      expect(
+        toolBodies.some((body) => body.action === "select"),
+      ).toBe(true),
+    );
+    expect(await screen.findByText(/Vybraná poznámka: Druhá/)).toBeTruthy();
+    const selectionMessage = socket.sent
+      .map((value) => JSON.parse(value) as Record<string, unknown>)
+      .find((value) => "clientContent" in value) as
+      | {
+          clientContent: {
+            turns: Array<{ parts: Array<{ text: string }> }>;
+          };
+        }
+      | undefined;
+    expect(selectionMessage?.clientContent.turns[0]?.parts[0]?.text).toContain(
+      "note-b",
+    );
+    expect(selectionMessage?.clientContent.turns[0]?.parts[0]?.text).not.toContain(
+      "Druhý text.",
+    );
+    expect(
+      (selectionMessage as { clientContent?: { turnComplete?: boolean } })
+        .clientContent?.turnComplete,
+    ).toBe(false);
+
+    await act(async () => {
+      socket.message({
+        toolCall: {
+          functionCalls: [
+            { args: { noteId: "note-b" }, id: "call-2", name: "get_note" },
+          ],
+        },
+      });
+    });
+
+    await waitFor(() =>
+      expect(
+        toolBodies.some(
+          (body) => body.name === "get_note" && body.callId === "call-2",
+        ),
+      ).toBe(true),
+    );
+
+    const readResponse = socket.sent
+      .map((value) => JSON.parse(value) as Record<string, unknown>)
+      .filter((value) => "toolResponse" in value)
+      .at(-1) as
+      | {
+          toolResponse: {
+            functionResponses: Array<{
+              id: string;
+              name: string;
+              response: unknown;
+            }>;
+          };
+        }
+      | undefined;
+
+    expect(readResponse?.toolResponse.functionResponses[0]).toMatchObject({
+      id: "call-2",
+      name: "get_note",
+      response: { content: "Druhý text.", noteId: "note-b" },
+    });
+    expect(setItem).not.toHaveBeenCalled();
+  });
+
   it("stops the mic and socket on unmount", async () => {
     const view = render(createElement(GeminiConversation));
     const { socket, localTrack } = await connectGemini();
@@ -386,6 +571,7 @@ describe("GeminiConversation", () => {
       tokenBodies.push(body);
       return jsonResponse(200, {
         token: "fake-token",
+        sessionId: "fake-tool-session",
         model: GEMINI_LIVE_MODEL_ID,
         voice: body.voice,
         maxSessionSeconds: GEMINI_LIVE_SESSION_MAX_SECONDS,

@@ -986,7 +986,8 @@ result as **P46** after confirming real voice replies were Czech. P55/P55B are
 the implementation lineage, not separately accepted phases. This is the sole
 `/voice-agent` provider, not a silent fallback; the OpenAI session/end routes
 and client are removed. Typed notes, offline search and all other providers are
-unaffected.
+unaffected. The no-tools rows below describe P46 at acceptance; P47 later adds
+only the two read-only tools documented in its section.
 
 | Item | Value |
 |---|---|
@@ -1005,8 +1006,8 @@ unaffected.
 ### Local mock verification
 
 `tests/voice-agent/gemini-session.test.ts` verifies the token request shape
-(`bidiGenerateContentSetup`, voice, Czech instructions, transcription, no
-tools), one-use fields, missing key, changed model, unknown voice, provider
+(`bidiGenerateContentSetup`, voice, Czech instructions, transcription and
+P46's no-tools setup), one-use fields, missing key, changed model, unknown voice, provider
 401/400/429/500 mapping, timeout, Host/Origin/content-type/rate-limit guards,
 no-store response and no database dependency.
 
@@ -1042,3 +1043,22 @@ MediaStream and Web Locks to verify:
 - Gemini cost/usage is not written to the app's usage ledger; the live spend is
   unknown and should be checked in the Google console. The app does not claim
   that a selected voice is best for Czech.
+
+## P47 session-bound read tools (accepted, mock verified / live unverified)
+
+P47's original OpenAI `oai-events` transport is retired with P45. The read-tool
+contract is applied to the accepted Gemini Live agent instead; no OpenAI code
+was reintroduced.
+
+| Item | Value |
+|---|---|
+| Token | The token route now creates a server-side tool session and returns its opaque `sessionId` together with the existing one-use token/model/voice/expiry fields. `bidiGenerateContentSetup` declares exactly two read functions, `search_notes` and `get_note`, and no mutation tools. |
+| Tool route | `POST /api/voice-agent/tool` is same-origin, Host/Origin checked, JSON-only, 16 KiB, 60 requests/minute and `no-store`. Actions are `call` (model-originated), `select` (explicit UI choice) and `end` (Stop/unmount). A missing/expired session is 404. |
+| Session | Server memory only, 9-minute TTL aligned with the token. At most 20 active sessions; a new session is rejected with 503 rather than evicting a still-running one. The session stores only opaque IDs, selection/version and call counters, never note content. Per-turn limit 4, per-session limit 20, duplicate call IDs rejected. |
+| Search | `search_notes({query,maxResults})` uses the P34 free text index, defaults to 3 and returns at most 5 IDs/titles/previews. Previews strip search markers and are capped at 240 graphemes. Empty queries return an empty result without a provider call. Semantic/hybrid search is not exposed. |
+| Read | `get_note({noteId})` succeeds only after the user clicked `Vybrat` for a note in the latest search results. The selected version is pinned; a changed/deleted/unselected note is rejected, and the selection is cleared on stale/deleted reads. Content uses P05's active plain text, capped at 1,200 graphemes, with `truncated`/`empty` flags. |
+| UI / privacy | Search results and the selected title are transient React state. After a successful `select`, the client sends a `clientContent` turn with only the server-confirmed note ID (no title or content) and `turnComplete: false`, so the model knows the selection without ending an in-flight spoken turn. There is no note write, proposal, transcript/audio persistence, browser storage or raw tool-output log. Selected note text and previews are sent to Google inside the Live session; the page discloses this. Instructions treat note text as data, not as instructions. |
+| Tests | `tests/voice-agent/read-tools.test.ts` covers bounded search/read, selection gating, stale/deleted notes, cross-session selected IDs, prompt injection returned as inert data with no mutation tool, duplicate/unknown calls, invalid arguments, per-turn/session caps, active-session cap, expiry and ending. `tests/voice-agent/tool-route.test.ts` covers guarded call/select/end and rate limit. `tests/db/voice-agent-read-tools.test.ts` verifies real P34 search/P05 read wiring, the five-result and 1,200-grapheme bounds, no mutation and deleted-note rejection. `tests/voice-agent/gemini-audio.test.tsx` covers two similar results, selection of the second, the ID-only `clientContent` notice, and the search -> select -> read tool response. |
+| Gate | `pnpm test` 833 passed / 141 skipped; `pnpm test:db` 157/157; `pnpm test:e2e` 69/69; `pnpm lint`, `pnpm typecheck` and `pnpm build` pass. |
+| Reviewer | First round found one Medium (selection was not conveyed to the model) and Lows (live-session eviction, shared rate-limit bucket, test gaps). The Medium, eviction and test gaps were fixed; the final re-review returned **accept**. Remaining Lows: `clientContent` turn semantics/click-while-speaking need the live check; 20 stale sessions can temporarily block a new one; the global 60/min bucket is acceptable while the exclusive microphone lease permits one live session. |
+| Live status | Accepted as mock verified; live unverified. No paid Gemini function-call session or real microphone selection trial has been run; the live tool-call path, Gemini's handling of the ID-only `clientContent` turn while audio is streaming, click-while-speaking, real note delivery and the resulting cost remain `live unverified` until separately authorized. |

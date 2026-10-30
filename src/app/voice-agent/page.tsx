@@ -21,10 +21,11 @@ export default function VoiceAgentPage() {
         Konverzační asistent
       </h1>
       <p className="mt-4 max-w-2xl leading-7 text-stone-700">
-        Tento režim je oddělený od diktování a od poznámek. Vytváří obousměrnou
-        českou hlasovou relaci Gemini Live přes WebSocket. Mikrofon je
-        výhradní, zvuk se neukládá a přepis zůstává jen dočasně v paměti
-        stránky.
+        Tento režim je oddělený od diktování. Vytváří obousměrnou českou
+        hlasovou relaci Gemini Live přes WebSocket. Asistent může vyhledat
+        poznámky a přečíst jednu poznámku, kterou v seznamu výslovně vyberete;
+        zapisovat do poznámek nesmí. Mikrofon je výhradní, zvuk se neukládá a
+        přepis zůstává jen dočasně v paměti stránky.
       </p>
 
       <section
@@ -77,8 +78,10 @@ export default function VoiceAgentPage() {
             vyhledávání použitelná; tento režim pouze zobrazí chybu.
           </li>
           <li>
-            Nástroje, čtení poznámek ani zápis do poznámek nejsou dostupné.
-            Asistent má jen české instrukce k přirozené, stručné konverzaci a
+            Asistent má pouze dvě čtecí funkce: vyhledání poznámek a přečtení
+            jedné poznámky vybrané uživatelem. Náhledy výsledků a obsah vybrané
+            poznámky se v rámci relace odešlou Googlu; aplikace je neukládá.
+            Zápis, návrhy změn ani potvrzení úprav nejsou dostupné a asistent
             nesmí tvrdit nepotvrzenou změnu poznámky.
           </li>
         </ul>
