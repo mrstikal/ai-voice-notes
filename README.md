@@ -3,14 +3,27 @@
 Local, single-user Czech voice-notes proof of concept. The UI, voice commands,
 and user-facing errors are Czech; code and documentation are English.
 
-This repository currently implements **P01-P09**: the workspace, database
-container, and Czech shell; the Markdown codec and exact text limits; the
-Drizzle schema, migrations, and isolated database tests; the local HTTP guard;
-the versioned notes CRUD API; the paginated notes and Trash UI; the optional
-transaction-safe demo-note seed CLI; the Markdown-first source/visual editor;
-and the debounced autosave with conflict recovery. Exports, dictation, and AI
-features arrive in later phases. No AI key or paid provider request is needed
-to run the implemented phases.
+This repository implements **P01-P44** in four stages:
+
+1. **Typed notes:** Czech CRUD, versioning/history, Markdown source/visual
+   editor, autosave/conflict recovery, Trash, DOCX/Markdown export and an
+   optional transaction-safe demo seed.
+2. **Voice:** ElevenLabs Scribe v2 realtime dictation with an exclusive
+   microphone lease, ElevenLabs/OpenRouter TTS with a validated local cache,
+   read-aloud and the experimental spoken Stop.
+3. **Approved AI:** bounded edits/proposals through P22-P24, cleanup,
+   summaries, tasks/tags, voice command interpretation, grounded Ask, and
+   P12 cost/usage admission. Every note mutation needs a visible diff and an
+   explicit confirmation.
+4. **Search and meetings:** offline Czech full-text search, optional semantic
+   and hybrid search, direct batch Scribe v2 meeting transcription, reviewed
+   meeting-note save and reviewed summary/decisions/tasks.
+
+P44 adds the four-stage offline integration, privacy/recovery audit and this
+quality report. The separate **P45+ OpenAI voice agent is not implemented**.
+Typed notes, search and exports work with **no AI keys** and no provider
+request; provider features are visibly disabled until a separately authorized
+live check. `AI_TEST_MODE=1` is test-only and refuses real credentials.
 
 ## Prerequisites
 
@@ -45,6 +58,11 @@ Open <http://127.0.0.1:3000>. The health endpoint is
 host by default and has no authentication, so do not expose it to a network.
 
 ## Meetings and FFmpeg
+
+The meeting flow is inspect → paid batch transcription → editable preview →
+explicit save → optional reviewed summary/decisions/tasks. A transcript is never
+saved as a note implicitly, and AI suggestions are unsaved artifacts until a
+visible P22-P24 diff is confirmed.
 
 Meeting capture (`/meetings`) requires host FFmpeg executables on `PATH` from
 P41B onward. The server uses `ffprobe` against its own private temp file to
@@ -86,6 +104,11 @@ live check is separately authorized.
 | `TEST_DATABASE_URL` | Isolated test PostgreSQL URL | compose `db-test` service |
 | `AI_TEST_MODE` | Test-only switch; leave empty normally | empty |
 | `ELEVENLABS_API_KEY` | Server-side ElevenLabs key; empty until an authorized live check | empty |
+| `OPENROUTER_API_KEY` | Server-side OpenRouter key for structured AI, TTS and embeddings; empty disables those features | empty |
+| `OPENROUTER_LLM_MODEL` | P21 structured-output model; changing it requires a new preflight and approval | `deepseek/deepseek-v4.1-flash-1017` |
+| `OPENROUTER_EMBEDDING_MODEL` | P36 embedding model; pinned to the 1536-dimension column | `openai/text-embedding-3-small` |
+| `OPENAI_API_KEY` | Reserved for the not-yet-implemented P45+ realtime agent; empty | empty |
+| `GEMINI_API_KEY` | Optional P55+ comparison; not required by the core | empty |
 | `ELEVENLABS_API_BASE_URL` | ElevenLabs API endpoint; test mode requires a loopback mock | `https://api.elevenlabs.io` |
 | `NOTE_MAX_CHARACTERS` | Maximum visible note characters | `20000` |
 | `MEETING_MAX_MINUTES` | Maximum meeting length | `15` |
@@ -104,6 +127,42 @@ rejected with a Czech error. Set `APP_ALLOW_FORWARDED_LOOPBACK=1` only when a
 local IDE or remote port forwarder rewrites the port (for example VS Code
 forwarding `3000` to `53508`); forwarded Host and Origin must still be loopback
 and use the same port.
+
+## Privacy, first-use notices and offline behavior
+
+Typed note editing, Markdown conversion, full-text search, version history and
+exports are local: no provider call is made and no key is required. Provider
+features show Czech first-use notices on their page or in **Nastavení →
+Soukromí a náklady**; the same disclosure is repeated at the point of a paid
+action.
+
+| Feature | What leaves the machine | What the app stores |
+|---|---|---|
+| Dictation | Microphone audio streamed to ElevenLabs Scribe v2 realtime | Transient partial/committed text in the note draft; no audio or provider transcript table |
+| Meeting transcription | The selected meeting file uploaded once to ElevenLabs batch Scribe v2 | Temporary `0600` file under `.data/uploads`, unlinked after the request; only the reviewed note text is saved |
+| Read aloud | The selected note text to OpenRouter TTS | Validated MP3 and technical metadata in the local `.data/tts` cache |
+| AI edits/summary/tasks/Ask | The selected note text or bounded excerpt to OpenRouter | Note revisions after explicit confirmation; P12 usage metadata without prompts or note bodies |
+| Semantic search | Note chunks or the query to OpenRouter embeddings | Vectors and technical index state in PostgreSQL |
+| Voice agent (P45+) | Not implemented | Nothing |
+
+ElevenLabs and OpenRouter process requests under their own retention policies;
+zero retention depends on the account/plan. The app does not claim provider-side
+zero retention and does not set provider logging flags it cannot verify. Keys
+stay server-side, are never written to logs, browser bundles, URLs or the usage
+ledger, and the local app has no authentication, so keep it on loopback.
+
+Raw HTML, unsafe links, tables, images and other unsupported Markdown make a
+note source-only: the source is preserved verbatim and visual/DOCX conversion is
+refused. The experimental spoken Stop is off by default and is not a guarantee.
+A simulated provider outage never deletes or rewrites a note.
+
+**No silent model switch:** the structured LLM, TTS and embedding models are
+pinned. A changed model, missing entitlement, wrong embedding dimension or
+provider error disables the feature with a Czech reason; it never falls back to
+an unapproved model or unstructured mutation. `AI_REQUEST_BUDGET_USD` is an
+app-side estimated admission budget, not a provider spending cap. Check
+`docs/QUALITY_REPORT.md` for measured vs `live unverified` capabilities and
+`docs/PROVIDER_SMOKE_TESTS.md` for the exact compatibility gates.
 
 ## Databases
 
@@ -180,7 +239,15 @@ docker compose exec -T db pg_restore -U ai_voice_notes -d ai_voice_notes --clean
 
 Run `pnpm db:migrate` after the backup and before starting the updated app or
 `pnpm db:seed`. `db:seed` checks the applied migration version and refuses with
-a Czech migrate-first message before deleting any `demo-v1:*` rows.
+a Czech migrate-first message before deleting any `demo-v1:*` rows. The same
+backup covers meeting save mappings and usage rows. The test DB is separate and
+is never restored into production automatically.
+
+To clear the local TTS cache, use **Nastavení → Vymazat cache** (it also purges
+targeted note entries through the existing cache contract). The cache is
+gitignored `.data/tts`; deleting it manually is safe. Meeting uploads live in
+`.data/uploads` and are removed after each request; no audio is part of a note
+backup.
 
 ## Scripts
 
@@ -191,20 +258,21 @@ a Czech migrate-first message before deleting any `demo-v1:*` rows.
 | `pnpm start` | Start the production build on the validated loopback origin |
 | `pnpm lint` | ESLint with Next.js core-web-vitals and TypeScript rules |
 | `pnpm typecheck` | Strict TypeScript check without emitting files |
-| `pnpm test` | Vitest unit/API tests; the DB suite also runs when both URLs are present |
+| `pnpm test` | Vitest unit/API tests, including the `tests/security/privacy.test.ts` audit; the DB suite also runs when both URLs are present |
 | `pnpm test:db` | Migrate the isolated `_test` database and run `tests/db` |
-| `pnpm test:e2e` | Build and run the offline Playwright notes/Trash flow |
+| `pnpm test:e2e` | Build and run the offline Playwright Stage 1-4, meeting, search and recovery flows against the isolated test DB |
+| `pnpm eval:search` | Optional 20-query search evaluation; paid modes require a fresh cost approval and ready fixture vectors |
 | `pnpm db:seed` | Explicitly replace the `demo-v1:*` demo notes in the dev database |
 | `pnpm db:migrate:test` | Apply committed migrations to the guarded test database |
 | `pnpm db:migrate` | Apply committed migrations to the development database (explicit authorization required) |
 
 ## Full-text search
 
-`/search` provides read-only Czech full-text search over active notes.
-`GET /api/search?q=&mode=fulltext&page=` also accepts only `mode=fulltext`
-until semantic search is implemented. Queries are trimmed, limited to 200
-graphemes, and an empty query returns an explanatory empty state rather than all
-notes. Unquoted terms use `plainto_tsquery('simple', unaccent(...))`; a query
+`/search` provides read-only Czech search over active notes. Full-text mode is
+offline; semantic/hybrid modes require an explicit paid approval and ready
+embeddings. `GET /api/search?q=&mode=fulltext|semantic|hybrid&page=` trims
+queries to 200 graphemes, and an empty query returns an explanatory empty state
+rather than all notes. Stale, deleted or old-version results are filtered. Unquoted terms use `plainto_tsquery('simple', unaccent(...))`; a query
 wrapped in `"..."`, `„...“`, or `“...”` uses
 `phraseto_tsquery('simple', unaccent(...))` for exact word order. Results are
 ranked by `ts_rank` with `id ASC` as a stable tie-break, ten per page, and
@@ -309,16 +377,19 @@ pnpm test:e2e
 
 The command builds Next.js, starts `scripts/test-server.ts` on
 `127.0.0.1:3100`, asserts the guarded `_test` targets, migrates and truncates
-only the isolated test database, and runs the offline notes/Trash, editor, and
-autosave flows (including the two-tab conflict case). No seed or provider key
-is used.
+only the isolated test database, and runs the offline Stage 1-4 flows:
+typed notes/editor/autosave/Trash, mocked dictation and supporting AI, summary/
+meeting proposals, full-text search, exports and a simulated provider outage.
+The privacy audit is `tests/security/privacy.test.ts` and runs under `pnpm
+test`, not under Playwright. Browser SDK/WebSocket doubles and loopback mocks
+replace real providers; no seed, real key or public egress is used.
 
 ## HTTP boundary
 
 API mutations are guarded by the configured loopback `Host` and an exact
 `Origin`, require `application/json`, and are read with per-route streaming byte
 ceilings: 1 MiB for note edits, 16 KiB for token/tool routes, and 3 MiB for
-reviewed meeting saves. Raw meeting audio will use a separate 25 MiB stream cap.
+reviewed meeting saves. Raw meeting audio uses a separate 25 MiB stream cap.
 A body over its ceiling receives an explicit Czech 413 without truncation.
 Costly routes can attach a Zod schema and an in-memory rate limiter; rejected
 requests never call the route handler. GET/HEAD routes never mutate or bill.

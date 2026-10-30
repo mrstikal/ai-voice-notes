@@ -1,8 +1,44 @@
 # Quality report
 
-Measured locally on 2026-10-28/29. Only rows with a real command and output are
+Measured locally on 2026-10-28/30. Only rows with a real command and output are
 filled; unrun checks are marked explicitly. A high score on 20 distinctive
 fixture queries is not a general quality threshold.
+
+## Stage 1-4 measured coverage
+
+This table separates measured evidence from unverified capability. A mocked
+latency is never entered as a real performance number.
+
+| Stage | Measurement | Observed evidence | Status |
+| --- | --- | --- | --- |
+| 1 | Typed notes, editor, versioning, exports, offline full-text | 793 unit / 138 skipped, 154 DB, 69 Playwright, including the four-stage offline flow; a separate no-key run on 127.0.0.1:3002 created a 40-character typed note, exported exact Markdown (HTTP 200) and found it with full-text search; no provider calls or usage rows | Offline verified, including no-key application run |
+| 2 | Scribe dictation commit/command latency | 180 s synthetic Czech audio; four `committed_transcript` events, 1,410 normalized characters, 193.6 s wall-clock to the session bound. Commit/command latency was not instrumented; manual reconnect count was not recorded | Live verified with synthetic audio; latency/reconnects unverified |
+| 2 | TTS first-audio and cache-hit time | Two live Czech requests (Sarah/George), 71,514/69,006 bytes, decoded 4.40/4.24 s; first-audio and cache-hit timings were not instrumented | Live audio verified; timing/cache unverified |
+| 2 | Experimental spoken-Stop reliability | User headset acceptance on 2026-10-27; the formal ten-trial aggregate was not recorded | Experimental, user-verified; aggregate unverified |
+| 3 | Voice command interpretation | 13/15 live commands passed; two targeted retests passed after prompt correction; no latency instrumented | Live partial; latency unverified |
+| 3 | Embedding request | One live call returned two 1,536-float vectors in 789 ms | Live verified |
+| 4 | Full-text/semantic/hybrid search | See the 20-query table below: Hit@1/3, MRR@5 and latency for text, semantic and hybrid | Live verified for the 20-query fixture |
+| 4 | RAG grounded answers | Automated citation/version checks only; no live LLM answer; manual factual review required | Live unverified |
+| 4 | Meeting diarization/transcript review | P42: 37.68 s Czech WAV, 388 characters, one real `speaker_0`, 6.5 s batch call; multi-speaker and 15-minute meetings unverified. P43: 215-character Czech note, live summary/decisions/tasks, one speaker-free source, 0.022702 USD reserved across two attempts | Live partial; multi-speaker/15-minute unverified |
+| 4 | Privacy/recovery integration | `tests/security/privacy.test.ts` audits client/imported secret boundaries, HTML/log/temp/CSRF/filename rules; `e2e/four-stage.spec.ts` crosses all four stages and proves a simulated provider outage leaves content, version and revisions unchanged; no provider is called | Offline verified |
+
+### Estimated vs actual/unknown cost
+
+| Operation | App estimate/approval | Provider-reported cost | Ledger status |
+| --- | ---: | ---: | --- |
+| Scribe realtime 180 s | 0.019500 | not reported | unknown |
+| TTS two voices | 0.280000 | not reported | unknown |
+| P36 fixture reindex | 0.000203 | 0.000163 | reported |
+| 20 semantic/hybrid query embeddings | 0.001000 approval per run | 0.000020 | reported |
+| P42 batch 37.68 s | 0.055000 | not reported | unknown |
+| P43 summary + decisions + tasks, two attempts | 0.022702 reserved | not reported | unknown |
+
+Stage 4 is accepted only for the observed text search, the 20-query
+semantic/hybrid evaluation, single-speaker meeting transcription/review and the
+P43 live summary/decisions/tasks path. RAG live answers, multi-speaker
+diarization, 15-minute meetings, physical-microphone dictation, TTS
+first-audio/cache timing and the ten-trial spoken-Stop aggregate remain
+`live unverified`.
 
 ## Stage 4 - Search
 

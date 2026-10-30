@@ -739,3 +739,56 @@ the user's headset verification, not on a recorded ten-trial aggregate.
   E2E also asserts that the immediate post-save panel shows the saved note title
   and its `Otevřít poznámku` link, and the suggestions E2E covers a failed
   note-fetch that hides the loading label while keeping the link.
+
+## P44 four-stage integration, privacy and recovery gate
+
+- **No new provider architecture or model switch.** P44 wires the already
+  accepted Stage 1-4 features into one offline flow and audits the existing
+  provider boundaries. The pinned structured LLM, TTS and embedding models stay
+  unchanged; a missing entitlement or incompatible model disables the feature
+  with a Czech reason.
+- **Offline cross-feature E2E:** `e2e/four-stage.spec.ts` creates a typed note,
+  inserts a mocked Scribe committed segment, generates and confirms a mocked
+  P29 summary through P22-P24, exports exact Markdown, finds the note with
+  offline full-text search, saves a meeting note through the local P42B API,
+  applies a mocked P31 task section through P22-P24, then simulates an
+  `ai-suggest` 503 and proves the first note's content, version and revision
+  count are unchanged. No public provider, seed or real key is used.
+- **Privacy audit:** `tests/security/privacy.test.ts` scans client/server
+  sources for long-lived provider keys in client code, `dangerouslySetInnerHTML`
+  and prompt/body logging; proves typed notes, Markdown, export and full-text
+  search modules do not import provider clients; configures the app with no AI
+  keys and the default bounded budget; keeps raw HTML and unsafe links
+  source-only; proves search snippets stay plain text; rejects cross-origin and
+  non-loopback mutations; checks meeting temp audio is `0600` in a `0700`
+  directory, is removed after the request and that an over-limit body leaves no
+  file; and rejects path/header control characters in export filenames.
+- **Setup and privacy documentation:** `README.md` now documents the current
+  four-stage scope, Docker/Node/pnpm/FFmpeg setup, isolated test DB, optional
+  seed, Czech first-use disclosures, exactly what leaves the machine per
+  feature, key/log/HTML/file/CSRF boundaries, backup/restore, TTS cache clearing,
+  source-only Markdown, the experimental spoken Stop, offline behavior and the
+  no-silent-model-switch rule.
+- **Quality status:** `docs/QUALITY_REPORT.md` lists Stage 1-4 rows separately
+  from measured evidence. Text search, the 20-query semantic/hybrid fixture,
+  single-speaker meeting transcription/review and the P43 summary/decisions/
+  tasks live path are live observed. RAG live answers, multi-speaker/15-minute
+  meetings, physical-microphone dictation, TTS first-audio/cache timing and the
+  ten-trial spoken-Stop aggregate remain `live unverified`; mocked timings are
+  never reported as real performance.
+- **Fail-closed harness:** because the E2E app runs `NODE_ENV=production`, the
+  OpenRouter client now blocks an unmocked transport whenever
+  `AI_TEST_MODE=1` (trimmed) as well as under Vitest. An E2E path that forgets its mock
+  returns a Czech disabled error instead of reaching `openrouter.ai`; the
+  four-stage spec still mocks every provider boundary it uses.
+- **No-key application run (2026-10-30):** the production build was started on
+  `127.0.0.1:3002` against the isolated `_test` database with
+  `ELEVENLABS_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY` and
+  `GEMINI_API_KEY` removed and `AI_TEST_MODE` empty. The UI created a 40-character
+  typed note, showed Czech "API klíč není nakonfigurovaný" notices with AI
+  controls disabled, exported the exact saved Markdown with HTTP 200 and found
+  the note through offline full-text search. The note was then deleted. No
+  provider request or usage row was made.
+- **Gate result:** the isolated-DB suite (`pnpm lint`, `typecheck`, `test`,
+  `test:db`, `test:e2e`, `build`) runs with dummy keys, no dev seed and no
+  provider call. A simulated provider outage loses no note.

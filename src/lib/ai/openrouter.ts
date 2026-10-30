@@ -91,7 +91,9 @@ export function setOpenRouterTransportForTests(
 }
 
 export function getOpenRouterTransport(): OpenRouterTransport {
-  if (process.env.NODE_ENV === "test") {
+  const testMode = process.env.AI_TEST_MODE?.trim() === "1";
+
+  if (process.env.NODE_ENV === "test" || testMode) {
     if (testTransport) {
       return testTransport;
     }
