@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { AgentStatus } from "@/components/voice-agent/AgentStatus";
 import { ChainedComparison } from "@/components/voice-agent/ChainedComparison";
 import { GeminiConversation } from "@/components/voice-agent/GeminiConversation";
 import {
@@ -126,6 +127,8 @@ export default function VoiceAgentPage() {
         ttsConfigured={ttsStatus?.configured ?? false}
         ttsVoices={ttsVoices}
       />
+
+      <AgentStatus />
 
       <p className="mt-8 text-sm leading-6 text-stone-600">
         Potřebujete diktování?{" "}

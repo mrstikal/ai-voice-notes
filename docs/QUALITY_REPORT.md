@@ -123,3 +123,35 @@ threshold".
   fake-transport `llm_grounded_answer` request; no note text was written to
   `provider_usage` or logs. Provider cost remains `unknown` unless the provider
   reports it, and the UI must show that state.
+
+## Stage 5 - Voice comparison metrics (P53)
+
+- **Offline instrumentation only.** `src/lib/voice-agent/metrics.ts` records
+  session start/end, turn start/finish, a **first-audio proxy** from the last
+  input-transcription update (Gemini) or chained turn end, barge-in to
+  **synchronous queue stop** (not audible speaker silence), a tool dispatch in
+  Gemini versus the whole chained turn (LLM + tools), errors by code,
+  selection counts (match/mismatch only when a caller knows the expectation;
+  live UI shows "nevyhodnoceno") and proposal outcome. It stores no transcript,
+  audio, note text, note ID, key or session secret; `AgentStatus` renders only
+  aggregates from the in-memory page session.
+- **Fixtures.** `tests/fixtures/voice-agent-scenarios.ts` defines the required
+  scenarios: select one of two migration notes, summarize the selected note,
+  read the last paragraph, propose/reject/approve a TODO and Undo, interrupt
+  output and Stop. Fixture utterances are never included in metric output.
+  The live UI does not know a scenario's expected note, so its match/mismatch
+  counters remain "nevyhodnoceno"; the fixture unit tests exercise the
+  match/mismatch path explicitly.
+- **Usage.** Observations are tagged `reported`, `estimated` or `unknown` per
+  provider. The UI reports the tag counts and only sums USD values that were
+  actually reported or estimated; missing values remain unknown. No per-minute
+  invoice is synthesized from missing token prices.
+- **Evidence.** `tests/voice-agent/metrics.test.ts` validates mode-separated
+  medians/ranges/sample sizes, failed turns, missing usage, sanitisation and
+  fixture-text exclusion. This proves instrumentation shape only, not real
+  latency or Czech voice quality.
+- **Live comparison: unverified.** No ≥5 trials per mode were run on the same
+  saved notes, and no authorized headphone/speaker session was observed. The
+  Gemini Live vs chained comparison therefore has **no published benchmark
+  numbers** and remains `live unverified`; the UI label must stay honest until
+  separately approved credentials/cost and real trials are recorded.

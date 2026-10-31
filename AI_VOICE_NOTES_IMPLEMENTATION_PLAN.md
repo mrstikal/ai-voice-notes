@@ -451,7 +451,7 @@ This is a separate `Konverzační asistent` mode, **not** Scribe dictation and n
 **Implement:** fresh-clone instructions with optional CLI seed and **no** provider credentials needed for typed notes; direct OpenAI key/entitlement and Czech privacy disclosure for voice agent; separate mock vs real smokes; FFmpeg/browser setup; repair any cross-stage regressions, tool-loop cap, Web Lock cleanup, provider outage handling, cost warnings, and no secret leaks. Keep Stage 5 an explicit mode, never auto-save conversations; do not turn Gemini optional work into a core dependency.
 **Pass:** `pnpm lint && pnpm typecheck && pnpm test && pnpm test:db && pnpm test:e2e && pnpm build` pass offline; mock E2E goes `connect -> select note -> preview edit -> reject -> approve -> undo -> stop`, with zero unauthorized mutations. With `OPENAI_API_KEY` unset, Stages 1-4 still operate. **Real** speech, tool and barge-in acceptance remains `live unverified` until separately observed; no fabricated audio/video/voice-agent trace is accepted as live proof.
 
-## 7. Optional Provider Comparison (P55, P55B, P56, P56B)
+## 7. Optional Provider Comparison (P55, P55B, P56, P56B) – not implemented due to gpt poor quality
 
 Skipping all four phases changes no core definition of done. Starting any requires the user's separate approval and a direct Google account for live checks; do not substitute Gemini for a failed OpenAI core integration without a new architecture decision.
 

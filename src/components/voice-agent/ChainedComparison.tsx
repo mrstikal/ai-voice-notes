@@ -13,6 +13,7 @@ import {
   tryAcquirePlaybackLease,
 } from "@/lib/tts/playback-lease";
 import type { MicrophoneLease } from "@/lib/voice/microphone";
+import { voiceMetrics } from "@/lib/voice-agent/metrics";
 import {
   CHAINED_NOTE_PREVIEW_MAX_GRAPHEMES,
   CHAINED_SESSION_MAX_MS,
@@ -111,6 +112,9 @@ export function ChainedComparison({
   const playbackLeaseRef = useRef<MicrophoneLease | null>(null);
   const sessionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewRef = useRef<HTMLTextAreaElement | null>(null);
+  const metricsSessionRef = useRef<number | null>(null);
+  const metricsTurnRef = useRef<number | null>(null);
+  const lastMetricsTurnRef = useRef<number | null>(null);
 
   const dictation = useScribeDictation({
     activityKind: "dictation",
@@ -130,6 +134,14 @@ export function ChainedComparison({
   useEffect(() => {
     partialRef.current = dictation.partialTranscript;
   }, [dictation.partialTranscript]);
+  useEffect(() => {
+    return voiceMetrics.onReset(() => {
+      metricsSessionRef.current = null;
+      metricsTurnRef.current = null;
+      lastMetricsTurnRef.current = null;
+    });
+  }, []);
+
 
   useEffect(() => {
     incompleteRef.current = dictation.incompleteNotice;
@@ -142,6 +154,7 @@ export function ChainedComparison({
       }
 
       stopAudio();
+      endMetricsSession("unmount");
     };
   }, []);
 
@@ -164,7 +177,21 @@ export function ChainedComparison({
     void lease?.release().catch(() => undefined);
   }
 
-  async function speak(text: string): Promise<void> {
+  function endMetricsSession(reason: string): void {
+    if (metricsTurnRef.current !== null) {
+      voiceMetrics.finishTurn(metricsTurnRef.current);
+      metricsTurnRef.current = null;
+    }
+
+    if (metricsSessionRef.current !== null) {
+      voiceMetrics.endSession(metricsSessionRef.current, reason);
+      metricsSessionRef.current = null;
+    }
+
+    lastMetricsTurnRef.current = null;
+  }
+
+  async function speak(text: string, turnId: number | null): Promise<void> {
     const trimmed = text.trim();
 
     if (trimmed === "") {
@@ -206,7 +233,18 @@ export function ChainedComparison({
         stopAudio();
         setError("Zvuk z ElevenLabs se nepodařilo přehrát.");
       };
+      if (turnId !== null) {
+        voiceMetrics.recordUsage(turnId, {
+          kind: "unknown",
+          provider: "elevenlabs_tts",
+        });
+      }
+
       await audio.play();
+
+      if (turnId !== null) {
+        voiceMetrics.markFirstAudio(turnId);
+      }
     } catch (caught) {
       stopAudio();
       setError(
@@ -229,6 +267,7 @@ export function ChainedComparison({
       stopAudio();
       setSessionStartedAt(null);
       setHeld(false);
+      endMetricsSession("timeout");
       setError(
         `Řetězená relace vypršela po ${CHAINED_SESSION_MAX_MS / 60_000} minutách. Spusťte novou relaci.`,
       );
@@ -243,6 +282,7 @@ export function ChainedComparison({
 
     void dictation.stop({ flush: false });
     stopAudio();
+    endMetricsSession("reset");
     committedRef.current = "";
     partialRef.current = "";
     setSessionStartedAt(null);
@@ -281,6 +321,26 @@ export function ChainedComparison({
     setDraft(trimmed);
     markSessionStart();
 
+    if (metricsSessionRef.current === null) {
+      metricsSessionRef.current = voiceMetrics.startSession("chained");
+    }
+
+    metricsTurnRef.current = voiceMetrics.startTurn("chained");
+    lastMetricsTurnRef.current = metricsTurnRef.current;
+    voiceMetrics.markTurnEnd(metricsTurnRef.current);
+    voiceMetrics.recordUsage(metricsTurnRef.current, {
+      kind: "unknown",
+      provider: "openrouter",
+    });
+    voiceMetrics.recordUsage(metricsTurnRef.current, {
+      kind: "unknown",
+      provider: "elevenlabs_scribe",
+    });
+
+    const metricsTurn = metricsTurnRef.current;
+    const requestStartedAt = Date.now();
+    let recordedError = false;
+
     try {
       const response = await fetch("/api/voice-agent/chained", {
         body: JSON.stringify({
@@ -293,8 +353,21 @@ export function ChainedComparison({
         method: "POST",
       });
       const payload: unknown = await response.json().catch(() => null);
+      voiceMetrics.recordToolRoundTrip(
+        metricsTurn,
+        Date.now() - requestStartedAt,
+      );
 
       if (!response.ok) {
+        voiceMetrics.recordError(
+          metricsTurn,
+          typeof payload === "object" && payload !== null
+            ? ((payload as { error?: { code?: unknown } }).error?.code as
+                | string
+                | undefined) ?? null
+            : null,
+        );
+        recordedError = true;
         throw new Error(readErrorMessage(payload));
       }
 
@@ -358,18 +431,28 @@ export function ChainedComparison({
         );
       }
 
+      if (candidate.kind === "proposal" && lastMetricsTurnRef.current !== null) {
+        voiceMetrics.recordProposal(lastMetricsTurnRef.current, "pending");
+      }
+
       setOutcome(candidate);
 
       if (candidate.speechText !== null) {
-        void speak(candidate.speechText);
+        void speak(candidate.speechText, metricsTurn);
       }
     } catch (caught) {
+      if (!recordedError) {
+        voiceMetrics.recordError(metricsTurn, "chained_request_failed");
+      }
+
       setError(
         caught instanceof Error
           ? caught.message
           : "Řetězený příkaz se nepodařilo provést.",
       );
     } finally {
+      voiceMetrics.finishTurn(metricsTurn);
+      metricsTurnRef.current = null;
       turnInFlightRef.current = false;
       setBusy(false);
     }
@@ -380,7 +463,19 @@ export function ChainedComparison({
       return;
     }
 
+    const interrupting = audioRef.current !== null;
+    const bargeTurn = metricsTurnRef.current ?? lastMetricsTurnRef.current;
+
+    if (interrupting && bargeTurn !== null) {
+      voiceMetrics.markBargeIn(bargeTurn);
+    }
+
     stopAudio();
+
+    if (interrupting && bargeTurn !== null) {
+      voiceMetrics.markOutputSilenced(bargeTurn);
+    }
+
     committedRef.current = "";
     setDraft("");
     setError(null);
@@ -445,6 +540,7 @@ export function ChainedComparison({
   }
 
   function selectResult(noteId: string, title: string): void {
+    voiceMetrics.recordSelection("chained", null);
     stopAudio();
     setSelectedNote({ noteId, title });
     setSelection(null);
@@ -491,7 +587,26 @@ export function ChainedComparison({
 
       const next = result as ChainedSummaryResult;
       setSummary(next);
-      void speak(next.summaryText);
+
+      if (metricsSessionRef.current === null) {
+        metricsSessionRef.current = voiceMetrics.startSession("chained");
+      }
+
+      const summaryUsageTurn =
+        lastMetricsTurnRef.current ?? metricsTurnRef.current;
+
+      if (summaryUsageTurn !== null) {
+        voiceMetrics.recordUsage(summaryUsageTurn, {
+          kind: "unknown",
+          provider: "openrouter",
+        });
+        voiceMetrics.recordUsage(summaryUsageTurn, {
+          kind: "unknown",
+          provider: "elevenlabs_tts",
+        });
+      }
+
+      void speak(next.summaryText, null);
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -545,12 +660,22 @@ export function ChainedComparison({
         current === null ? current : { ...current, version: appliedVersion },
       );
       setLastApplied({ noteId: proposal.noteId, version: appliedVersion });
+
+      if (lastMetricsTurnRef.current !== null) {
+        voiceMetrics.recordProposal(lastMetricsTurnRef.current, "applied");
+      }
+
       setOutcome(null);
       setNotice(
         `Návrh byl aplikován. Poznámka má nyní verzi ${appliedVersion}. Změnu lze vrátit v historii.`,
       );
-      void speak(`Změna byla aplikována. Poznámka má verzi ${appliedVersion}.`);
+      void speak(`Změna byla aplikována. Poznámka má verzi ${appliedVersion}.`, lastMetricsTurnRef.current);
     } catch (caught) {
+      if (lastMetricsTurnRef.current !== null) {
+        voiceMetrics.recordProposal(lastMetricsTurnRef.current, "failed");
+        voiceMetrics.recordError(lastMetricsTurnRef.current, "proposal_failed");
+      }
+
       setError(
         caught instanceof Error
           ? caught.message
@@ -585,9 +710,18 @@ export function ChainedComparison({
         throw new Error(readErrorMessage(payload));
       }
 
+      if (lastMetricsTurnRef.current !== null) {
+        voiceMetrics.recordProposal(lastMetricsTurnRef.current, "rejected");
+      }
+
       setOutcome(null);
       setNotice("Návrh byl zamítnut. Poznámka zůstala beze změny.");
     } catch (caught) {
+      if (lastMetricsTurnRef.current !== null) {
+        voiceMetrics.recordProposal(lastMetricsTurnRef.current, "failed");
+        voiceMetrics.recordError(lastMetricsTurnRef.current, "proposal_failed");
+      }
+
       setError(
         caught instanceof Error
           ? caught.message
@@ -626,9 +760,19 @@ export function ChainedComparison({
           : current,
       );
       setLastApplied(null);
+
+      if (lastMetricsTurnRef.current !== null) {
+        voiceMetrics.recordProposal(lastMetricsTurnRef.current, "undo");
+      }
+
       setNotice(`Změna byla vrácena. Poznámka má verzi ${updated.version}.`);
-      void speak(`Změna byla vrácena. Poznámka má verzi ${updated.version}.`);
+      void speak(`Změna byla vrácena. Poznámka má verzi ${updated.version}.`, lastMetricsTurnRef.current);
     } catch (caught) {
+      if (lastMetricsTurnRef.current !== null) {
+        voiceMetrics.recordProposal(lastMetricsTurnRef.current, "failed");
+        voiceMetrics.recordError(lastMetricsTurnRef.current, "undo_failed");
+      }
+
       setError(
         caught instanceof Error
           ? caught.message

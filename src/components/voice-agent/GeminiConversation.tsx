@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { formatUsdAmount } from "@/lib/ai/usage-format";
+import { voiceMetrics } from "@/lib/voice-agent/metrics";
 import { describeProposalResult } from "@/lib/voice-agent/proposal-result";
 import { PendingEdit, type PendingEditResult } from "./PendingEdit";
 import {
@@ -592,6 +593,12 @@ export function GeminiConversation() {
   const mutedRef = useRef(false);
   const inputModeRef = useRef<"auto" | "push">("auto");
   const pushHoldRef = useRef(false);
+  const metricsSessionRef = useRef<number | null>(null);
+  const metricsTurnRef = useRef<number | null>(null);
+  const lastMetricsTurnRef = useRef<number | null>(null);
+  const metricsTurnHasAudioRef = useRef(false);
+  const pendingProposalMetricsTurnRef = useRef<number | null>(null);
+  const connectingInFlightRef = useRef(false);
 
   const stopPlayback = useCallback(() => {
     for (const source of sourcesRef.current) {
@@ -641,6 +648,30 @@ export function GeminiConversation() {
     ) => {
       stoppingRef.current = true;
       streamingRef.current = false;
+      connectingInFlightRef.current = false;
+
+      if (nextStatus === "error" && metricsSessionRef.current !== null) {
+        voiceMetrics.recordSessionError(
+          metricsSessionRef.current,
+          "session_error",
+        );
+      }
+
+      if (metricsTurnRef.current !== null) {
+        voiceMetrics.finishTurn(metricsTurnRef.current);
+        lastMetricsTurnRef.current = metricsTurnRef.current;
+        metricsTurnRef.current = null;
+        metricsTurnHasAudioRef.current = false;
+      }
+
+      if (metricsSessionRef.current !== null) {
+        voiceMetrics.endSession(
+          metricsSessionRef.current,
+          nextStatus === "error" ? "error" : "stop",
+        );
+        metricsSessionRef.current = null;
+        lastMetricsTurnRef.current = null;
+      }
 
       if (setupTimerRef.current !== null) {
         clearTimeout(setupTimerRef.current);
@@ -685,6 +716,7 @@ export function GeminiConversation() {
       setSummaryBusy(false);
       setSummaryError(null);
       setPendingProposalId(null);
+      pendingProposalMetricsTurnRef.current = null;
       setToolNotice(null);
       setSelectingNoteId(null);
       mutedRef.current = false;
@@ -698,6 +730,19 @@ export function GeminiConversation() {
   );
 
   useEffect(() => {
+    return voiceMetrics.onReset(() => {
+      metricsSessionRef.current =
+        socketRef.current !== null || connectingInFlightRef.current
+          ? voiceMetrics.startSession("gemini")
+          : null;
+      metricsTurnRef.current = null;
+      lastMetricsTurnRef.current = null;
+      metricsTurnHasAudioRef.current = false;
+      pendingProposalMetricsTurnRef.current = null;
+    });
+  }, []);
+
+  useEffect(() => {
     mountedRef.current = true;
 
     return () => {
@@ -705,6 +750,20 @@ export function GeminiConversation() {
       attemptRef.current += 1;
       stoppingRef.current = true;
       streamingRef.current = false;
+
+      if (metricsTurnRef.current !== null) {
+        voiceMetrics.finishTurn(metricsTurnRef.current);
+        metricsTurnRef.current = null;
+        metricsTurnHasAudioRef.current = false;
+      }
+
+      if (metricsSessionRef.current !== null) {
+        voiceMetrics.endSession(
+          metricsSessionRef.current,
+          "unmount",
+        );
+        metricsSessionRef.current = null;
+      }
 
       if (setupTimerRef.current !== null) {
         clearTimeout(setupTimerRef.current);
@@ -730,6 +789,17 @@ export function GeminiConversation() {
       const toolSession = sessionIdRef.current;
       sessionIdRef.current = null;
       void endVoiceAgentToolSession(toolSession);
+
+      if (metricsTurnRef.current !== null) {
+        voiceMetrics.finishTurn(metricsTurnRef.current);
+        metricsTurnRef.current = null;
+        metricsTurnHasAudioRef.current = false;
+      }
+
+      if (metricsSessionRef.current !== null) {
+        voiceMetrics.endSession(metricsSessionRef.current, "unmount");
+        metricsSessionRef.current = null;
+      }
 
       releaseAudio();
     };
@@ -763,6 +833,12 @@ export function GeminiConversation() {
         return;
       }
 
+      if (metricsTurnRef.current === null) {
+        metricsTurnRef.current = voiceMetrics.startTurn("gemini");
+      }
+
+      metricsTurnHasAudioRef.current = true;
+      voiceMetrics.markFirstAudio(metricsTurnRef.current);
       const samples = pcm16ToFloat32(bytes);
       const buffer = context.createBuffer(
         1,
@@ -834,7 +910,17 @@ export function GeminiConversation() {
         sourcesRef.current.size > 0 &&
         pcmRms(captured) >= LOCAL_BARGE_IN_RMS
       ) {
+        const bargeTurn = metricsTurnRef.current ?? lastMetricsTurnRef.current;
+
+        if (bargeTurn !== null) {
+          voiceMetrics.markBargeIn(bargeTurn);
+        }
+
         stopPlayback();
+
+        if (bargeTurn !== null) {
+          voiceMetrics.markOutputSilenced(bargeTurn);
+        }
 
         if (mountedRef.current) {
           setConversation("user-speaking");
@@ -1037,6 +1123,14 @@ export function GeminiConversation() {
       const proposal = readProposalToolResult(outcome.response);
 
       if (proposal) {
+        const proposalTurn =
+          metricsTurnRef.current ?? lastMetricsTurnRef.current;
+
+        if (proposalTurn !== null) {
+          voiceMetrics.recordProposal(proposalTurn, "pending");
+          pendingProposalMetricsTurnRef.current = proposalTurn;
+        }
+
         setPendingProposalId(proposal.proposalId);
         setToolNotice(
           "Návrh je připravený v panelu. Poznámka se nezměnila; návrh musíte potvrdit nebo zamítnout.",
@@ -1125,7 +1219,27 @@ export function GeminiConversation() {
         continue;
       }
 
+      const toolStartedAt = Date.now();
+      const toolTurn =
+        metricsTurnRef.current ?? voiceMetrics.startTurn("gemini");
+
+      if (metricsTurnRef.current === null) {
+        metricsTurnRef.current = toolTurn;
+      }
+
       const result = await executeToolCall(call, attempt, socket, session);
+      voiceMetrics.recordToolRoundTrip(
+        toolTurn,
+        Date.now() - toolStartedAt,
+      );
+
+      if (result) {
+        const code = readErrorCode(result.response);
+
+        if (code !== null) {
+          voiceMetrics.recordError(toolTurn, code);
+        }
+      }
 
       if (
         result &&
@@ -1209,6 +1323,7 @@ export function GeminiConversation() {
       }
 
       if (mountedRef.current) {
+        voiceMetrics.recordSelection("gemini", null);
         setSelectedNote(selected);
         setSelectedPreview(
           selected.preview
@@ -1244,6 +1359,23 @@ export function GeminiConversation() {
   function forwardProposalResult(result: PendingEditResult): void {
     const messaging = describeProposalResult(result);
     setToolNotice(messaging.notice);
+
+    const proposalTurn =
+      pendingProposalMetricsTurnRef.current ??
+      metricsTurnRef.current ??
+      lastMetricsTurnRef.current;
+
+    if (proposalTurn !== null) {
+      voiceMetrics.recordProposal(
+        proposalTurn,
+        result.kind === "applied"
+          ? "applied"
+          : result.kind === "rejected"
+            ? "rejected"
+            : "failed",
+      );
+      pendingProposalMetricsTurnRef.current = null;
+    }
 
     if (result.kind === "applied") {
       setSelectedNote((current) =>
@@ -1547,7 +1679,25 @@ export function GeminiConversation() {
     const content = serverContent as Record<string, unknown>;
 
     if (content.interrupted === true) {
+      const bargeTurn = metricsTurnRef.current ?? lastMetricsTurnRef.current;
+
+      if (bargeTurn !== null) {
+        voiceMetrics.markBargeIn(bargeTurn);
+      }
+
       stopPlayback();
+
+      if (bargeTurn !== null) {
+        voiceMetrics.markOutputSilenced(bargeTurn);
+        voiceMetrics.finishTurn(bargeTurn);
+
+        if (metricsTurnRef.current === bargeTurn) {
+          lastMetricsTurnRef.current = bargeTurn;
+          metricsTurnRef.current = null;
+        }
+
+        metricsTurnHasAudioRef.current = false;
+      }
     }
 
     const inputTranscription = content.inputTranscription;
@@ -1559,6 +1709,22 @@ export function GeminiConversation() {
       const text = (inputTranscription as { text?: unknown }).text;
 
       if (typeof text === "string") {
+        if (
+          metricsTurnRef.current !== null &&
+          metricsTurnHasAudioRef.current
+        ) {
+          voiceMetrics.finishTurn(metricsTurnRef.current);
+          lastMetricsTurnRef.current = metricsTurnRef.current;
+          metricsTurnRef.current = null;
+          metricsTurnHasAudioRef.current = false;
+        }
+
+        if (metricsTurnRef.current === null) {
+          metricsTurnRef.current = voiceMetrics.startTurn("gemini");
+        }
+
+        lastMetricsTurnRef.current = metricsTurnRef.current;
+        voiceMetrics.markTurnEnd(metricsTurnRef.current);
         setTranscript((current) => ({
           ...current,
           user: capTranscript(text),
@@ -1619,6 +1785,13 @@ export function GeminiConversation() {
     }
 
     if (content.turnComplete === true) {
+      if (metricsTurnRef.current !== null) {
+        voiceMetrics.finishTurn(metricsTurnRef.current);
+        lastMetricsTurnRef.current = metricsTurnRef.current;
+        metricsTurnRef.current = null;
+        metricsTurnHasAudioRef.current = false;
+      }
+
       turnIdRef.current = newTurnId();
       setConversation("idle");
     }
@@ -1654,6 +1827,7 @@ export function GeminiConversation() {
     }
 
     outputContextRef.current = outputContext;
+    connectingInFlightRef.current = true;
     void outputContext.resume().catch(() => {
       if (mountedRef.current) {
         setAudioBlocked(true);
@@ -1674,6 +1848,10 @@ export function GeminiConversation() {
     setConversation("idle");
     setStatus("connecting");
     let microphoneReady = false;
+
+    if (metricsSessionRef.current === null) {
+      metricsSessionRef.current = voiceMetrics.startSession("gemini");
+    }
 
     try {
       const lease = await acquireMicrophoneLease();
@@ -1754,6 +1932,7 @@ export function GeminiConversation() {
       setExpiresAt(payload.expiresAt);
       const socket = new WebSocket(websocketUrl(payload.token));
       socketRef.current = socket;
+      connectingInFlightRef.current = false;
       setupTimerRef.current = setTimeout(() => {
         if (socketRef.current === socket) {
           shutdown("error", "Gemini neodpověděl včas. Zkuste to znovu.");
