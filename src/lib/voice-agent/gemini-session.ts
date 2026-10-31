@@ -23,7 +23,7 @@ import {
 export const GEMINI_LIVE_MODEL_ID = DEFAULT_GEMINI_LIVE_MODEL;
 export const GEMINI_LIVE_TOKEN_URL =
   "https://generativelanguage.googleapis.com/v1beta/auth_tokens";
-export const GEMINI_LIVE_SESSION_MAX_SECONDS = 9 * 60;
+export const GEMINI_LIVE_SESSION_MAX_SECONDS = 10 * 60;
 export const GEMINI_LIVE_TOKEN_TIMEOUT_MS = 15_000;
 export const GEMINI_TOKEN_REQUEST_MAX_BYTES = 4 * 1024;
 

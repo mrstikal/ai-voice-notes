@@ -86,6 +86,12 @@ export default function VoiceAgentPage() {
             jednu revizi ai, kterou lze vrátit v historii poznámky; model sám
             nikdy nepotvrdí ani nezmění poznámku a zamítnutí obsah nemění.
           </li>
+          <li>
+            Když začnete mluvit, aplikace okamžitě ztiší rozehranou odpověď.
+            Mikrofon lze ztlumit nebo používat jen po dobu stisku tlačítka
+            Držet a mluvit. Relace je omezená na 10 minut a cena Gemini není
+            pevně zastropovaná.
+          </li>
         </ul>
       </section>
 

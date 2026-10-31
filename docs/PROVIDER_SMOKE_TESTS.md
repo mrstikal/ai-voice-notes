@@ -993,11 +993,11 @@ only the two read-only tools documented in its section.
 |---|---|
 | Installed package | None; native browser `WebSocket`, Web Audio, `getUserMedia` and the server's built-in `fetch` |
 | Official documentation checked | 2026-10-30: <https://ai.google.dev/gemini-api/docs/models/gemini-3.8-live>, <https://ai.google.dev/gemini-api/docs/live-api>, <https://ai.google.dev/gemini-api/docs/live-api/get-started-websocket>, <https://ai.google.dev/gemini-api/docs/live-api/capabilities>, <https://ai.google.dev/gemini-api/docs/live-api/ephemeral-tokens>. The current AuthToken discovery schema uses `bidiGenerateContentSetup` (the older `liveConnectConstraints` shape returned `Unknown field`). |
-| Token | Server `POST /v1beta/auth_tokens` with `x-goog-api-key`, `uses: 1`, `newSessionExpireTime` 60 s, session `expireTime` 9 min + 1 min and `bidiGenerateContentSetup` locking model, `responseModalities: ["AUDIO"]`, selected prebuilt voice, Czech-only system instructions (language is pinned through the instruction, not `languageCode`; never switch to Spanish or another language), `inputAudioTranscription.languageCodes: ["cs"]`, output transcription; no tools. Response contains only `["expiresAt","maxSessionSeconds","model","token","voice"]`, with `cache-control: no-store`; the long-lived key never reaches the browser. |
+| Token | Server `POST /v1beta/auth_tokens` with `x-goog-api-key`, `uses: 1`, `newSessionExpireTime` 60 s, session `expireTime` 10 min + 1 min and `bidiGenerateContentSetup` locking model, `responseModalities: ["AUDIO"]`, selected prebuilt voice, Czech-only system instructions (language is pinned through the instruction, not `languageCode`; never switch to Spanish or another language), `inputAudioTranscription.languageCodes: ["cs"]`, output transcription; no tools. Response contains only `["expiresAt","maxSessionSeconds","model","token","voice"]`, with `cache-control: no-store`; the long-lived key never reaches the browser. |
 | WebSocket | Browser opens `BidiGenerateContentConstrained?access_token=…` directly to Google, sends `{"setup":{}}` because the token locks setup, and waits for `setupComplete` (15 s timeout). No `/v1/live/sessions`, no OpenAI SDP, no long-lived key. |
 | Voice selector | `GeminiConversation` exposes 30 documented prebuilt voices (Aoede default, Kore, Puck, Charon, Fenrir, Leda, Orus, Zephyr, …) with Czech descriptors. The selected voice is sent to the token route and locked in the token; the selector is disabled while connecting/connected because a voice change requires a new session. |
 | Audio | Microphone is 16 kHz mono PCM16 (`audio/pcm;rate=16000`) via a Web Audio `ScriptProcessor`; output is 24 kHz PCM16 decoded into sequential `AudioBufferSourceNode`s. The output context is created/resumed in the Connect gesture. `interrupted` stops and clears queued output. Input is resampled if the browser does not honor 16 kHz. |
-| Microphone / cleanup | The exclusive `ai-voice-notes:microphone` Web Lock is acquired before `getUserMedia`; busy dictation/TTS/monitor or another tab gets a Czech explanation. Stop/unmount/9-minute expiry/close stops all tracks, releases the lock, disconnects the processor, stops queued audio and closes the socket/contexts before updating the UI. No auto reconnect; each connect needs a new token. |
+| Microphone / cleanup | The exclusive `ai-voice-notes:microphone` Web Lock is acquired before `getUserMedia`; busy dictation/TTS/monitor or another tab gets a Czech explanation. Stop/unmount/10-minute expiry/close stops all tracks, releases the lock, disconnects the processor, stops queued audio and closes the socket/contexts before updating the UI. No auto reconnect; each connect needs a new token. |
 | Transcript / privacy | `inputTranscription` and `outputTranscription` are transient React state only; captions can be hidden. No note request, database dependency or browser storage write; the token lives only in browser memory. No tools and no note context. |
 | UI | `Připojuji`/`Připojeno`/`Odpojeno`/`Chyba`, microphone `aktivní/vypnutý`, turn `Připraveno k rozhovoru`/`Mluvíte`/`Čekám na odpověď`/`Asistent mluví`, voice selector and transient subtitles. |
 | Cost | Google bills Gemini Live audio usage; P46 does not measure or cap it and the UI labels cost unknown. The voice selector changes the voice, not the price guarantee. |
@@ -1038,8 +1038,8 @@ MediaStream and Web Locks to verify:
   upstream); the selector cannot prevent that. Voice changes are not applied
   mid-session.
 - Token expiry/close has no provider-side resumption; reconnect is user-driven
-  and mints a new token. The 9-minute app cap is below the documented ~10-minute
-  WebSocket lifetime.
+  and mints a new token. The 10-minute app cap matches the documented ~10-minute WebSocket
+  lifetime; the token carries the 60-second start window as slack.
 - Gemini cost/usage is not written to the app's usage ledger; the live spend is
   unknown and should be checked in the Google console. The app does not claim
   that a selected voice is best for Czech.
@@ -1054,7 +1054,7 @@ was reintroduced.
 |---|---|
 | Token | The token route now creates a server-side tool session and returns its opaque `sessionId` together with the existing one-use token/model/voice/expiry fields. `bidiGenerateContentSetup` declares exactly two read functions, `search_notes` and `get_note`, and no mutation tools. |
 | Tool route | `POST /api/voice-agent/tool` is same-origin, Host/Origin checked, JSON-only, 16 KiB, 60 requests/minute and `no-store`. Actions are `call` (model-originated), `select` (explicit UI choice) and `end` (Stop/unmount). A missing/expired session is 404. |
-| Session | Server memory only, 9-minute TTL aligned with the token. At most 20 active sessions; a new session is rejected with 503 rather than evicting a still-running one. The session stores only opaque IDs, selection/version and call counters, never note content. Per-turn limit 4, per-session limit 20, duplicate call IDs rejected. |
+| Session | Server memory only, 10-minute TTL aligned with the token. At most 20 active sessions; a new session is rejected with 503 rather than evicting a still-running one. The session stores only opaque IDs, selection/version and call counters, never note content. Per-turn limit 4, per-session limit 20, duplicate call IDs rejected. |
 | Search | `search_notes({query,maxResults})` uses the P34 free text index, defaults to 3 and returns at most 5 IDs/titles/previews. Previews strip search markers and are capped at 240 graphemes. Empty queries return an empty result without a provider call. Semantic/hybrid search is not exposed. |
 | Read | `get_note({noteId})` succeeds only after the user clicked `Vybrat` for a note in the latest search results. The selected version is pinned; a changed/deleted/unselected note is rejected, and the selection is cleared on stale/deleted reads. Content uses P05's active plain text, capped at 1,200 graphemes, with `truncated`/`empty` flags. |
 | UI / privacy | Search results and the selected title are transient React state. After a successful `select`, the client sends a `clientContent` turn with only the server-confirmed note ID (no title or content) and `turnComplete: false`, so the model knows the selection without ending an in-flight spoken turn. There is no note write, proposal, transcript/audio persistence, browser storage or raw tool-output log. Selected note text and previews are sent to Google inside the Live session; the page discloses this. Instructions treat note text as data, not as instructions. |
@@ -1062,3 +1062,21 @@ was reintroduced.
 | Gate | `pnpm test` 833 passed / 141 skipped; `pnpm test:db` 157/157; `pnpm test:e2e` 69/69; `pnpm lint`, `pnpm typecheck` and `pnpm build` pass. |
 | Reviewer | First round found one Medium (selection was not conveyed to the model) and Lows (live-session eviction, shared rate-limit bucket, test gaps). The Medium, eviction and test gaps were fixed; the final re-review returned **accept**. Remaining Lows: `clientContent` turn semantics/click-while-speaking need the live check; 20 stale sessions can temporarily block a new one; the global 60/min bucket is acceptable while the exclusive microphone lease permits one live session. |
 | Live status | Accepted as mock verified; live unverified. No paid Gemini function-call session or real microphone selection trial has been run; the live tool-call path, Gemini's handling of the ID-only `clientContent` turn while audio is streaming, click-while-speaking, real note delivery and the resulting cost remain `live unverified` until separately authorized. |
+
+## P51 bounded controls, barge-in and documented voices (accepted, mock verified / live unverified)
+
+P51's OpenAI `marin`/`cedar` IDs do not apply to the Gemini Live replacement. The
+documented Gemini voices remain the 30 prebuilt voices in `gemini-voices.ts`, with
+`Aoede` as default. The selector is disabled while connecting/connected because a
+voice change requires a new token and session.
+
+| Item | Value |
+|---|---|
+| Barge-in | Gemini's server `interrupted` stops and clears queued output. In addition, a local input RMS gate (threshold `0.02`) clears all scheduled `AudioBufferSourceNode`s immediately when the microphone is open and assistant audio is playing. The old queue and playback cursor are reset, so old speech is never replayed; the pending approval proposal/summary is not touched. |
+| Mute / PTT | Mute sends zero PCM frames instead of microphone audio. Push-to-talk (`Stiskni a mluv`) sends real frames only while the button is held (pointer or Space/Enter); otherwise it sends zeros. Captions remain a separate switch. |
+| Session controls | Connect and Stop are guarded against double clicks, the voice is fixed while connected, and the session ends at 10 minutes or token expiry. Stop/unmount/error/timeout closes the socket, stops all output and tracks, releases the Web Lock and clears captions. Manual retry is offered after an error; there is no automatic reconnect. |
+| Cost | The UI warns that Gemini cost is unknown, is not measured in the P12 ledger and has no hard dollar cap. No fixed latency (including 300 ms) is claimed. |
+| Tests | `tests/voice-agent/interrupt.test.tsx` covers local barge-in/queue clear, mute silence, push-to-talk gating, double start/stop, fixed voice, caption toggle, timeout cleanup, manual retry and lock release. `tests/voice-agent/gemini-audio.test.tsx` verifies an interrupted turn leaves a pending approval untouched and never calls confirm. |
+| Gate | Affected voice/API/UI tests pass; the DB suite was not re-run because P51 has no DB change. lint/typecheck/build pass. The optional authorized headphone/speaker trial was not run, so real interruption latency and perceived behavior remain `live unverified`. |
+
+Residual: the local RMS threshold may need tuning for a particular microphone/speaker; echo cancellation is enabled, and the server `interrupted` event remains the authoritative cancellation. `ScriptProcessorNode` remains deprecated. The 10-minute cap is a bounded app timer, not a provider-side or dollar cap.

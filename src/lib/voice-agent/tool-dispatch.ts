@@ -42,7 +42,6 @@ import {
   type SummaryGenerator,
 } from "./read-services.ts";
 
-export const TOOL_SESSION_TTL_MS = 9 * 60 * 1000;
 export const MAX_TOOL_CALLS_PER_TURN = 4;
 export const MAX_TOOL_CALLS_PER_SESSION = 20;
 export const MAX_ACTIVE_TOOL_SESSIONS = 20;

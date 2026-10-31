@@ -34,6 +34,7 @@ import {
 
 export const GEMINI_TOKEN_ENDPOINT = "/api/voice-agent/gemini-token";
 export const GEMINI_TOOL_ENDPOINT = "/api/voice-agent/tool";
+export const LOCAL_BARGE_IN_RMS = 0.02;
 export const GEMINI_WEBSOCKET_URL =
   "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained";
 const SETUP_TIMEOUT_MS = 15_000;
@@ -217,6 +218,20 @@ function readProposalToolResult(
   }
 
   return { proposalId: result.proposalId, status: result.status };
+}
+
+function pcmRms(samples: Float32Array): number {
+  if (samples.length === 0) {
+    return 0;
+  }
+
+  let sum = 0;
+
+  for (const sample of samples) {
+    sum += sample * sample;
+  }
+
+  return Math.sqrt(sum / samples.length);
 }
 
 function capTranscript(text: string): string {
@@ -528,6 +543,9 @@ export function GeminiConversation() {
     assistant: "",
   });
   const [showCaptions, setShowCaptions] = useState(true);
+  const [muted, setMuted] = useState(false);
+  const [inputMode, setInputMode] = useState<"auto" | "push">("auto");
+  const [pushHeld, setPushHeld] = useState(false);
   const [audioBlocked, setAudioBlocked] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<readonly SearchResultItem[]>(
@@ -571,6 +589,9 @@ export function GeminiConversation() {
   const turnIdRef = useRef(newTurnId());
   const cancelledToolIdsRef = useRef<Set<string>>(new Set());
   const previewRef = useRef<HTMLTextAreaElement | null>(null);
+  const mutedRef = useRef(false);
+  const inputModeRef = useRef<"auto" | "push">("auto");
+  const pushHoldRef = useRef(false);
 
   const stopPlayback = useCallback(() => {
     for (const source of sourcesRef.current) {
@@ -666,6 +687,10 @@ export function GeminiConversation() {
       setPendingProposalId(null);
       setToolNotice(null);
       setSelectingNoteId(null);
+      mutedRef.current = false;
+      setMuted(false);
+      pushHoldRef.current = false;
+      setPushHeld(false);
       cancelledToolIdsRef.current.clear();
       setTranscript({ user: "", assistant: "" });
     },
@@ -799,7 +824,26 @@ export function GeminiConversation() {
         return;
       }
 
-      const input = event.inputBuffer.getChannelData(0);
+      const captured = event.inputBuffer.getChannelData(0);
+      const microphoneOpen =
+        !mutedRef.current &&
+        (inputModeRef.current === "auto" || pushHoldRef.current);
+
+      if (
+        microphoneOpen &&
+        sourcesRef.current.size > 0 &&
+        pcmRms(captured) >= LOCAL_BARGE_IN_RMS
+      ) {
+        stopPlayback();
+
+        if (mountedRef.current) {
+          setConversation("user-speaking");
+        }
+      }
+
+      const input = microphoneOpen
+        ? captured
+        : new Float32Array(captured.length);
       const pcm =
         context.sampleRate === GEMINI_INPUT_SAMPLE_RATE
           ? float32ToPcm16(input)
@@ -1820,6 +1864,26 @@ export function GeminiConversation() {
       });
   }
 
+  function updateMuted(next: boolean): void {
+    mutedRef.current = next;
+    setMuted(next);
+  }
+
+  function updateInputMode(next: "auto" | "push"): void {
+    inputModeRef.current = next;
+    setInputMode(next);
+
+    if (next === "auto") {
+      pushHoldRef.current = false;
+      setPushHeld(false);
+    }
+  }
+
+  function updatePushHeld(next: boolean): void {
+    pushHoldRef.current = next;
+    setPushHeld(next);
+  }
+
   const canConnect = !connecting && status !== "connected";
   const canStop = status === "connecting" || status === "connected";
   const hasTranscript =
@@ -1868,9 +1932,28 @@ export function GeminiConversation() {
         Hlas lze změnit jen před připojením; nový hlas vyžaduje novou relaci.
       </p>
 
+      <label className="mt-4 block max-w-sm text-sm font-medium text-stone-800">
+        Režim mikrofonu
+        <select
+          className="mt-1 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900"
+          data-testid="voice-agent-input-mode"
+          onChange={(event) => {
+            updateInputMode(event.target.value === "push" ? "push" : "auto");
+          }}
+          value={inputMode}
+        >
+          <option value="auto">Automaticky (VAD)</option>
+          <option value="push">Stiskni a mluv</option>
+        </select>
+      </label>
+      <p className="mt-1 text-xs leading-5 text-stone-500">
+        V režimu Stiskni a mluv se mikrofon otevírá jen po dobu stisku.
+      </p>
+
       <div className="mt-4 flex flex-wrap gap-3">
         <button
           className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900 disabled:cursor-not-allowed disabled:bg-stone-300 disabled:text-stone-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+          data-testid="voice-agent-connect"
           disabled={!canConnect}
           onClick={connect}
           type="button"
@@ -1879,13 +1962,97 @@ export function GeminiConversation() {
         </button>
         <button
           className="rounded-lg border border-stone-300 px-4 py-2 text-sm font-semibold text-stone-800 hover:bg-stone-100 disabled:cursor-not-allowed disabled:border-stone-200 disabled:text-stone-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+          data-testid="voice-agent-stop"
           disabled={!canStop}
           onClick={disconnect}
           type="button"
         >
           Ukončit
         </button>
+        <button
+          className="rounded-lg border border-stone-300 px-4 py-2 text-sm font-semibold text-stone-800 hover:bg-stone-100 disabled:cursor-not-allowed disabled:border-stone-200 disabled:text-stone-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+          aria-pressed={muted}
+          data-testid="voice-agent-mute"
+          disabled={!canStop}
+          onClick={() => {
+            updateMuted(!muted);
+          }}
+          type="button"
+        >
+          {muted ? "Zapnout mikrofon" : "Ztlumit mikrofon"}
+        </button>
+        {inputMode === "push" ? (
+          <button
+            className="rounded-lg border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-900 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:border-stone-200 disabled:text-stone-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+            aria-pressed={pushHeld}
+            data-testid="voice-agent-push-to-talk"
+            disabled={!canStop || muted}
+            onBlur={() => {
+              updatePushHeld(false);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === " " || event.key === "Enter") {
+                event.preventDefault();
+                updatePushHeld(true);
+              }
+            }}
+            onKeyUp={(event) => {
+              if (event.key === " " || event.key === "Enter") {
+                event.preventDefault();
+                updatePushHeld(false);
+              }
+            }}
+            onPointerCancel={() => {
+              updatePushHeld(false);
+            }}
+            onPointerDown={(event) => {
+              event.preventDefault();
+              event.currentTarget.setPointerCapture?.(event.pointerId);
+              updatePushHeld(true);
+            }}
+            onPointerLeave={() => {
+              updatePushHeld(false);
+            }}
+            onPointerUp={() => {
+              updatePushHeld(false);
+            }}
+            type="button"
+          >
+            {pushHeld ? "Mikrofon je otevřený" : "Držet a mluvit"}
+          </button>
+        ) : null}
+        {status === "error" ? (
+          <button
+            className="rounded-lg border border-amber-400 px-4 py-2 text-sm font-semibold text-amber-950 hover:bg-amber-100 disabled:cursor-not-allowed disabled:border-stone-200 disabled:text-stone-400"
+            data-testid="voice-agent-retry"
+            disabled={connecting}
+            onClick={connect}
+            type="button"
+          >
+            Zkusit znovu
+          </button>
+        ) : null}
       </div>
+
+      <p
+        className="mt-2 text-xs leading-5 text-stone-500"
+        data-testid="voice-agent-input-state"
+      >
+        {muted
+          ? "Mikrofon je ztlumený; do Gemini se posílá ticho."
+          : inputMode === "push"
+            ? pushHeld
+              ? "Mikrofon je otevřený jen po dobu stisku."
+              : "Mikrofon je zavřený; podržte Držet a mluvit."
+            : "Mikrofon je otevřený a Gemini detekuje řeč automaticky."}
+      </p>
+      <p
+        className="mt-1 text-xs leading-5 text-stone-500"
+        data-testid="voice-agent-cost-warning"
+      >
+        Cena Gemini je neznámá a aplikace ji neměří ani neomezuje pevným
+        dolarovým stropem. Relace se po nejvýše 10 minutách ukončí.
+      </p>
 
       <ConnectionStatus
         conversation={conversation}

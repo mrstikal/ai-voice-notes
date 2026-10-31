@@ -1077,6 +1077,16 @@ describe("GeminiConversation", () => {
       false,
     );
 
+    await act(async () => {
+      socket.message({ serverContent: { interrupted: true } });
+    });
+    expect(screen.getByTestId("voice-agent-pending-edit")).toBeTruthy();
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).includes("/api/voice-agent/confirm"),
+      ),
+    ).toBe(false);
+
     fireEvent.click(screen.getByTestId("voice-agent-pending-reject"));
     await waitFor(() =>
       expect(screen.getByText("Zamítnuto")).toBeDefined(),
