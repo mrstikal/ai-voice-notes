@@ -37,6 +37,12 @@ This repository implements **P01-P50**, with P46 delivered as the approved Gemin
    user re-tested with a real microphone, confirmed Czech replies and accepted
    P46; live Gemini tool-call and P50 approval paths remain unverified.
    Latency and formal multi-turn quality remain unmeasured.
+   An explicit `Řetězený režim` comparison path uses ElevenLabs Scribe for one
+   push-to-talk turn, OpenRouter for the bounded intent and summary, and
+   ElevenLabs TTS for the reply. It never needs an OpenAI key or a
+   Gemini/tool session; edits still require the same P23/P24 click and Undo.
+   Its 10-minute session, provider split, exclusive microphone, and unknown
+   uncapped cost are disclosed on the page.
 
 P44 adds the four-stage offline integration, privacy/recovery audit and this
 quality report. P45 added the OpenAI realtime bootstrap, which was retired; P46

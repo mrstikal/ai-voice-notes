@@ -37,12 +37,19 @@ import {
   taskSuggestionResponseSchema,
   type TaskSuggestionResponse,
 } from "./task-suggestions.ts";
+import {
+  CHAINED_INTENT_JSON_SCHEMA,
+  CHAINED_INTENT_SCHEMA_NAME,
+  chainedIntentProviderSchema,
+  type ChainedIntentProviderResponse,
+} from "../voice/chained-intent.ts";
 
 export const LLM_CANDIDATE_MODEL_ID = DEFAULT_OPENROUTER_LLM_MODEL;
 export const LLM_OPERATION = "llm_structured_edit";
 export const TAG_SUGGESTIONS_OPERATION = "llm_tag_suggestions";
 export const TASK_SUGGESTIONS_OPERATION = "llm_task_suggestions";
 export const SUMMARY_OPERATION = "llm_summary";
+export const CHAINED_INTENT_OPERATION = "llm_chained_intent";
 export const LLM_INPUT_MAX_CODE_UNITS = 12_000;
 export const LLM_MAX_OUTPUT_TOKENS = 1_200;
 export const LLM_TIMEOUT_MS = 20_000;
@@ -316,6 +323,9 @@ export interface StructuredLlmServiceOptions {
 
 export interface StructuredLlmService {
   request(input: StructuredLlmRequest): Promise<LlmEditResponse>;
+  requestChainedIntent(
+    input: StructuredLlmRequest,
+  ): Promise<ChainedIntentProviderResponse>;
   requestSummary(input: StructuredLlmRequest): Promise<SummaryResponse>;
   requestTagSuggestions(
     input: StructuredLlmRequest,
@@ -469,6 +479,30 @@ function parseTagSuggestionProviderResponse(
       502,
       "llm_schema_invalid",
       "Model nevrátil platný návrh tagů. Návrh nebyl přijat.",
+      {
+        issues: parsed.error.issues.map((issue) => ({
+          path: issue.path.map(String).join("."),
+          code: issue.code,
+        })),
+      },
+    );
+  }
+
+  return parsed.data;
+}
+
+function parseChainedIntentProviderResponse(
+  response: OpenRouterResponse,
+): ChainedIntentProviderResponse {
+  const parsed = chainedIntentProviderSchema.safeParse(
+    readProviderContent(response),
+  );
+
+  if (!parsed.success) {
+    throw new StructuredLlmError(
+      502,
+      "llm_schema_invalid",
+      "Model nevrátil platný záměr. Příkaz nebyl přijat.",
       {
         issues: parsed.error.issues.map((issue) => ({
           path: issue.path.map(String).join("."),
@@ -668,6 +702,15 @@ export function createStructuredLlmService(
         operation: LLM_OPERATION,
         requestKind: "structured_edit",
         parse: parseProviderResponse,
+      }),
+    requestChainedIntent: (input) =>
+      requestStructured(input, {
+        label: "hlasový záměr",
+        schemaName: CHAINED_INTENT_SCHEMA_NAME,
+        jsonSchema: CHAINED_INTENT_JSON_SCHEMA,
+        operation: CHAINED_INTENT_OPERATION,
+        requestKind: "chained_intent",
+        parse: parseChainedIntentProviderResponse,
       }),
     requestSummary: (input) =>
       requestStructured(input, {

@@ -84,6 +84,7 @@ export interface UseScribeDictationOptions {
   readonly flushOnStop?: boolean;
   readonly vadSilenceThresholdSecs?: number;
   readonly onBeforeSessionClose?: () => void;
+  readonly onIncompleteNotice?: (notice: string | null) => void;
 }
 
 export interface UseScribeDictationResult {
@@ -148,6 +149,7 @@ export function useScribeDictation(
     options.vadSilenceThresholdSecs ?? SCRIBE_VAD_SILENCE_THRESHOLD_SECS,
   );
   const onBeforeSessionCloseRef = useRef(options.onBeforeSessionClose);
+  const onIncompleteNoticeRef = useRef(options.onIncompleteNotice);
   const hasStartedRef = useRef(false);
   const lastPartialAtRef = useRef<number | null>(null);
   const microphoneActive =
@@ -188,6 +190,15 @@ export function useScribeDictation(
   useEffect(() => {
     onBeforeSessionCloseRef.current = options.onBeforeSessionClose;
   }, [options.onBeforeSessionClose]);
+
+  useEffect(() => {
+    onIncompleteNoticeRef.current = options.onIncompleteNotice;
+  }, [options.onIncompleteNotice]);
+
+  function applyIncompleteNotice(notice: string | null) {
+    setIncompleteNotice(notice);
+    onIncompleteNoticeRef.current?.(notice);
+  }
 
   function notifySessionError(message: string) {
     const sessionId = sessionIdRef.current;
@@ -423,11 +434,11 @@ export function useScribeDictation(
             finalCommitResolverRef.current = null;
 
             if (!commitSent || !finalResolved) {
-              setIncompleteNotice(
+              applyIncompleteNotice(
                 "Poslední promluva se nemusela dokončit. Zkontrolujte text před uložením.",
               );
             } else {
-              setIncompleteNotice(null);
+              applyIncompleteNotice(null);
             }
           }
 
@@ -438,7 +449,7 @@ export function useScribeDictation(
               try {
                 onBeforeSessionCloseRef.current?.();
               } catch {
-                setIncompleteNotice(
+                applyIncompleteNotice(
                   "Poslední formátovací příkaz se nepodařilo dokončit. Zkontrolujte text před uložením.",
                 );
               }
@@ -469,7 +480,7 @@ export function useScribeDictation(
       sessionIdRef.current = sessionId;
       const transcriptSession = new TranscriptSession();
       transcriptSessionRef.current = transcriptSession;
-      setIncompleteNotice(null);
+      applyIncompleteNotice(null);
 
       if (flushQuietTimerRef.current !== null) {
         clearTimeout(flushQuietTimerRef.current);
@@ -561,7 +572,7 @@ export function useScribeDictation(
       hasStartedRef.current = true;
     }
 
-    setIncompleteNotice(null);
+    applyIncompleteNotice(null);
     lastPartialAtRef.current = null;
     scribeRef.current?.clearTranscripts();
     void getOrCreateController().start();

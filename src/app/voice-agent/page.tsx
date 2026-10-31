@@ -1,17 +1,40 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { ChainedComparison } from "@/components/voice-agent/ChainedComparison";
 import { GeminiConversation } from "@/components/voice-agent/GeminiConversation";
 import {
   GEMINI_LIVE_MODEL_ID,
   GEMINI_LIVE_SESSION_MAX_SECONDS,
 } from "@/lib/voice-agent/gemini-session";
+import {
+  getTtsProviderStatus,
+  type TtsProviderStatus,
+} from "@/lib/tts/provider";
 
 export const metadata: Metadata = {
   title: "Konverzační asistent",
 };
 
 export default function VoiceAgentPage() {
+  let ttsStatus: TtsProviderStatus | null = null;
+
+  try {
+    ttsStatus = getTtsProviderStatus();
+  } catch {
+    ttsStatus = null;
+  }
+
+  const ttsVoices = (
+    ttsStatus?.voices.filter((voice) => voice.availability !== "unavailable") ?? [
+      { availability: "live_unverified" as const, id: "sarah", label: "Sarah" },
+    ]
+  ).map((voice) => ({
+    availability: voice.availability,
+    id: voice.id,
+    label: voice.label,
+  }));
+
   return (
     <div className="mx-auto max-w-3xl px-6 py-12">
       <p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-800">
@@ -25,7 +48,8 @@ export default function VoiceAgentPage() {
         hlasovou relaci Gemini Live přes WebSocket. Asistent může vyhledat
         poznámky a přečíst jednu poznámku, kterou v seznamu výslovně vyberete;
         zapisovat do poznámek nesmí. Mikrofon je výhradní, zvuk se neukládá a
-        přepis zůstává jen dočasně v paměti stránky.
+        přepis zůstává jen dočasně v paměti stránky. Návrh úpravy se zapíše
+        až po vašem kliknutí na Potvrdit.
       </p>
 
       <section
@@ -96,6 +120,12 @@ export default function VoiceAgentPage() {
       </section>
 
       <GeminiConversation />
+
+      <ChainedComparison
+        defaultTtsVoice={ttsVoices[0]?.id ?? "sarah"}
+        ttsConfigured={ttsStatus?.configured ?? false}
+        ttsVoices={ttsVoices}
+      />
 
       <p className="mt-8 text-sm leading-6 text-stone-600">
         Potřebujete diktování?{" "}

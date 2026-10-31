@@ -1080,3 +1080,21 @@ voice change requires a new token and session.
 | Gate | Affected voice/API/UI tests pass; the DB suite was not re-run because P51 has no DB change. lint/typecheck/build pass. The optional authorized headphone/speaker trial was not run, so real interruption latency and perceived behavior remain `live unverified`. |
 
 Residual: the local RMS threshold may need tuning for a particular microphone/speaker; echo cancellation is enabled, and the server `interrupted` event remains the authoritative cancellation. `ScriptProcessorNode` remains deprecated. The 10-minute cap is a bounded app timer, not a provider-side or dollar cap.
+
+## P52 chained STT -> LLM -> TTS comparison (accepted, mock verified / live unverified)
+
+The explicit `Řetězený režim` on `/voice-agent` is a comparison path, not
+another agent framework. It does not use the Gemini Live session or the P47
+tool dispatcher and does not need `OPENAI_API_KEY`.
+
+| Item | Value |
+|---|---|
+| Turns | One push-to-talk Scribe turn (`useScribeDictation`, `scribe_v2_realtime`, Czech, exclusive microphone lease). Multiple VAD commits in one hold are joined in order; the joined text is bounded to 600 graphemes and sent to `POST /api/voice-agent/chained`. |
+| Intent | P52 strict JSON schema with only `search_notes`, `get_note`, `read_note_section`, `summarize_note`, `propose_edit` and `unclear`; no note ID, version, path or arbitrary action. Invalid/extra fields are rejected before execution. A spoken task command is deterministically normalised to `append_bounded_section` with `- [ ] ` text, matching P49's `add_todo` formatting. |
+| Reads | `read-services.ts` (P34 search, P05 note, P32 sections) with at most three search results and one note per turn; a 1,200-grapheme note read is labelled as truncated in the panel and spoken reply. `summarize_note` only returns a cost offer; `Povolit shrnutí` reuses P29 with the 8,000-grapheme and 12,000-code-unit bounds. |
+| Edits | `propose_edit` creates a P23 version-bound proposal with server-supplied version/source hash. It never applies from the transcript; the panel uses the existing P23/P24 confirm and P25 Undo flow. |
+| TTS | The response is spoken through `POST /api/tts` (P19B direct synthesis) with the selected TTS voice and the playback lease so dictation and playback cannot overlap. |
+| Providers | ElevenLabs Scribe for STT; OpenRouter for intent and summary; ElevenLabs for the TTS reply; no OpenAI key or session ID. Errors name the provider (`openrouter`, `proposal`, `notes`, `ElevenLabs Scribe`). The UI states cost is unknown and not capped. |
+| Bounds | One intent and one note per turn; search max 3; summary source max 8,000 graphemes; client session timer 10 minutes; exclusive microphone lock and playback lease. |
+| Tests | `tests/voice-agent/chained.test.ts` covers strict intent rejection, prompt data minimisation, search without session, selection gating, exact section, task normalisation, transcript accumulation, truncated read, summary offer without a provider call, a real summary call, proposal version binding/no mutation, ambiguity/provider errors, the grapheme bound and guarded route. `tests/voice-agent/chained-ui.test.tsx` covers find -> select -> read -> proposal -> approve -> Undo, draft retention with a provider error, TTS/mic handoff and push-to-talk starts/stops. |
+| Live status | Mock verified; live unverified. No paid Scribe/OpenRouter/TTS turn was run. Real Czech intent quality, provider latency and the 10-minute acoustic session remain unverified. |
