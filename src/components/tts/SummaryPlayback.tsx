@@ -18,6 +18,7 @@ import { isAbortError, readTtsErrorMessage } from "@/lib/tts/player";
 import type { MicrophoneLease, MicrophoneLockManager } from "@/lib/voice/microphone";
 
 import type { PlaybackAudioFactory, PlaybackAudioHandle } from "./AudioPlayer";
+import { SpokenStopMonitor } from "./SpokenStopMonitor";
 
 export interface SummaryPlaybackProps {
   readonly artifact: SummaryArtifact;
@@ -27,6 +28,7 @@ export interface SummaryPlaybackProps {
   readonly fetchImpl?: typeof fetch;
   readonly audioFactory: PlaybackAudioFactory;
   readonly playbackLocks?: MicrophoneLockManager | null;
+  readonly stopMonitorEnabled?: boolean;
 }
 
 const defaultFetch: typeof fetch = (input, init) => fetch(input, init);
@@ -39,6 +41,7 @@ export function SummaryPlayback({
   fetchImpl = defaultFetch,
   audioFactory,
   playbackLocks,
+  stopMonitorEnabled = false,
 }: SummaryPlaybackProps) {
   const [consent, setConsent] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -160,7 +163,7 @@ export function SummaryPlayback({
 
     try {
       const lease = await tryAcquirePlaybackLease(playbackLocks, {
-        microphoneLockMode: "exclusive",
+        microphoneLockMode: stopMonitorEnabled ? "shared" : "exclusive",
       });
 
       if (generation !== generationRef.current || !mountedRef.current) {
@@ -343,6 +346,16 @@ export function SummaryPlayback({
           Zastavit
         </button>
       </div>
+
+      {stopMonitorEnabled ? (
+        <SpokenStopMonitor
+          active={playing && !disabled}
+          onStop={() => {
+            dispose();
+            setError(null);
+          }}
+        />
+      ) : null}
 
       {error ? (
         <p className="mt-2 text-sm text-red-900" role="alert">

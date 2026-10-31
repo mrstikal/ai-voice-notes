@@ -17,7 +17,11 @@ const content = [
   "- [ ] Koupit mléko",
   "- [x] Zavolat lékaři",
 ].join("\n");
-const note = { contentMd: content, version: 4 };
+const note = {
+  contentMd: content,
+  id: "11111111-1111-4111-8111-111111111111",
+  version: 4,
+};
 const plain = parseNoteMarkdown(content).plainText;
 
 function read(transcript: string, extra: Record<string, unknown> = {}) {
@@ -121,6 +125,7 @@ describe("P32 read selection", () => {
     const interleaved = read("Přečíst poslední dva odstavce", {
       note: {
         contentMd: "První odstavec.\n\n- [ ] Úkol\n\nDruhý odstavec.",
+        id: "22222222-2222-4222-8222-222222222222",
         version: 1,
       },
     });
@@ -140,12 +145,29 @@ describe("P32 read selection", () => {
     });
     expect(
       read("Přečíst shrnutí", {
-        summary: { noteVersion: 3, text: "Stará verze." },
+        summary: {
+          noteId: note.id,
+          noteVersion: 3,
+          text: "Stará verze.",
+        },
       }),
     ).toMatchObject({ action: "summary_stale" });
     expect(
       read("Přečíst shrnutí", {
-        summary: { noteVersion: 4, text: "Aktuální shrnutí." },
+        summary: {
+          noteId: "33333333-3333-4333-8333-333333333333",
+          noteVersion: 4,
+          text: "Cizí shrnutí.",
+        },
+      }),
+    ).toMatchObject({ action: "summary_stale" });
+    expect(
+      read("Přečíst shrnutí", {
+        summary: {
+          noteId: note.id,
+          noteVersion: 4,
+          text: "Aktuální shrnutí.",
+        },
       }),
     ).toEqual({
       action: "summary",

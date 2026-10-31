@@ -215,6 +215,7 @@ test("four stages work offline across typed, dictated, AI-edited and searched no
 }) => {
   const title = `Čtyři fáze E2E ${Date.now()}`;
   const noteId = await createNote(page, title, "Ruční text o databázi.");
+  const initialNote = await currentNote(request, noteId);
   const source = page.getByLabel("Obsah (Markdown)");
 
   // Stage 2: mocked Scribe dictation commits a sentence into the typed note.
@@ -246,8 +247,15 @@ test("four stages work offline across typed, dictated, AI-edited and searched no
   );
   await expect(source).toHaveValue(/Diktovaná věta o migraci databáze\./u);
   await page.getByRole("button", { name: "Stop" }).click();
-  await page.getByRole("button", { name: "Uložit", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText(/Uloženo · verze \d+/u);
+  // The dictation Stop flush performs the voice save itself. Wait for that
+  // exact version instead of racing a second manual save, which would remount
+  // the summary panel after the artifact is generated.
+  await expect(page.getByRole("status")).toContainText(
+    new RegExp(
+      `(?:Hlasový přepis uložen|Uloženo) · verze ${initialNote.version + 1}`,
+      "u",
+    ),
+  );
 
   const afterDictation = await currentNote(request, noteId);
   expect(afterDictation.contentMd).toContain("Ruční text o databázi.");

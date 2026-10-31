@@ -115,11 +115,14 @@ export function NoteWorkspace({
         providerError={providerError}
         providerStatus={providerStatus}
         summary={
-          summaryPlayback?.noteVersion === note.version
+          summaryPlayback?.noteId === note.id &&
+          summaryPlayback.noteVersion === note.version
             ? summaryPlayback
             : null
         }
-        summaryArtifact={summaryArtifact}
+        summaryArtifact={
+          summaryArtifact?.noteId === note.id ? summaryArtifact : null
+        }
         onVoiceSummary={setSummaryPlayback}
       />
       <TaskVoiceControls

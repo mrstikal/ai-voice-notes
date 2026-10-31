@@ -134,8 +134,11 @@ export function useScribeDictation(
     connection: ScribeConnection;
     listener: CommittedListener;
   } | null>(null);
+  const lifecycleCleanupRef = useRef<Array<() => void>>([]);
   const transcriptSessionRef = useRef<TranscriptSession | null>(null);
-  const finalCommitResolverRef = useRef<(() => void) | null>(null);
+  const finalCommitResolverRef = useRef<((accepted: boolean) => void) | null>(
+    null,
+  );
   const flushQuietTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -200,14 +203,6 @@ export function useScribeDictation(
     onIncompleteNoticeRef.current?.(notice);
   }
 
-  function notifySessionError(message: string) {
-    const sessionId = sessionIdRef.current;
-
-    if (sessionId !== null) {
-      void controllerRef.current?.notifyError(sessionId, message);
-    }
-  }
-
   const scribe = useScribe({
     modelId: SCRIBE_MODEL_ID,
     languageCode: SCRIBE_LANGUAGE_CODE,
@@ -238,83 +233,6 @@ export function useScribeDictation(
         void controllerRef.current?.notifyDisconnected(sessionId);
       }
     },
-    onError: (sessionError) => {
-      const sessionId = sessionIdRef.current;
-
-      if (sessionId === null) {
-        return;
-      }
-
-      if (isConnectionLostError(sessionError)) {
-        void controllerRef.current?.notifyDisconnected(sessionId);
-        return;
-      }
-
-      void controllerRef.current?.notifyError(
-        sessionId,
-        toCzechSessionError(sessionError),
-      );
-    },
-    onAuthError: () => {
-      notifySessionError(
-        "Token pro diktování byl odmítnut. Zkuste to znovu.",
-      );
-    },
-    onQuotaExceededError: () => {
-      notifySessionError(
-        "Byl vyčerpán limit ElevenLabs. Zkontrolujte nastavení účtu.",
-      );
-    },
-    onRateLimitedError: () => {
-      notifySessionError(
-        "ElevenLabs dočasně omezil požadavky. Zkuste to později.",
-      );
-    },
-    onSessionTimeLimitExceededError: () => {
-      notifySessionError(
-        "Poskytovatel ukončil relaci z důvodu časového limitu.",
-      );
-    },
-    onTranscriberError: () => {
-      notifySessionError(
-        "Přepisovač ElevenLabs hlásí chybu. Zkuste to znovu.",
-      );
-    },
-    onUnacceptedTermsError: () => {
-      notifySessionError(
-        "Účet ElevenLabs nemá přijaté podmínky. Přijměte je v nastavení účtu.",
-      );
-    },
-    onInputError: () => {
-      notifySessionError(
-        "Zvukový vstup byl odmítnut. Zkontrolujte mikrofon.",
-      );
-    },
-    onQueueOverflowError: () => {
-      notifySessionError(
-        "Fronta ElevenLabs je plná. Zkuste to znovu později.",
-      );
-    },
-    onResourceExhaustedError: () => {
-      notifySessionError(
-        "Prostředky ElevenLabs jsou vyčerpané. Zkuste to znovu později.",
-      );
-    },
-    onChunkSizeExceededError: () => {
-      notifySessionError(
-        "Zvuková data byla příliš velká. Zkuste to znovu.",
-      );
-    },
-    onInsufficientAudioActivityError: () => {
-      notifySessionError(
-        "Nebyl zachycen dostatek zvuku. Zkontrolujte mikrofon.",
-      );
-    },
-    onCommitThrottledError: () => {
-      notifySessionError(
-        "ElevenLabs dočasně omezil ukončování segmentů. Zkuste to znovu.",
-      );
-    },
   });
 
   useEffect(() => {
@@ -327,10 +245,19 @@ export function useScribeDictation(
       flushQuietTimerRef.current = null;
     }
 
-    finalCommitResolverRef.current?.();
+    // Closing the session is not an acknowledgement from the provider. Mark
+    // the pending Stop flush as incomplete so a connection lost during the
+    // flush cannot hide the P15 warning.
+    finalCommitResolverRef.current?.(false);
     finalCommitResolverRef.current = null;
     transcriptSessionRef.current?.close();
     transcriptSessionRef.current = null;
+
+    for (const cleanup of lifecycleCleanupRef.current) {
+      cleanup();
+    }
+
+    lifecycleCleanupRef.current = [];
     const committedListener = committedListenerRef.current;
     committedListenerRef.current = null;
     committedListener?.connection.off(
@@ -356,7 +283,7 @@ export function useScribeDictation(
 
     flushQuietTimerRef.current = setTimeout(() => {
       flushQuietTimerRef.current = null;
-      finalCommitResolverRef.current?.();
+      finalCommitResolverRef.current?.(true);
       finalCommitResolverRef.current = null;
     }, FLUSH_SETTLE_MS);
   }
@@ -395,10 +322,10 @@ export function useScribeDictation(
           ) {
             let commitSent = false;
             let finalResolved = false;
-            let resolveFinal!: () => void;
+            let resolveFinal!: (accepted: boolean) => void;
             const finalCommit = new Promise<void>((resolve) => {
-              resolveFinal = () => {
-                finalResolved = true;
+              resolveFinal = (accepted) => {
+                finalResolved = accepted;
                 resolve();
               };
             });
@@ -412,7 +339,7 @@ export function useScribeDictation(
             }
 
             if (!commitSent) {
-              resolveFinal();
+              resolveFinal(false);
             } else {
               let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
               const timeout = new Promise<void>((resolve) => {
@@ -499,6 +426,95 @@ export function useScribeDictation(
       if (connection === null) {
         throw new Error("Scribe spojení není dostupné.");
       }
+
+      const cleanups: Array<() => void> = [];
+      const isCurrent = () => sessionId === sessionIdRef.current;
+      const notifyBoundError = (message: string, connectionLost = false) => {
+        if (!isCurrent()) {
+          return;
+        }
+
+        if (connectionLost) {
+          void controllerRef.current?.notifyDisconnected(sessionId);
+        } else {
+          void controllerRef.current?.notifyError(sessionId, message);
+        }
+      };
+      const onProviderError = (data: { error: string }) => {
+        const error = new Error(data.error);
+        notifyBoundError(
+          toCzechSessionError(error),
+          isConnectionLostError(error),
+        );
+      };
+      const providerErrorListeners: ReadonlyArray<{
+        readonly event: RealtimeEvents;
+        readonly message: string;
+      }> = [
+        {
+          event: RealtimeEvents.AUTH_ERROR,
+          message: "Token pro diktování byl odmítnut. Zkuste to znovu.",
+        },
+        {
+          event: RealtimeEvents.QUOTA_EXCEEDED,
+          message: "Byl vyčerpán limit ElevenLabs. Zkontrolujte nastavení účtu.",
+        },
+        {
+          event: RealtimeEvents.RATE_LIMITED,
+          message: "ElevenLabs dočasně omezil požadavky. Zkuste to později.",
+        },
+        {
+          event: RealtimeEvents.SESSION_TIME_LIMIT_EXCEEDED,
+          message: "Poskytovatel ukončil relaci z důvodu časového limitu.",
+        },
+        {
+          event: RealtimeEvents.TRANSCRIBER_ERROR,
+          message: "Přepisovač ElevenLabs hlásí chybu. Zkuste to znovu.",
+        },
+        {
+          event: RealtimeEvents.UNACCEPTED_TERMS,
+          message:
+            "Účet ElevenLabs nemá přijaté podmínky. Přijměte je v nastavení účtu.",
+        },
+        {
+          event: RealtimeEvents.INPUT_ERROR,
+          message: "Zvukový vstup byl odmítnut. Zkontrolujte mikrofon.",
+        },
+        {
+          event: RealtimeEvents.QUEUE_OVERFLOW,
+          message: "Fronta ElevenLabs je plná. Zkuste to znovu později.",
+        },
+        {
+          event: RealtimeEvents.RESOURCE_EXHAUSTED,
+          message: "Prostředky ElevenLabs jsou vyčerpané. Zkuste to znovu později.",
+        },
+        {
+          event: RealtimeEvents.CHUNK_SIZE_EXCEEDED,
+          message: "Zvuková data byla příliš velká. Zkuste to znovu.",
+        },
+        {
+          event: RealtimeEvents.INSUFFICIENT_AUDIO_ACTIVITY,
+          message: "Nebyl zachycen dostatek zvuku. Zkontrolujte mikrofon.",
+        },
+        {
+          event: RealtimeEvents.COMMIT_THROTTLED,
+          message:
+            "ElevenLabs dočasně omezil ukončování segmentů. Zkuste to znovu.",
+        },
+      ];
+
+      connection.on(RealtimeEvents.ERROR, onProviderError);
+      cleanups.push(() =>
+        connection.off(RealtimeEvents.ERROR, onProviderError),
+      );
+
+      for (const { event, message } of providerErrorListeners) {
+        const handler = () => notifyBoundError(message);
+        connection.on(event, handler as never);
+        cleanups.push(() => connection.off(event, handler as never));
+      }
+
+      lifecycleCleanupRef.current = cleanups;
 
       const listener: CommittedListener = (data) => {
         if (sessionId !== sessionIdRef.current) {

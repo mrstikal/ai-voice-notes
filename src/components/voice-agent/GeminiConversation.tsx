@@ -36,6 +36,7 @@ import {
 export const GEMINI_TOKEN_ENDPOINT = "/api/voice-agent/gemini-token";
 export const GEMINI_TOOL_ENDPOINT = "/api/voice-agent/tool";
 export const LOCAL_BARGE_IN_RMS = 0.02;
+const MAX_PENDING_PCM_CHUNKS = 128;
 export const GEMINI_WEBSOCKET_URL =
   "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained";
 const SETUP_TIMEOUT_MS = 15_000;
@@ -580,6 +581,9 @@ export function GeminiConversation() {
   const silentGainRef = useRef<GainNode | null>(null);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const nextPlayAtRef = useRef(0);
+  const suppressPlaybackRef = useRef(false);
+  const pendingPcmRef = useRef<Uint8Array[]>([]);
+  const modelTurnActiveRef = useRef(false);
   const setupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attemptRef = useRef(0);
@@ -601,6 +605,10 @@ export function GeminiConversation() {
   const metricsTurnHasAudioRef = useRef(false);
   const pendingProposalMetricsTurnRef = useRef<number | null>(null);
   const connectingInFlightRef = useRef(false);
+
+  const clearPlaybackSuppression = useCallback(() => {
+    suppressPlaybackRef.current = false;
+  }, []);
 
   const stopPlayback = useCallback(() => {
     for (const source of sourcesRef.current) {
@@ -648,9 +656,13 @@ export function GeminiConversation() {
       message: string | null = null,
       detailText: string | null = null,
     ) => {
+      attemptRef.current += 1;
       stoppingRef.current = true;
       streamingRef.current = false;
       connectingInFlightRef.current = false;
+      clearPlaybackSuppression();
+      pendingPcmRef.current = [];
+      modelTurnActiveRef.current = false;
 
       if (nextStatus === "error" && metricsSessionRef.current !== null) {
         voiceMetrics.recordSessionError(
@@ -728,7 +740,7 @@ export function GeminiConversation() {
       cancelledToolIdsRef.current.clear();
       setTranscript({ user: "", assistant: "" });
     },
-    [releaseAudio],
+    [clearPlaybackSuppression, releaseAudio],
   );
 
   useEffect(() => {
@@ -760,6 +772,9 @@ export function GeminiConversation() {
       attemptRef.current += 1;
       stoppingRef.current = true;
       streamingRef.current = false;
+      clearPlaybackSuppression();
+      pendingPcmRef.current = [];
+      modelTurnActiveRef.current = false;
 
       if (metricsTurnRef.current !== null) {
         voiceMetrics.finishTurn(metricsTurnRef.current);
@@ -813,36 +828,10 @@ export function GeminiConversation() {
 
       releaseAudio();
     };
-  }, [releaseAudio]);
+  }, [clearPlaybackSuppression, releaseAudio]);
 
-  const playPcm = useCallback(
-    (encoded: string) => {
-      const context = outputContextRef.current;
-
-      if (!context) {
-        return;
-      }
-
-      if (context.state === "suspended") {
-        void context.resume().catch(() => {
-          if (mountedRef.current) {
-            setAudioBlocked(true);
-          }
-        });
-      }
-
-      let bytes: Uint8Array;
-
-      try {
-        bytes = base64ToBytes(encoded);
-      } catch {
-        return;
-      }
-
-      if (bytes.byteLength === 0 || bytes.byteLength % 2 !== 0) {
-        return;
-      }
-
+  const schedulePcm = useCallback(
+    (context: AudioContext, bytes: Uint8Array) => {
       if (metricsTurnRef.current === null) {
         metricsTurnRef.current = voiceMetrics.startTurn("gemini");
       }
@@ -869,6 +858,71 @@ export function GeminiConversation() {
       };
     },
     [],
+  );
+
+  const flushPendingPcm = useCallback(
+    (context: AudioContext) => {
+      const pending = pendingPcmRef.current;
+
+      if (pending.length === 0) {
+        return;
+      }
+
+      pendingPcmRef.current = [];
+
+      for (const chunk of pending) {
+        schedulePcm(context, chunk);
+      }
+    },
+    [schedulePcm],
+  );
+
+  const playPcm = useCallback(
+    (encoded: string) => {
+      const context = outputContextRef.current;
+
+      if (!context || context.state === "closed") {
+        return;
+      }
+
+      if (context.state === "suspended") {
+        void context.resume().catch(() => {
+          if (mountedRef.current) {
+            setAudioBlocked(true);
+          }
+        });
+      }
+
+      let bytes: Uint8Array;
+
+      try {
+        bytes = base64ToBytes(encoded);
+      } catch {
+        return;
+      }
+
+      if (bytes.byteLength === 0 || bytes.byteLength % 2 !== 0) {
+        return;
+      }
+
+      if (suppressPlaybackRef.current) {
+        pendingPcmRef.current = [];
+        return;
+      }
+
+      if (context.state !== "running") {
+        // Keep a bounded prefix for the blocked-audio resume instead of
+        // scheduling an unbounded backlog that would replay minutes of speech.
+        if (pendingPcmRef.current.length < MAX_PENDING_PCM_CHUNKS) {
+          pendingPcmRef.current.push(bytes);
+        }
+        return;
+      }
+
+      flushPendingPcm(context);
+      schedulePcm(context, bytes);
+    },
+    [flushPendingPcm, schedulePcm],
   );
 
   function startMicrophoneStreaming(attempt: number) {
@@ -927,6 +981,17 @@ export function GeminiConversation() {
         }
 
         stopPlayback();
+        // Do not replay the interrupted turn's already in-flight PCM chunks.
+        // Only arm the guard while the server is still generating; a barge-in
+        // after ``turnComplete`` has no old chunks to suppress and must not
+        // mute the next answer. The guard clears at the real turn boundary.
+        if (modelTurnActiveRef.current) {
+          suppressPlaybackRef.current = true;
+        } else {
+          clearPlaybackSuppression();
+        }
+
+        pendingPcmRef.current = [];
 
         if (bargeTurn !== null) {
           voiceMetrics.markOutputSilenced(bargeTurn);
@@ -1710,6 +1775,9 @@ export function GeminiConversation() {
       }
 
       stopPlayback();
+      clearPlaybackSuppression();
+      pendingPcmRef.current = [];
+      modelTurnActiveRef.current = false;
 
       if (bargeTurn !== null) {
         voiceMetrics.markOutputSilenced(bargeTurn);
@@ -1777,6 +1845,7 @@ export function GeminiConversation() {
     const modelTurn = content.modelTurn;
 
     if (typeof modelTurn === "object" && modelTurn !== null) {
+      modelTurnActiveRef.current = true;
       const parts = (modelTurn as { parts?: unknown }).parts;
 
       if (Array.isArray(parts)) {
@@ -1816,6 +1885,12 @@ export function GeminiConversation() {
         metricsTurnHasAudioRef.current = false;
       }
 
+      clearPlaybackSuppression();
+      // Do not replay a finished answer's blocked prefix at the start of the
+      // next turn. A turn that completed while audio was blocked is dropped
+      // rather than replayed out of context.
+      pendingPcmRef.current = [];
+      modelTurnActiveRef.current = false;
       turnIdRef.current = newTurnId();
       setConversation("idle");
     }
@@ -1864,6 +1939,9 @@ export function GeminiConversation() {
 
     stoppingRef.current = false;
     streamingRef.current = false;
+    clearPlaybackSuppression();
+    pendingPcmRef.current = [];
+    modelTurnActiveRef.current = false;
     setConnecting(true);
     setError(null);
     setDetail(null);
@@ -2058,6 +2136,7 @@ export function GeminiConversation() {
       .then(() => {
         if (mountedRef.current) {
           setAudioBlocked(false);
+          flushPendingPcm(context);
         }
       })
       .catch(() => {

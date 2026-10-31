@@ -125,9 +125,14 @@ async function loadSeedNotes(
      ORDER BY seed_key`,
   );
 
-  if (result.rows.length < SEED_FIXTURES.length) {
+  const presentKeys = new Set(result.rows.map((row) => row.seed_key));
+  const missingKeys = SEED_FIXTURES.map((fixture) => fixture.key).filter(
+    (key) => !presentKeys.has(key),
+  );
+
+  if (missingKeys.length > 0) {
     throw new Error(
-      `Chybí testovací fixtures: nalezeno ${result.rows.length}, očekáváno ${SEED_FIXTURES.length}. Spusťte NODE_ENV=test pnpm db:seed; evaluátor sám neseeduje ani nemaže poznámky.`,
+      `Chybí testovací fixtures: ${missingKeys.join(", ")}. Spusťte NODE_ENV=test pnpm db:seed; evaluátor sám neseeduje ani nemaže poznámky.`,
     );
   }
 
@@ -140,11 +145,11 @@ async function loadSeedNotes(
   return new Map(result.rows.map((row) => [row.id, row.seed_key]));
 }
 
-async function countReadySeedChunks(
+async function loadReadySeedKeys(
   connection: ReturnType<typeof createDatabase>,
-): Promise<number> {
-  const result = await connection.pool.query<{ count: number | string }>(
-    `SELECT count(*)::int AS count
+): Promise<Set<string>> {
+  const result = await connection.pool.query<{ seed_key: string }>(
+    `SELECT DISTINCT n.seed_key
      FROM note_chunks AS c
      JOIN notes AS n ON n.id = c.note_id
      WHERE n.seed_key LIKE 'demo-v1:%'
@@ -156,7 +161,7 @@ async function countReadySeedChunks(
     [EMBEDDING_MODEL_ID],
   );
 
-  return Number(result.rows[0]?.count ?? 0);
+  return new Set(result.rows.map((row) => row.seed_key));
 }
 
 function seedRankedIds(
@@ -286,16 +291,23 @@ async function main(): Promise<void> {
     let embedder: EmbeddingService | null = null;
 
     if (options.mode !== "text") {
-      const ready = await countReadySeedChunks(connection);
+      const readyKeys = await loadReadySeedKeys(connection);
+      const missingReady = [
+        ...new Set(
+          allQueries.flatMap((fixture) => fixture.expectedSeedKeys),
+        ),
+      ].filter((key) => !readyKeys.has(key));
 
-      if (ready === 0) {
+      if (missingReady.length > 0) {
         throw new Error(
-          "Placené hodnocení vyžaduje ready vektory pro demo-v1:* poznámky. Nejprve je připravte explicitní P36 reindexací; evaluátor vektory sám nevytváří.",
+          `Placené hodnocení vyžaduje ready vektory pro všechny očekávané fixtures (${missingReady.join(", ")}). Nejprve je připravte explicitní P36 reindexací; evaluátor vektory sám nevytváří.`,
         );
       }
 
-      const estimate = estimateEmbeddingMaxCostUsd(
-        allQueries.map((fixture) => fixture.query),
+      const estimate = allQueries.reduce(
+        (total, fixture) =>
+          total + estimateEmbeddingMaxCostUsd([fixture.query]),
+        0,
       );
 
       console.log(

@@ -255,7 +255,8 @@ export function RevisionHistory({
                       Vrátit poslední změnu
                     </button>
                   ) : null}
-                  {revision.reason === "ai" ? (
+                  {revision.reason === "ai" &&
+                  revision.beforeSnapshot.contentMd.trim() !== "" ? (
                     <button
                       className="rounded-lg border border-stone-300 px-3 py-1.5 text-xs font-semibold text-stone-800 hover:bg-stone-100 disabled:cursor-not-allowed disabled:text-stone-400"
                       data-testid={`revision-before-toggle-${revision.noteVersion}`}
@@ -295,6 +296,7 @@ export function RevisionHistory({
               <DiffView diff={revision.diff} />
 
               {revision.reason === "ai" &&
+              revision.beforeSnapshot.contentMd.trim() !== "" &&
               beforeRevisionId === revision.id ? (
                 <div data-testid={`revision-before-${revision.noteVersion}`}>
                   <p className="mt-3 text-xs font-semibold text-stone-700">

@@ -31,6 +31,7 @@ const readSelectionRequestSchema = z
     paragraphIndex: z.number().int().nonnegative().optional(),
     summary: z
       .object({
+        noteId: z.string().uuid(),
         noteVersion: z.number().int().min(1),
         text: z.string().max(10_000),
       })
@@ -57,6 +58,7 @@ export const POST = createGuardedJsonRoute<ReadSelectionRequest>({
       const result: ReadSelectionResult = parseReadSelection({
         transcript: data.transcript,
         note: {
+          id: note.id,
           contentMd: note.contentMd,
           version: note.version,
         },

@@ -62,12 +62,14 @@ type CommittedListener = (data: { text: string; id?: string }) => void;
 
 interface FakeConnection {
   readonly active: Set<CommittedListener>;
+  readonly errorListeners: Set<(data: { error: string }) => void>;
   readonly registered: CommittedListener[];
   readonly handle: ScribeConnection;
 }
 
 function createFakeConnection(): FakeConnection {
   const active = new Set<CommittedListener>();
+  const errorListeners = new Set<(data: { error: string }) => void>();
   const registered: CommittedListener[] = [];
   const handle = {
     on(event: string, listener: CommittedListener) {
@@ -75,15 +77,27 @@ function createFakeConnection(): FakeConnection {
         active.add(listener);
         registered.push(listener);
       }
+
+      if (event === "error") {
+        errorListeners.add(
+          listener as unknown as (data: { error: string }) => void,
+        );
+      }
     },
     off(event: string, listener: CommittedListener) {
       if (event === "committed_transcript") {
         active.delete(listener);
       }
+
+      if (event === "error") {
+        errorListeners.delete(
+          listener as unknown as (data: { error: string }) => void,
+        );
+      }
     },
   } as unknown as ScribeConnection;
 
-  return { active, registered, handle };
+  return { active, errorListeners, registered, handle };
 }
 
 interface MockScribeInstance {
@@ -161,9 +175,18 @@ function createMockScribeInstance(
       }
     },
     emitError: (error) => {
-      setProviderError(
-        error instanceof Error ? error.message : "Neznámá chyba poskytovatele.",
-      );
+      const message =
+        error instanceof Error ? error.message : "Neznámá chyba poskytovatele.";
+      setProviderError(message);
+      const connection = connections.at(-1);
+
+      if (connection && connection.errorListeners.size > 0) {
+        for (const listener of connection.errorListeners) {
+          listener({ error: message });
+        }
+        return;
+      }
+
       instance.options?.onError?.(error);
     },
     emitDisconnect: () => {

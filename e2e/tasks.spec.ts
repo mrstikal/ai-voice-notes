@@ -388,7 +388,9 @@ test("vytvoř seznam úkolů starts a dictated checklist", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Diktovat text" })).toBeEnabled({
     timeout: 5_000,
   });
-  await expect(page.getByRole("status")).toContainText(/Uloženo · verze/);
+  await expect(page.getByRole("status")).toContainText(
+    /(?:Hlasový přepis uložen|Uloženo) · verze/,
+  );
 
   expect((await currentNote(page.request, noteId)).contentMd).toContain(
     "- [ ] Připravit migrace",

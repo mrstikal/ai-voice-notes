@@ -213,6 +213,75 @@ describe("GeminiConversation", () => {
     ).toBe(true);
   });
 
+  it("queues a bounded prefix while audio is blocked and flushes it on resume", async () => {
+    render(createElement(GeminiConversation));
+    const { socket, output } = await connectGemini();
+
+    output.state = "suspended";
+    output.resume = vi.fn(async () => {
+      throw new Error("autoplay blocked");
+    });
+
+    const outputPcm = bytesToBase64(
+      float32ToPcm16(new Float32Array(240).fill(0.1)),
+    );
+
+    await act(async () => {
+      socket.message({
+        serverContent: {
+          modelTurn: { parts: [{ inlineData: { data: outputPcm } }] },
+        },
+      });
+      socket.message({
+        serverContent: {
+          modelTurn: { parts: [{ inlineData: { data: outputPcm } }] },
+        },
+      });
+    });
+
+    expect(output.bufferSources).toHaveLength(0);
+    const enable = await screen.findByRole("button", { name: "Zapnout zvuk" });
+
+    output.state = "running";
+    output.resume = vi.fn(async () => undefined);
+    fireEvent.click(enable);
+
+    await waitFor(() => expect(output.bufferSources).toHaveLength(2));
+  });
+
+  it("drops the blocked prefix when that turn already completed", async () => {
+    render(createElement(GeminiConversation));
+    const { socket, output } = await connectGemini();
+
+    output.state = "suspended";
+    output.resume = vi.fn(async () => {
+      throw new Error("autoplay blocked");
+    });
+
+    const outputPcm = bytesToBase64(
+      float32ToPcm16(new Float32Array(240).fill(0.1)),
+    );
+
+    await act(async () => {
+      socket.message({
+        serverContent: {
+          modelTurn: { parts: [{ inlineData: { data: outputPcm } }] },
+        },
+      });
+      socket.message({ serverContent: { turnComplete: true } });
+    });
+
+    const enable = await screen.findByRole("button", { name: "Zapnout zvuk" });
+    output.state = "running";
+    output.resume = vi.fn(async () => undefined);
+    fireEvent.click(enable);
+
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Zapnout zvuk" })).toBeNull(),
+    );
+    expect(output.bufferSources).toHaveLength(0);
+  });
+
   it("shows two transient Czech turns without persisting them", async () => {
     const setItem = vi.spyOn(Storage.prototype, "setItem");
     render(createElement(GeminiConversation));

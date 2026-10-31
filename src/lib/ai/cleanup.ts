@@ -248,8 +248,64 @@ export function buildCleanupPrompt(input: {
   ].join("\n");
 }
 
+function isUnarySign(
+  text: string,
+  signIndex: number,
+  signCharacter: string,
+  numberStart: number,
+): boolean {
+  // ``1000 - 200`` / ``- 3`` are binary/separated, not an attached sign.
+  if (signIndex !== numberStart - 1) {
+    return false;
+  }
+
+  const immediatePrevious = text[signIndex - 1];
+
+  if (immediatePrevious === undefined) {
+    return true;
+  }
+
+  // A space before an attached sign means a negative number (``1000 -200``,
+  // ``(3) -2``); a spaced plus is an operator (``3 +4``).
+  if (/\s/u.test(immediatePrevious)) {
+    return signCharacter !== "+" && signCharacter !== "\uFF0B";
+  }
+
+  // A sign directly attached to a word/number is a hyphen/operator, not a
+  // unary sign: ``GPT-4``, ``100-200`` or ``(a)-5``. Opening/operator
+  // punctuation starts a unary sign: ``(-3)``, ``=-3``, ``3*-4``.
+  return /[([{;,:=<>*+/|]/u.test(immediatePrevious);
+}
+
 export function extractNumericSubstrings(text: string): readonly string[] {
-  return text.match(/\d+(?:[.,:]\d+)*/gu) ?? [];
+  const numbers: string[] = [];
+
+  for (const match of text.matchAll(/\d+(?:[.,:]\d+)*/gu)) {
+    const start = match.index ?? 0;
+    let signIndex = start - 1;
+
+    while (signIndex >= 0 && /\s/u.test(text[signIndex]!)) {
+      signIndex -= 1;
+    }
+
+    let sign = "";
+    const signCharacter = text[signIndex];
+
+    if (
+      signCharacter !== undefined &&
+      /[\u002B\uFF0B\u002D\u2010-\u2015\u2212\uFE63\uFF0D]/u.test(
+        signCharacter,
+      ) &&
+      isUnarySign(text, signIndex, signCharacter, start)
+    ) {
+      sign =
+        signCharacter === "+" || signCharacter === "\uFF0B" ? "+" : "-";
+    }
+
+    numbers.push(`${sign}${match[0]}`);
+  }
+
+  return numbers;
 }
 
 function extractTaskMarkers(text: string): readonly string[] {

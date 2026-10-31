@@ -197,6 +197,16 @@ export function AudioPlayer({
         return;
       }
 
+      if (
+        result.noteVersion !== note.version ||
+        summaryArtifact.noteId !== note.id
+      ) {
+        setVoiceCommandError(
+          "Poznámka se mezitím změnila. Shrnutí znovu vytvořte pro aktuální verzi.",
+        );
+        return;
+      }
+
       onVoiceSummary?.(summaryArtifact);
       setVoiceCommandStatus(
         "Shrnutí je připravené k přečtení v části Shrnutí k přečtení.",
@@ -206,6 +216,13 @@ export function AudioPlayer({
 
     if (result.action !== "read") {
       setVoiceCommandError(result.message);
+      return;
+    }
+
+    if (result.noteVersion !== note.version) {
+      clearManifest(
+        "Poznámka se mezitím změnila. Zopakujte hlasový příkaz pro aktuální verzi.",
+      );
       return;
     }
 
@@ -833,6 +850,7 @@ export function AudioPlayer({
 
   async function handleResume() {
     const audio = audioRef.current;
+    const generation = generationRef.current;
 
     if (audio === null) {
       return;
@@ -840,9 +858,26 @@ export function AudioPlayer({
 
     try {
       await audio.play();
+
+      if (
+        generation !== generationRef.current ||
+        audioRef.current !== audio ||
+        !mountedRef.current
+      ) {
+        return;
+      }
+
       setPhase("playing");
       setNotice(null);
     } catch {
+      if (
+        generation !== generationRef.current ||
+        audioRef.current !== audio ||
+        !mountedRef.current
+      ) {
+        return;
+      }
+
       failPlayback(
         "Přehrávání se nepodařilo obnovit. Zkuste to znovu; poznámka zůstala beze změny.",
       );
@@ -1018,7 +1053,9 @@ export function AudioPlayer({
         </p>
       ) : null}
 
-      {summary !== null && summary.noteVersion === note.version ? (
+      {summary !== null &&
+      summary.noteId === note.id &&
+      summary.noteVersion === note.version ? (
         <SummaryPlayback
           artifact={summary}
           audioFactory={audioFactory}
@@ -1027,6 +1064,7 @@ export function AudioPlayer({
           key={`${summary.noteId}:${summary.noteVersion}:${summary.summaryText}`}
           playbackLocks={playbackLocks}
           providerStatus={providerStatus}
+          stopMonitorEnabled={stopMonitorEnabled}
           voice={effectiveVoice}
         />
       ) : null}
@@ -1528,6 +1566,7 @@ function VoiceReadCommand({
             summaryArtifact === null
               ? null
               : {
+                  noteId: summaryArtifact.noteId,
                   noteVersion: summaryArtifact.noteVersion,
                   text: summaryArtifact.summaryText,
                 },

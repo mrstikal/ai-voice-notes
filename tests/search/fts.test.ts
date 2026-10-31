@@ -55,6 +55,12 @@ describe("P34 search snippets", () => {
       "Tělo bez výrazu.",
     );
   });
+
+  it("does not split a surrogate pair in the no-match prefix", () => {
+    const snippet = buildSearchSnippet("aaaaa😀b", "nenalezeno", 6);
+    expect(snippet).toBe("aaaaa");
+    expect(hasLoneSurrogate(snippet)).toBe(false);
+  });
 });
 
 describe("P34 snippet Unicode edges", () => {

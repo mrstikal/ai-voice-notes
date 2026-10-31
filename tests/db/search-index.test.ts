@@ -257,6 +257,14 @@ describe.skipIf(!hasTestDatabase)("P33 materialized full-text index", () => {
       [...firstPage.items, ...secondPage.items].map((item) => item.id),
     ).toHaveLength(11);
 
+    const outOfRange = await searchNotesFullText(connection.db, {
+      page: 9,
+      query: "hledany",
+    });
+    expect(outOfRange.items).toEqual([]);
+    expect(outOfRange.total).toBe(11);
+    expect(outOfRange.hasNext).toBe(false);
+
     await notes.deleteNote(migration.id, 1);
     const deleted = await searchNotesFullText(connection.db, {
       page: 1,

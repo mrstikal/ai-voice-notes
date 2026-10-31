@@ -208,6 +208,29 @@ describe("P51 bounded Gemini session controls", () => {
     expect(first?.stopped).toBe(true);
     expect(lastAudioBytes(socket).some((byte) => byte !== 0)).toBe(true);
 
+    // In-flight chunks of the interrupted turn may still arrive before the
+    // server's `interrupted` message. They must not be scheduled again.
+    playFakeOutput(socket);
+    expect(output.bufferSources).toHaveLength(1);
+
+    act(() => {
+      socket.message({ serverContent: { interrupted: true } });
+    });
+    playFakeOutput(socket);
+    expect(output.bufferSources).toHaveLength(2);
+    expect(output.bufferSources[1]?.stopped).toBe(false);
+    expect(input.processors).toHaveLength(1);
+  });
+
+  it("does not mute the next answer after a barge-in that follows turnComplete", async () => {
+    const { input, output, socket } = await connect();
+    playFakeOutput(socket);
+
+    act(() => {
+      socket.message({ serverContent: { turnComplete: true } });
+    });
+    emit(new Float32Array(4096).fill(0.5));
+
     playFakeOutput(socket);
     expect(output.bufferSources).toHaveLength(2);
     expect(output.bufferSources[1]?.stopped).toBe(false);

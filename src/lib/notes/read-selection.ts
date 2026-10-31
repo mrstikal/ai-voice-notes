@@ -20,6 +20,7 @@ export type ReadSelectionScope =
 export interface ReadSelectionRequest {
   readonly transcript: string;
   readonly note: {
+    readonly id: string;
     readonly contentMd: string;
     readonly version: number;
   };
@@ -29,6 +30,7 @@ export interface ReadSelectionRequest {
   };
   readonly paragraphIndex?: number;
   readonly summary?: {
+    readonly noteId: string;
     readonly noteVersion: number;
     readonly text: string;
   } | null;
@@ -173,11 +175,16 @@ export function parseReadSelection(
       };
     }
 
-    if (request.summary.noteVersion !== request.note.version) {
+    if (
+      request.summary.noteId !== request.note.id ||
+      request.summary.noteVersion !== request.note.version
+    ) {
       return {
         action: "summary_stale",
         message:
-          "Shrnutí je ze starší verze poznámky. Vytvořte ho znovu; staré shrnutí se nepřečte.",
+          request.summary.noteId !== request.note.id
+            ? "Shrnutí patří k jiné poznámce. Vytvořte ho znovu pro tuto poznámku; cizí shrnutí se nepřečte."
+            : "Shrnutí je ze starší verze poznámky. Vytvořte ho znovu; staré shrnutí se nepřečte.",
       };
     }
 

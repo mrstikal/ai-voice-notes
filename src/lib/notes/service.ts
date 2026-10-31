@@ -818,7 +818,11 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
         }
 
         await refreshNoteSearch(tx, id);
-        await refreshNoteChunks(tx, updated);
+        await refreshNoteChunks(tx, updated, {
+          reuseReadyEmbeddingsFromVersion: contentChanged
+            ? undefined
+            : current.version,
+        });
 
         return toDetail(updated, tags);
       });

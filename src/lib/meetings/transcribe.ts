@@ -39,6 +39,7 @@ export const SCRIBE_BATCH_LANGUAGE_CODE = "cs";
 export const SCRIBE_BATCH_USD_PER_HOUR = 0.22;
 export const SCRIBE_BATCH_TIMEOUT_MS = 240_000;
 export const SCRIBE_BATCH_MAX_WORDS = 300_000;
+export const SCRIBE_BATCH_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 export const MEETING_TRANSCRIPT_MAX_GRAPHEMES = 60_000;
 export const MEETING_TRANSCRIPT_MAX_APPROVAL_USD = 1;
 export const MEETING_TRANSCRIPT_FILE_NAME = "meeting-upload";
@@ -147,12 +148,74 @@ export function getBatchTranscribeTransport(): BatchTranscribeTransport {
   return createSdkTransport();
 }
 
+function createCappedFetch(maxBytes: number): typeof fetch {
+  return async (input, init) => {
+    const response = await fetch(input, init);
+    const contentLength = response.headers.get("content-length");
+
+    if (
+      contentLength !== null &&
+      Number.isFinite(Number(contentLength)) &&
+      Number(contentLength) > maxBytes
+    ) {
+      if (response.body !== null) {
+        await response.body.cancel().catch(() => undefined);
+      }
+
+      throw new Error("Provider response exceeded the allowed size.");
+    }
+
+    if (response.body === null) {
+      return response;
+    }
+
+    const reader = response.body.getReader();
+    let received = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      async cancel(reason) {
+        await reader.cancel(reason);
+      },
+      async pull(controller) {
+        try {
+          const { done, value } = await reader.read();
+
+          if (done) {
+            controller.close();
+            return;
+          }
+
+          received += value.byteLength;
+
+          if (received > maxBytes) {
+            await reader.cancel().catch(() => undefined);
+            controller.error(
+              new Error("Provider response exceeded the allowed size."),
+            );
+            return;
+          }
+
+          controller.enqueue(value);
+        } catch (error) {
+          controller.error(error);
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: response.headers,
+      status: response.status,
+      statusText: response.statusText,
+    });
+  };
+}
+
 function createSdkTransport(): BatchTranscribeTransport {
   return {
     async transcribe({ apiKey, baseUrl, filePath, fileName, timeoutMs }) {
       const client = new ElevenLabsClient({
         apiKey,
         baseUrl,
+        fetch: createCappedFetch(SCRIBE_BATCH_MAX_RESPONSE_BYTES),
         timeoutInSeconds: Math.ceil(timeoutMs / 1_000),
         maxRetries: 0,
       });

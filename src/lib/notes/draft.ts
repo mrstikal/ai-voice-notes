@@ -148,6 +148,13 @@ export function writeStoredDraft(
   }
 
   try {
+    // Store the new recovery copy first. If the quota-sensitive write fails,
+    // the previous draft must remain available instead of being deleted.
+    storage.setItem(
+      draftStorageKey(draft.noteId, draft.baseVersion),
+      JSON.stringify(draft),
+    );
+
     for (const existing of readStoredDrafts(draft.noteId, storage)) {
       if (existing.baseVersion !== draft.baseVersion) {
         storage.removeItem(
@@ -155,11 +162,6 @@ export function writeStoredDraft(
         );
       }
     }
-
-    storage.setItem(
-      draftStorageKey(draft.noteId, draft.baseVersion),
-      JSON.stringify(draft),
-    );
   } catch {
     return;
   }
@@ -192,10 +194,13 @@ export function syncStoredDraft(params: {
   const storage =
     params.storage === undefined ? defaultStorage() : params.storage;
 
-  if (
-    params.currentContentMd !== null &&
-    params.currentContentMd !== params.acknowledgedContentMd
-  ) {
+  if (params.currentContentMd === null) {
+    // A visual serialization failure must not be treated as "matches saved".
+    // Keep the stored recovery copy rather than clearing it.
+    return;
+  }
+
+  if (params.currentContentMd !== params.acknowledgedContentMd) {
     writeStoredDraft(
       {
         noteId: params.noteId,

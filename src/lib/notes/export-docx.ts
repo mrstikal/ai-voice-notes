@@ -236,6 +236,7 @@ function textParagraph(
 function codeParagraph(
   value: string,
   paragraphContext: ParagraphContext,
+  options: IParagraphOptions = {},
 ): Paragraph {
   const lines = value.split(/\r\n|\r|\n/);
   const children = lines.map(
@@ -251,6 +252,7 @@ function codeParagraph(
 
   return new Paragraph({
     ...paragraphOptions(paragraphContext),
+    ...options,
     children,
     includeIfEmpty: true,
     shading: { fill: "F2F2F2" },
@@ -395,12 +397,24 @@ function renderListItemBlocks(
 
     if (child.type === "code") {
       paragraphs.push(
-        codeParagraph(child.value, {
-          continuationIndent: isFirstBlock
-            ? (clampListLevel(depth) + 1) * LIST_INDENT
-            : continuationIndent,
-          quoteDepth,
-        }),
+        codeParagraph(
+          child.value,
+          {
+            continuationIndent: isFirstBlock
+              ? (clampListLevel(depth) + 1) * LIST_INDENT
+              : continuationIndent,
+            quoteDepth,
+          },
+          isFirstBlock
+            ? listItemParagraphOptions(
+                list,
+                depth,
+                definition,
+                quoteDepth,
+                typeof item.checked === "boolean",
+              )
+            : {},
+        ),
       );
       isFirstBlock = false;
       continue;

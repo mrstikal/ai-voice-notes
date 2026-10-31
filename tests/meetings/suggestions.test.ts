@@ -219,6 +219,36 @@ describe("meeting summary, decisions and tasks", () => {
     });
   });
 
+  it("rejects tables and raw HTML in the decisions section", async () => {
+    const content = "Petra: Projekt začne v pondělí.";
+    const invalidSections = [
+      "## Rozhodnutí\n\n| Úkol | Termín |\n| --- | --- |\n| Migrace | pondělí |",
+      "## Rozhodnutí\n\n- Projekt začne v pondělí.<br>",
+      "## Rozhodnutí\n\n- Projekt začne v pondělí.\n\n## Další krok\n\n- Nic.",
+    ];
+
+    for (const text of invalidSections) {
+      const llm = fakeLlm({
+        decision: {
+          kind: "operation",
+          operation: { type: "append_bounded_section", text },
+        },
+      });
+      const result = await suggestMeetingSummaryDecisions({
+        note: note(content),
+        start: 0,
+        end: content.length,
+        llm: llm.service,
+        isSavedMeeting: saved,
+      });
+
+      expect(result.decisionsText).toBeNull();
+      expect(result.decisionsError).toMatchObject({
+        code: "meeting_decisions_invalid",
+      });
+    }
+  });
+
   it("returns the paid summary with an explicit unclear-decisions error", async () => {
     const content = "Petra: Uvidíme.";
     const llm = fakeLlm({
@@ -315,6 +345,55 @@ describe("meeting summary, decisions and tasks", () => {
     });
 
     expect(result.summaryText).toBe("Shrnutí schůzky.");
+    expect(result.decisionsText).toBeNull();
+    expect(result.decisionsError).toMatchObject({
+      code: "meeting_decisions_invented_speaker",
+    });
+  });
+
+  it("matches the same speaker when only the label spacing differs", async () => {
+    const content = "Mluvčí 1: Projekt začne v pondělí.";
+    const llm = fakeLlm({
+      decision: {
+        kind: "operation",
+        operation: {
+          type: "append_bounded_section",
+          text: "## Rozhodnutí\n\n- Mluvčí1 rozhodl, že projekt začne v pondělí.",
+        },
+      },
+    });
+
+    const result = await suggestMeetingSummaryDecisions({
+      note: note(content),
+      start: 0,
+      end: content.length,
+      llm: llm.service,
+      isSavedMeeting: saved,
+    });
+
+    expect(result.decisionsText).toContain("Mluvčí1");
+  });
+
+  it("does not accept Mluvčí 1 when the source only contains Mluvčí 10", async () => {
+    const content = "Mluvčí 10: Projekt začne v pondělí.";
+    const llm = fakeLlm({
+      decision: {
+        kind: "operation",
+        operation: {
+          type: "append_bounded_section",
+          text: "## Rozhodnutí\n\n- Mluvčí 1 rozhodl, že projekt začne v pondělí.",
+        },
+      },
+    });
+
+    const result = await suggestMeetingSummaryDecisions({
+      note: note(content),
+      start: 0,
+      end: content.length,
+      llm: llm.service,
+      isSavedMeeting: saved,
+    });
+
     expect(result.decisionsText).toBeNull();
     expect(result.decisionsError).toMatchObject({
       code: "meeting_decisions_invented_speaker",

@@ -171,15 +171,29 @@ async function assertSavedMeeting(
   }
 }
 
+function canonicalSpeakerLabel(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/gu, "")
+    .toLocaleLowerCase("cs-CZ")
+    .replace(/\s+/gu, "")
+    .trim();
+}
+
 function inventedSpeakerLabel(
   text: string,
   sourceText: string,
 ): string | null {
   const pattern = /(?:Mluvčí|Speaker|Hlas)\s*\d+/giu;
-  const source = sourceText.toLocaleLowerCase("cs-CZ");
+  const sourceLabels = new Set(
+    Array.from(
+      sourceText.matchAll(pattern),
+      (match) => canonicalSpeakerLabel(match[0]),
+    ),
+  );
 
   for (const match of text.matchAll(pattern)) {
-    if (!source.includes(match[0].toLocaleLowerCase("cs-CZ"))) {
+    if (!sourceLabels.has(canonicalSpeakerLabel(match[0]))) {
       return match[0];
     }
   }
@@ -208,6 +222,35 @@ function normalizeDecisionSection(raw: string): string {
   return text.trim();
 }
 
+const DECISION_BULLET = /^\s*[-*]\s+\S/u;
+const DECISION_CONTINUATION = /^\s{2,}\S/u;
+const DECISION_HEADING = /^#{1,6}\s/u;
+const DECISION_TABLE_ROW = /^\s*\|/u;
+const DECISION_HTML = /<\/?[A-Za-z][^>]*>/u;
+
+function assertPlainDecisionSection(text: string): void {
+  for (const line of text.split("\n").slice(1)) {
+    const trimmed = line.trim();
+
+    if (trimmed === "") {
+      continue;
+    }
+
+    if (
+      DECISION_HEADING.test(trimmed) ||
+      DECISION_TABLE_ROW.test(line) ||
+      DECISION_HTML.test(line) ||
+      (!DECISION_BULLET.test(line) && !DECISION_CONTINUATION.test(line))
+    ) {
+      throw new MeetingSuggestionError(
+        422,
+        "meeting_decisions_invalid",
+        "Sekce rozhodnutí musí obsahovat jen nadpis a odrážky. Tabulky, HTML ani jiné bloky se nepřijímají.",
+      );
+    }
+  }
+}
+
 export function validateMeetingDecisionsText(input: {
   readonly text: string;
   readonly sourceText: string;
@@ -231,6 +274,8 @@ export function validateMeetingDecisionsText(input: {
       "Sekce rozhodnutí musí obsahovat alespoň jednu odrážku. Návrh nebyl přijat.",
     );
   }
+
+  assertPlainDecisionSection(text);
 
   if (countGraphemes(text) > MEETING_DECISIONS_MAX_GRAPHEMES) {
     throw new MeetingSuggestionError(

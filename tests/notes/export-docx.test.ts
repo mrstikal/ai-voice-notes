@@ -142,6 +142,17 @@ describe("DOCX export", () => {
     expect(parts.document).toContain('<w:lang w:val="cs-CZ"/>');
   });
 
+  it("keeps list numbering when the first item block is code", async () => {
+    const buffer = await renderNoteDocx(
+      "Kód v seznamu",
+      ['- ```ts', "  const hodnota = 1;", "  ```"].join("\n"),
+    );
+    const parts = await readDocx(buffer);
+    const codeParagraph = paragraphContaining(parts.document, "const hodnota");
+
+    expect(codeParagraph).toContain("<w:numPr>");
+  });
+
   it("uses the note title as metadata and avoids duplicating an H1 title", async () => {
     const buffer = await renderNoteDocx(
       "Stejný nadpis",

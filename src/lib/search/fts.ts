@@ -165,6 +165,29 @@ function snippetNeedle(query: string): string {
   return words.sort((left, right) => right.length - left.length)[0] ?? "";
 }
 
+function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
+}
+
+function isLowSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff;
+}
+
+function snippetPrefix(content: string, maxLength: number): string {
+  let end = Math.min(content.length, maxLength);
+
+  if (
+    end > 0 &&
+    end < content.length &&
+    isHighSurrogate(content.charCodeAt(end - 1)) &&
+    isLowSurrogate(content.charCodeAt(end))
+  ) {
+    end -= 1;
+  }
+
+  return content.slice(0, end);
+}
+
 export function buildSearchSnippet(
   contentPlain: string,
   query: string,
@@ -174,14 +197,14 @@ export function buildSearchSnippet(
   const foldedNeedle = foldSearch(needle);
 
   if (needle === "" || foldedNeedle === "") {
-    return contentPlain.slice(0, maxLength);
+    return snippetPrefix(contentPlain, maxLength);
   }
 
   const { folded, map } = foldWithMap(contentPlain);
   const position = folded.indexOf(foldedNeedle);
 
   if (position === -1) {
-    return contentPlain.slice(0, maxLength);
+    return snippetPrefix(contentPlain, maxLength);
   }
 
   const matchStart = map[position] ?? 0;
@@ -275,7 +298,19 @@ export async function searchNotesFullText(
     version: number;
     total: number | string;
   }>;
-  const total = rows[0] === undefined ? 0 : Number(rows[0].total);
+  let total = rows[0] === undefined ? 0 : Number(rows[0].total);
+
+  if (rows.length === 0 && input.page > 1) {
+    const countResult = await db.execute<{ readonly total: number | string }>(sql`
+      WITH q AS (SELECT ${tsQuery} AS query)
+      SELECT count(*)::int AS total
+      FROM notes AS n
+      CROSS JOIN q
+      WHERE n.deleted_at IS NULL
+        AND n.search_vector @@ q.query
+    `);
+    total = Number(countResult.rows[0]?.total ?? 0);
+  }
 
   return {
     empty: false,

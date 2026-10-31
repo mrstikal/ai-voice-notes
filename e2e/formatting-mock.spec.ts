@@ -285,7 +285,9 @@ test("Script A saves Markdown and tasks, keeps an embedded stop word, and uses t
   await page.waitForTimeout(300);
   expect(await source.inputValue()).toBe(afterStop);
 
-  await expect(page.getByRole("status")).toContainText(/Uloženo · verze/);
+  await expect(page.getByRole("status")).toContainText(
+    /(?:Hlasový přepis uložen|Uloženo) · verze/,
+  );
   const saved = (await (
     await request.get(`/api/notes/${noteId}`)
   ).json()) as { contentMd: string };

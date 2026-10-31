@@ -227,6 +227,102 @@ export async function assertFfprobeAvailable(
   }
 }
 
+function ebmlVintLength(firstByte: number): number | null {
+  if (firstByte === 0) {
+    return null;
+  }
+
+  let mask = 0x80;
+  let length = 1;
+
+  while ((firstByte & mask) === 0) {
+    mask >>= 1;
+    length += 1;
+  }
+
+  return length <= 8 ? length : null;
+}
+
+function readEbmlVint(
+  buffer: Buffer,
+  offset: number,
+  keepMarker: boolean,
+): { readonly value: number; readonly length: number } | null {
+  const first = buffer[offset];
+
+  if (first === undefined) {
+    return null;
+  }
+
+  const length = ebmlVintLength(first);
+
+  if (length === null || offset + length > buffer.length) {
+    return null;
+  }
+
+  let value = keepMarker ? first : first & ((1 << (8 - length)) - 1);
+
+  for (let index = 1; index < length; index += 1) {
+    value = value * 256 + buffer[offset + index]!;
+  }
+
+  return { length, value };
+}
+
+function readEbmlDocType(header: Buffer): string | null {
+  if (
+    header.length < 4 ||
+    header[0] !== 0x1a ||
+    header[1] !== 0x45 ||
+    header[2] !== 0xdf ||
+    header[3] !== 0xa3
+  ) {
+    return null;
+  }
+
+  const headerSize = readEbmlVint(header, 4, false);
+
+  if (headerSize === null) {
+    return null;
+  }
+
+  let offset = 4 + headerSize.length;
+  const headerEnd = Math.min(header.length, offset + headerSize.value);
+
+  while (offset < headerEnd) {
+    const elementId = readEbmlVint(header, offset, true);
+
+    if (elementId === null) {
+      return null;
+    }
+
+    offset += elementId.length;
+    const elementSize = readEbmlVint(header, offset, false);
+
+    if (elementSize === null) {
+      return null;
+    }
+
+    offset += elementSize.length;
+    const dataEnd = offset + elementSize.value;
+
+    if (dataEnd > headerEnd || dataEnd > header.length) {
+      return null;
+    }
+
+    if (elementId.value === 0x4282) {
+      return header
+        .subarray(offset, dataEnd)
+        .toString("ascii")
+        .replace(/\0+$/u, "");
+    }
+
+    offset = dataEnd;
+  }
+
+  return null;
+}
+
 async function readMagicFormat(
   filePath: string,
 ): Promise<MeetingMediaFormat | null> {
@@ -243,7 +339,7 @@ async function readMagicFormat(
   }
 
   try {
-    const buffer = Buffer.alloc(64);
+    const buffer = Buffer.alloc(1_024);
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
     const header = buffer.subarray(0, bytesRead);
 
@@ -262,17 +358,9 @@ async function readMagicFormat(
       header[2] === 0xdf &&
       header[3] === 0xa3
     ) {
-      const text = header.toString("latin1");
-
-      if (text.includes("webm")) {
-        return "webm";
-      }
-
-      if (text.includes("matroska")) {
-        return null;
-      }
-
-      return null;
+      // An EBML Void element may contain arbitrary text such as "webm".
+      // Only the actual DocType identifies a WebM container.
+      return readEbmlDocType(header) === "webm" ? "webm" : null;
     }
 
     if (
@@ -616,7 +704,17 @@ export async function receiveMeetingAudioToTemp(
   }
 
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  await chmod(directory, 0o700).catch(() => undefined);
+
+  try {
+    await chmod(directory, 0o700);
+  } catch {
+    throw new MeetingUploadError(
+      500,
+      "upload_directory_permissions",
+      "Nepodařilo se zajistit privátní oprávnění složky pro nahrávku. Nahrávka nebyla přijata.",
+    );
+  }
+
   await cleanupExpiredMeetingUploads(directory);
 
   const filename = `${MEETING_TEMP_PREFIX}${randomUUID()}${MEETING_TEMP_SUFFIX}`;

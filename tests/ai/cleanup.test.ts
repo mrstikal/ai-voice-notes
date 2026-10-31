@@ -4,6 +4,7 @@ import {
   CLEANUP_PARAGRAPH_MAX_GRAPHEMES,
   CleanupError,
   collectCleanupParagraphs,
+  extractNumericSubstrings,
   normalizeProperNames,
   suggestCleanup,
   validateCleanupText,
@@ -169,6 +170,57 @@ describe("cleanup suggestion safety", () => {
       `${cleaned}\n\nDruhý odstavec zůstává beze změny.`,
     );
     expect(resolution.candidate?.blockIndex).toBe(0);
+  });
+
+  it("ignores whitespace and dash style between binary numbers but keeps unary signs", () => {
+    expect(extractNumericSubstrings("3+4")).toEqual(
+      extractNumericSubstrings("3 + 4"),
+    );
+    expect(extractNumericSubstrings("100-200")).toEqual(
+      extractNumericSubstrings("100\u2013200"),
+    );
+    expect(extractNumericSubstrings("1000 \u2013200")).not.toEqual(
+      extractNumericSubstrings("1000 200"),
+    );
+    expect(extractNumericSubstrings("1000 \u2013200")).toEqual(
+      extractNumericSubstrings("1000 -200"),
+    );
+    expect(extractNumericSubstrings("1000 \u2014200")).toEqual(
+      extractNumericSubstrings("1000 -200"),
+    );
+    expect(extractNumericSubstrings("1000 \u2212200")).toEqual(
+      extractNumericSubstrings("1000 -200"),
+    );
+    expect(extractNumericSubstrings("\uFF0B200")).toEqual(
+      extractNumericSubstrings("+200"),
+    );
+    expect(extractNumericSubstrings("GPT-4")).toEqual(
+      extractNumericSubstrings("GPT 4"),
+    );
+    expect(extractNumericSubstrings("měl -3 schůzky")).not.toEqual(
+      extractNumericSubstrings("měl 3 schůzky"),
+    );
+    expect(extractNumericSubstrings("(3) -2 body")).not.toEqual(
+      extractNumericSubstrings("(3) 2 body"),
+    );
+    expect(extractNumericSubstrings("1000 -200 korun")).not.toEqual(
+      extractNumericSubstrings("1000 200 korun"),
+    );
+    expect(extractNumericSubstrings("3 - 4")).toEqual(
+      extractNumericSubstrings("3 + 4"),
+    );
+  });
+
+  it("rejects a sign flip that keeps the same digits", async () => {
+    const signLlm = fakeLlm(
+      replaceParagraphResponse(
+        "Včera jsem se sešel s Janem Novákem a měl jsem -3 schůzky.",
+      ),
+    );
+
+    await expect(suggest(signLlm)).rejects.toMatchObject({
+      code: "cleanup_numeric_changed",
+    });
   });
 
   it("rejects an altered number, altered proper name and added task marker", async () => {

@@ -193,7 +193,7 @@ function collectPlainParagraphs(
 export function buildSummaryPrompt(sourceText: string): string {
   return [
     "Shrň pouze následující český text. Nepřidávej nová fakta.",
-    "Vrať append_bounded_section s prostým českým shrnutím.",
+    'Vrať JSON objekt {"summaryText":"prosté české shrnutí"}.',
     JSON.stringify({ sourceText }, null, 2),
   ].join("\n");
 }

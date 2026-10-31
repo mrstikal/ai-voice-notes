@@ -218,6 +218,17 @@ async function prepareMissingChunks(
         continue;
       }
 
+      const existing = await tx.execute<{ readonly exists: number }>(sql`
+        SELECT 1 AS exists
+        FROM note_chunks
+        WHERE note_id = ${note.id} AND note_version = ${note.version}
+        LIMIT 1
+      `);
+
+      if (existing.rows.length > 0) {
+        continue;
+      }
+
       await refreshNoteChunks(tx, {
         id: note.id,
         contentMd: note.content_md,
@@ -569,10 +580,20 @@ export async function runReindex(
         batch.chunks.map((chunk) => chunk.text),
       );
     } catch (error) {
-      await markReindexChunksError(
-        options.db,
-        batch.chunks.map((chunk) => chunk.chunkId),
-      ).catch(() => undefined);
+      try {
+        await markReindexChunksError(
+          options.db,
+          batch.chunks.map((chunk) => chunk.chunkId),
+        );
+      } catch {
+        throw new ReindexError(
+          500,
+          "reindex_error_state_failed",
+          "Embedding se nepodařilo vytvořit a chunky se ani nepodařilo označit jako chybné. Zkontrolujte databázi a zkuste to znovu.",
+          { chunkCount: batch.chunks.length, errorStatePersisted: false },
+        );
+      }
+
       throw error;
     }
 

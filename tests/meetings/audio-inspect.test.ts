@@ -60,13 +60,31 @@ async function wavForFakeProbe(): Promise<string> {
 
 async function webmForFakeProbe(): Promise<string> {
   const filePath = path.join(scriptDirectory, "fake-input.webm");
-  const header = Buffer.alloc(32);
+  // Minimal valid EBML header: EBML ID, size 7, DocType 0x4282 = "webm".
+  const header = Buffer.from([
+    0x1a, 0x45, 0xdf, 0xa3,
+    0x87,
+    0x42, 0x82, 0x84,
+    0x77, 0x65, 0x62, 0x6d,
+  ]);
 
-  header[0] = 0x1a;
-  header[1] = 0x45;
-  header[2] = 0xdf;
-  header[3] = 0xa3;
-  header.write("webm", 16, "latin1");
+  await writeFile(filePath, header);
+
+  return filePath;
+}
+
+async function spoofedMatroskaForFakeProbe(): Promise<string> {
+  const filePath = path.join(scriptDirectory, "spoofed-matroska.webm");
+  // Valid EBML header with DocType "matroska" and a Void element whose data
+  // includes the string "webm". A naive substring check would accept it.
+  const header = Buffer.from([
+    0x1a, 0x45, 0xdf, 0xa3,
+    0x91,
+    0x42, 0x82, 0x88,
+    0x6d, 0x61, 0x74, 0x72, 0x6f, 0x73, 0x6b, 0x61,
+    0xec, 0x84,
+    0x77, 0x65, 0x62, 0x6d,
+  ]);
 
   await writeFile(filePath, header);
 
@@ -271,6 +289,21 @@ describe("P41B ffprobe failure and parser paths", () => {
       codec: "opus",
       durationSeconds: 1.02,
     });
+  });
+
+  it("rejects a Matroska DocType even when a Void element contains webm", async () => {
+    const spoofed = await spoofedMatroskaForFakeProbe();
+    const probe = await script(
+      "matroska-webm-ffprobe",
+      '#!/bin/sh\ncase "$*" in *"-version"*) echo "ffprobe version fake"; exit 0;; esac\nprintf \'%s\' \'{"format":{"format_name":"matroska,webm","duration":"1.0"},"streams":[{"codec_type":"audio","codec_name":"opus"}]}\'\n',
+    );
+
+    await expect(
+      inspectMeetingAudio(spoofed, {
+        ffprobePath: probe,
+        maxDurationSeconds: 900,
+      }),
+    ).rejects.toMatchObject({ status: 422, code: "invalid_media" });
   });
 
   it("rejects malformed JSON and an unknown duration", async () => {
