@@ -11,7 +11,7 @@ latency is never entered as a real performance number.
 
 | Stage | Measurement | Observed evidence | Status |
 | --- | --- | --- | --- |
-| 1 | Typed notes, editor, versioning, exports, offline full-text | 793 unit / 138 skipped, 154 DB, 69 Playwright, including the four-stage offline flow; a separate no-key run on 127.0.0.1:3002 created a 40-character typed note, exported exact Markdown (HTTP 200) and found it with full-text search; no provider calls or usage rows | Offline verified, including no-key application run |
+| 1 | Typed notes, editor, versioning, exports, offline full-text | 923 unit / 144 skipped, 160 DB, 70 Playwright after P54, including the four-stage offline flow and the mocked voice-agent flow; a separate no-key run on 127.0.0.1:3002 created a 40-character typed note, exported exact Markdown (HTTP 200) and found it with full-text search; no provider calls or usage rows | Offline verified, including no-key application run |
 | 2 | Scribe dictation commit/command latency | 180 s synthetic Czech audio; four `committed_transcript` events, 1,410 normalized characters, 193.6 s wall-clock to the session bound. Commit/command latency was not instrumented; manual reconnect count was not recorded | Live verified with synthetic audio; latency/reconnects unverified |
 | 2 | TTS first-audio and cache-hit time | Two live Czech requests (Sarah/George), 71,514/69,006 bytes, decoded 4.40/4.24 s; first-audio and cache-hit timings were not instrumented | Live audio verified; timing/cache unverified |
 | 2 | Experimental spoken-Stop reliability | User headset acceptance on 2026-10-27; the formal ten-trial aggregate was not recorded | Experimental, user-verified; aggregate unverified |
@@ -21,6 +21,7 @@ latency is never entered as a real performance number.
 | 4 | RAG grounded answers | Automated citation/version checks only; no live LLM answer; manual factual review required | Live unverified |
 | 4 | Meeting diarization/transcript review | P42: 37.68 s Czech WAV, 388 characters, one real `speaker_0`, 6.5 s batch call; multi-speaker and 15-minute meetings unverified. P43: 215-character Czech note, live summary/decisions/tasks, one speaker-free source, 0.022702 USD reserved across two attempts | Live partial; multi-speaker/15-minute unverified |
 | 4 | Privacy/recovery integration | `tests/security/privacy.test.ts` audits client/imported secret boundaries, HTML/log/temp/CSRF/filename rules; `e2e/four-stage.spec.ts` crosses all four stages and proves a simulated provider outage leaves content, version and revisions unchanged; no provider is called | Offline verified |
+| 5 | Voice-agent approval safety and release gate | Mock E2E `e2e/voice-agent-mock.spec.ts` connects through the loopback Gemini token mock and a Playwright WebSocket double, selects one searched note, rejects one preview without a mutation, approves a second with exactly one `ai` revision, undoes it through P25, stops and reconnects; `tests/security/voice-agent-boundary.test.ts` checks the browser storage/log boundary across the voice-agent client components and the browser-shipped modules under `src/lib/voice-agent/`, the client-only import boundary, the pinned browser WebSocket host plus config-resolved token URL, the seven-tool cap and a Czech provider-outage error without the key; `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm test:db`, `pnpm test:e2e` and `pnpm build` pass offline | Offline verified; real speech/tool/barge-in remains `live unverified` |
 
 ### Estimated vs actual/unknown cost
 
@@ -155,3 +156,26 @@ threshold".
   Gemini Live vs chained comparison therefore has **no published benchmark
   numbers** and remains `live unverified`; the UI label must stay honest until
   separately approved credentials/cost and real trials are recorded.
+
+## Stage 5 - Five-stage release gate (P54)
+
+- **Exact offline gate:** `pnpm lint`, `pnpm typecheck`, `pnpm test` (923
+  passed / 144 skipped), `pnpm test:db` (160/160), `pnpm test:e2e` (70/70) and
+  `pnpm build`. The E2E command builds Next.js and runs
+  `scripts/test-server.ts` against the isolated `_test` database with dummy
+  keys only.
+- **Mock E2E flow:** `e2e/voice-agent-mock.spec.ts` covers `connect -> select
+  note -> preview edit -> reject -> approve -> undo -> stop`. The note is
+  byte-unchanged and has one `initial` revision before the explicit
+  `Potvrdit` click; the click produces exactly one `ai` revision; P25 Undo
+  restores the exact previous Markdown and appends an `undo` revision. A
+  second connect proves the microphone lease/Web Audio resources were released.
+  Browser storage contains no transcript or note text. The Gemini token call
+  goes to the loopback mock in `scripts/test-server.ts`; the Gemini Live
+  WebSocket is mocked by `tests/helpers/webrtc-double.ts` (the plan's historical
+  filename, now carrying the Gemini JSON protocol). All tool, proposal,
+  confirmation and note routes are the real local implementations.
+- **Not live evidence:** no Google, ElevenLabs or OpenRouter request is made by
+  the gate. Real Gemini function-call continuation, Czech voice quality,
+  barge-in latency and the formal comparison trials remain `live unverified`.
+  Mocked timings are not reported as real performance.

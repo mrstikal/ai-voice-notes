@@ -12,6 +12,7 @@ const TEST_ORIGIN = "http://127.0.0.1:3100";
 const MOCK_PROVIDER_ORIGIN = "http://127.0.0.1:4010";
 const MOCK_PROVIDER_PORT = 4010;
 const MOCK_ELEVENLABS_API_KEY = "test-only-elevenlabs";
+const MOCK_GEMINI_API_KEY = "test-only-gemini";
 const MOCK_MAX_REQUEST_BYTES = 26 * 1024 * 1024;
 const MOCK_BATCH_TRANSCRIPT = {
   language_code: "cs",
@@ -65,6 +66,7 @@ function validateMockUpload(
 
 function startMockProviderServer(): Promise<Server> {
   let tokenCounter = 0;
+  let geminiTokenCounter = 0;
   const server = createServer((request, response) => {
     const pathname = new URL(
       request.url ?? "/",
@@ -77,14 +79,32 @@ function startMockProviderServer(): Promise<Server> {
     const isTokenPath =
       pathname === "/v1/single-use-token/realtime_scribe";
     const isTranscribePath = pathname === "/v1/speech-to-text";
+    const isGeminiTokenPath = pathname === "/v1beta/auth_tokens";
 
     if (
       request.method !== "POST" ||
-      (!isTokenPath && !isTranscribePath)
+      (!isTokenPath && !isTranscribePath && !isGeminiTokenPath)
     ) {
       request.resume();
       response.writeHead(404);
       response.end(JSON.stringify({ error: "not_found" }));
+      return;
+    }
+
+    if (isGeminiTokenPath) {
+      if (request.headers["x-goog-api-key"] !== MOCK_GEMINI_API_KEY) {
+        request.resume();
+        response.writeHead(401);
+        response.end(JSON.stringify({ error: "unauthorized" }));
+        return;
+      }
+
+      request.resume();
+      geminiTokenCounter += 1;
+      response.writeHead(200);
+      response.end(
+        JSON.stringify({ name: `auth_tokens/mock-gemini-${geminiTokenCounter}` }),
+      );
       return;
     }
 
@@ -201,7 +221,8 @@ async function main(): Promise<void> {
         ELEVENLABS_API_KEY: MOCK_ELEVENLABS_API_KEY,
         ELEVENLABS_API_BASE_URL: MOCK_PROVIDER_ORIGIN,
         OPENROUTER_API_KEY: "test-only-openrouter",
-        GEMINI_API_KEY: "test-only-gemini",
+        GEMINI_API_KEY: MOCK_GEMINI_API_KEY,
+        GEMINI_API_BASE_URL: MOCK_PROVIDER_ORIGIN,
         DATABASE_URL: targets.testUrl,
         TEST_DATABASE_URL: targets.testUrl,
       },

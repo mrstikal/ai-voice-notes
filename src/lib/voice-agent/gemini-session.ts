@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   ConfigurationError,
+  DEFAULT_GEMINI_API_BASE_URL,
   DEFAULT_GEMINI_LIVE_MODEL,
   loadConfig,
   type AppConfig,
@@ -21,8 +22,8 @@ import {
 } from "./tool-dispatch.ts";
 
 export const GEMINI_LIVE_MODEL_ID = DEFAULT_GEMINI_LIVE_MODEL;
-export const GEMINI_LIVE_TOKEN_URL =
-  "https://generativelanguage.googleapis.com/v1beta/auth_tokens";
+export const GEMINI_LIVE_TOKEN_PATH = "/v1beta/auth_tokens";
+export const GEMINI_LIVE_TOKEN_URL = `${DEFAULT_GEMINI_API_BASE_URL}${GEMINI_LIVE_TOKEN_PATH}`;
 export const GEMINI_LIVE_SESSION_MAX_SECONDS = 10 * 60;
 export const GEMINI_LIVE_TOKEN_TIMEOUT_MS = 15_000;
 export const GEMINI_TOKEN_REQUEST_MAX_BYTES = 4 * 1024;
@@ -145,15 +146,29 @@ function defaultFetcher(): GeminiTokenFetcher {
   };
 }
 
-function resolveFetcher(config: AppConfig): GeminiTokenFetcher {
-  const testMode =
-    process.env.NODE_ENV === "test" ||
-    config.aiTestMode ||
-    process.env.AI_TEST_MODE?.trim() === "1";
+export function geminiTokenUrl(baseUrl: string): string {
+  return `${baseUrl.replace(/\/+$/u, "")}${GEMINI_LIVE_TOKEN_PATH}`;
+}
 
-  if (testMode) {
-    if (testFetcher) {
-      return testFetcher;
+function resolveFetcher(config: AppConfig): GeminiTokenFetcher {
+  if (testFetcher) {
+    return testFetcher;
+  }
+
+  if (process.env.NODE_ENV === "test") {
+    throw new GeminiTokenError(
+      500,
+      "unmocked_provider_call",
+      "V testovacím režimu není povolený nemockovaný odchozí požadavek.",
+    );
+  }
+
+  if (
+    config.aiTestMode ||
+    process.env.AI_TEST_MODE?.trim() === "1"
+  ) {
+    if (config.geminiApiBaseUrl !== DEFAULT_GEMINI_API_BASE_URL) {
+      return defaultFetcher();
     }
 
     throw new GeminiTokenError(
@@ -285,7 +300,7 @@ export async function mintGeminiToken(
 
   try {
     const result = await fetcher({
-      url: GEMINI_LIVE_TOKEN_URL,
+      url: geminiTokenUrl(config.geminiApiBaseUrl),
       apiKey: config.geminiApiKey,
       body: buildGeminiTokenRequest(voice, tokenStartExpiresAt),
       signal: controller.signal,

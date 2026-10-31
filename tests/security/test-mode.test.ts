@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ConfigurationError,
   DEFAULT_ELEVENLABS_API_BASE_URL,
+  DEFAULT_GEMINI_API_BASE_URL,
   TEST_MODE_PROVIDER_KEYS,
   loadConfig,
   type Environment,
@@ -29,6 +30,7 @@ const TEST_MODE_ENV: Environment = {
   TEST_DATABASE_URL,
   ELEVENLABS_API_KEY: TEST_MODE_PROVIDER_KEYS.ELEVENLABS_API_KEY,
   ELEVENLABS_API_BASE_URL: "http://127.0.0.1:4010",
+  GEMINI_API_BASE_URL: "http://127.0.0.1:4010",
   OPENROUTER_API_KEY: TEST_MODE_PROVIDER_KEYS.OPENROUTER_API_KEY,
   GEMINI_API_KEY: TEST_MODE_PROVIDER_KEYS.GEMINI_API_KEY,
 };
@@ -53,6 +55,7 @@ describe("AI_TEST_MODE guard", () => {
       TEST_MODE_PROVIDER_KEYS.ELEVENLABS_API_KEY,
     );
     expect(config.elevenLabsApiBaseUrl).toBe("http://127.0.0.1:4010");
+    expect(config.geminiApiBaseUrl).toBe("http://127.0.0.1:4010");
     expect(config.openRouterApiKey).toBe(
       TEST_MODE_PROVIDER_KEYS.OPENROUTER_API_KEY,
     );
@@ -104,7 +107,14 @@ describe("AI_TEST_MODE guard", () => {
       expect(() =>
         configWithTestMode({ ELEVENLABS_API_BASE_URL: baseUrl }),
       ).toThrow(ConfigurationError);
+      expect(() =>
+        configWithTestMode({ GEMINI_API_BASE_URL: baseUrl }),
+      ).toThrow(ConfigurationError);
     }
+
+    expect(() =>
+      configWithTestMode({ GEMINI_API_BASE_URL: undefined }),
+    ).toThrow(/GEMINI_API_BASE_URL/u);
   });
 
   it("accepts real keys and public provider endpoints when test mode is off", () => {
@@ -120,6 +130,7 @@ describe("AI_TEST_MODE guard", () => {
     expect(config.aiTestMode).toBe(false);
     expect(config.elevenLabsApiKey).toBe("sk-real-looking-key");
     expect(config.elevenLabsApiBaseUrl).toBe(DEFAULT_ELEVENLABS_API_BASE_URL);
+    expect(config.geminiApiBaseUrl).toBe(DEFAULT_GEMINI_API_BASE_URL);
   });
 });
 

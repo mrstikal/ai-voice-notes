@@ -6,6 +6,8 @@ export const DEFAULT_NOTE_MAX_CHARACTERS = CONTENT_MAX_GRAPHEMES;
 export const DEFAULT_MEETING_MAX_MINUTES = 15;
 export const DEFAULT_AI_REQUEST_BUDGET_USD = 2.0;
 export const DEFAULT_ELEVENLABS_API_BASE_URL = "https://api.elevenlabs.io";
+export const DEFAULT_GEMINI_API_BASE_URL =
+  "https://generativelanguage.googleapis.com";
 export const DEFAULT_OPENROUTER_LLM_MODEL =
   "deepseek/deepseek-v4.1-flash-1017";
 export const DEFAULT_OPENROUTER_EMBEDDING_MODEL =
@@ -39,6 +41,7 @@ export interface AppConfig {
   allowForwardedLoopback: boolean;
   elevenLabsApiKey: string | null;
   elevenLabsApiBaseUrl: string;
+  geminiApiBaseUrl: string;
   openRouterApiKey: string | null;
   openRouterLlmModel: string;
   openRouterEmbeddingModel: string;
@@ -243,56 +246,57 @@ function parseOptionalSecret(
   return value;
 }
 
-function parseElevenLabsApiBaseUrl(
+function parseProviderApiBaseUrl(
   env: Environment,
+  name: "ELEVENLABS_API_BASE_URL" | "GEMINI_API_BASE_URL",
+  fallback: string,
   aiTestMode: boolean,
 ): string {
-  const value =
-    env.ELEVENLABS_API_BASE_URL?.trim() || DEFAULT_ELEVENLABS_API_BASE_URL;
+  const value = env[name]?.trim() || fallback;
 
   let url: URL;
   try {
     url = new URL(value);
   } catch {
     throw new ConfigurationError(
-      "ELEVENLABS_API_BASE_URL musí být platná adresa, například https://api.elevenlabs.io.",
+      `${name} musí být platná adresa, například ${fallback}.`,
     );
   }
 
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new ConfigurationError(
-      "ELEVENLABS_API_BASE_URL musí používat protokol http nebo https.",
+      `${name} musí používat protokol http nebo https.`,
     );
   }
 
   if (url.username !== "" || url.password !== "") {
     throw new ConfigurationError(
-      "ELEVENLABS_API_BASE_URL nesmí obsahovat přihlašovací údaje.",
+      `${name} nesmí obsahovat přihlašovací údaje.`,
     );
   }
 
   if (url.search !== "" || url.hash !== "") {
     throw new ConfigurationError(
-      "ELEVENLABS_API_BASE_URL nesmí obsahovat dotaz ani fragment.",
+      `${name} nesmí obsahovat dotaz ani fragment.`,
     );
   }
 
   if (aiTestMode) {
     if (url.protocol !== "http:") {
       throw new ConfigurationError(
-        "ELEVENLABS_API_BASE_URL musí v AI_TEST_MODE=1 používat http na loopback mocku.",
+        `${name} musí v AI_TEST_MODE=1 používat http na loopback mocku.`,
       );
     }
 
     if (!isLoopbackHostname(url.hostname)) {
       throw new ConfigurationError(
-        "ELEVENLABS_API_BASE_URL musí v AI_TEST_MODE=1 mířit na loopback adresu.",
+        `${name} musí v AI_TEST_MODE=1 mířit na loopback adresu.`,
       );
     }
 
     if (url.port === "") {
       throw new ConfigurationError(
-        "ELEVENLABS_API_BASE_URL musí v AI_TEST_MODE=1 obsahovat explicitní port mock serveru.",
+        `${name} musí v AI_TEST_MODE=1 obsahovat explicitní port mock serveru.`,
       );
     }
   }
@@ -515,7 +519,18 @@ export function loadConfig(
     "GEMINI_LIVE_MODEL",
     DEFAULT_GEMINI_LIVE_MODEL,
   );
-  const elevenLabsApiBaseUrl = parseElevenLabsApiBaseUrl(env, aiTestMode);
+  const elevenLabsApiBaseUrl = parseProviderApiBaseUrl(
+    env,
+    "ELEVENLABS_API_BASE_URL",
+    DEFAULT_ELEVENLABS_API_BASE_URL,
+    aiTestMode,
+  );
+  const geminiApiBaseUrl = parseProviderApiBaseUrl(
+    env,
+    "GEMINI_API_BASE_URL",
+    DEFAULT_GEMINI_API_BASE_URL,
+    aiTestMode,
+  );
   const noteMaxCharacters = parsePositiveInteger(
     env,
     "NOTE_MAX_CHARACTERS",
@@ -545,6 +560,7 @@ export function loadConfig(
     aiTestMode,
     elevenLabsApiKey,
     elevenLabsApiBaseUrl,
+    geminiApiBaseUrl,
     openRouterApiKey,
     openRouterLlmModel,
     openRouterEmbeddingModel,

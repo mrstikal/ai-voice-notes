@@ -3,7 +3,7 @@
 Local, single-user Czech voice-notes proof of concept. The UI, voice commands,
 and user-facing errors are Czech; code and documentation are English.
 
-This repository implements **P01-P50**, with P46 delivered as the approved Gemini Live replacement (P55/P55B implementation lineage) and P47-P50 adding read/preview tools, in five stages:
+This repository implements **P01-P54**, with P46 delivered as the approved Gemini Live replacement (P55/P55B implementation lineage), P47-P50 adding read/preview tools, P51-P52 the bounded voice controls and chained comparison, P53 honest in-memory metrics and P54 the five-stage regression/release gate, in five stages:
 
 1. **Typed notes:** Czech CRUD, versioning/history, Markdown source/visual
    editor, autosave/conflict recovery, Trash, DOCX/Markdown export and an
@@ -48,9 +48,12 @@ P44 adds the four-stage offline integration, privacy/recovery audit and this
 quality report. P45 added the OpenAI realtime bootstrap, which was retired; P46
 is delivered as the Gemini Live replacement (10-minute sessions, selectable
 voice, transient Czech audio/subtitles), P47 adds session-bound search and
-selected-note fetch, P48 adds bounded sections and approved summaries, and
-P49-P50 add preview-only proposals plus an explicit on-screen confirmation that
-applies at most one undoable `ai` revision.
+selected-note fetch, P48 adds bounded sections and approved summaries, P49-P50
+add preview-only proposals plus an explicit on-screen confirmation that applies
+at most one undoable `ai` revision, P51 adds barge-in/mute/push-to-talk/cost
+controls, P52 adds the chained STT -> LLM -> TTS comparison, P53 adds honest
+in-memory metrics and P54 adds the five-stage offline regression gate and the
+reproducible release instructions below.
 Typed notes, search and exports work with **no AI keys** and no provider
 request; provider features are visibly disabled until a separately authorized
 live check. `AI_TEST_MODE=1` is test-only and refuses real credentials.
@@ -140,16 +143,17 @@ live check is separately authorized.
 | `GEMINI_API_KEY` | Server-side Gemini key for the voice agent; empty disables `/voice-agent` while typed notes and search keep working | empty |
 | `GEMINI_LIVE_MODEL` | Pinned Gemini Live model; a different value blocks the mode with a Czech reason | `gemini-3.8-live` |
 | `ELEVENLABS_API_BASE_URL` | ElevenLabs API endpoint; test mode requires a loopback mock | `https://api.elevenlabs.io` |
+| `GEMINI_API_BASE_URL` | Gemini token endpoint; test mode requires a loopback mock. Leave unset for a real provider | `https://generativelanguage.googleapis.com` |
 | `NOTE_MAX_CHARACTERS` | Maximum visible note characters | `20000` |
 | `MEETING_MAX_MINUTES` | Maximum meeting length | `15` |
 | `AI_REQUEST_BUDGET_USD` | Local estimated AI admission budget | `2.00` |
 
 When `AI_TEST_MODE=1`, startup requires `DATABASE_URL` (and, when set,
 `TEST_DATABASE_URL`) to name a database ending with `_test`, a loopback
-`ELEVENLABS_API_BASE_URL` with an explicit port, and exact dummy provider keys
-for any configured credential (`test-only-elevenlabs`,
-`test-only-openrouter`, `test-only-gemini`). Real keys are
-rejected before a provider client is constructed.
+`ELEVENLABS_API_BASE_URL` and `GEMINI_API_BASE_URL` with an explicit port, and
+exact dummy provider keys for any configured credential
+(`test-only-elevenlabs`, `test-only-openrouter`, `test-only-gemini`). Real keys
+are rejected before a provider client is constructed.
 
 `APP_ORIGIN` is validated at startup. Only `127.0.0.1`, `localhost`, or `::1`
 with an explicit port is accepted; paths, credentials, and other hosts are
@@ -173,7 +177,7 @@ action.
 | Read aloud | The selected note text to OpenRouter TTS | Validated MP3 and technical metadata in the local `.data/tts` cache |
 | AI edits/summary/tasks/Ask | The selected note text or bounded excerpt to OpenRouter | Note revisions after explicit confirmation; P12 usage metadata without prompts or note bodies |
 | Semantic search | Note chunks or the query to OpenRouter embeddings | Vectors and technical index state in PostgreSQL |
-| Voice agent (P46-P50) | The browser sends live 16 kHz microphone PCM directly to Google Gemini Live over a short-lived constrained WebSocket token; 24 kHz PCM audio and Czech transcriptions come back. The token is minted server-side; no long-lived key is in the browser. The agent may run a bounded full-text search, read one selected note/section, prepare a summary only after a cost click, and create preview-only proposals. An explicit `Potvrdit` click in the same live session delegates once to the P24 transaction and writes at most one undoable `ai` revision; the model never applies or confirms, and no unselected note is read. | The ephemeral token and tool `sessionId` exist only in browser/server memory; transient search results, selection, transcript and proposal preview live in React state; the process-local session holds the raw proposal nonce and selected-note gate; no long-lived key, audio recording, conversation, tool-session note body or model-applied note change persisted. The only note change is the clicked P24 apply and its `ai` revision. |
+| Voice agent (P46-P53) | The browser sends live 16 kHz microphone PCM directly to Google Gemini Live over a short-lived constrained WebSocket token; 24 kHz PCM audio and Czech transcriptions come back. The token is minted server-side; no long-lived key is in the browser. The agent may run a bounded full-text search, read one selected note/section, prepare a summary only after a cost click, and create preview-only proposals. An explicit `Potvrdit` click in the same live session delegates once to the P24 transaction and writes at most one undoable `ai` revision; the model never applies or confirms, and no unselected note is read. | The ephemeral token and tool `sessionId` exist only in browser/server memory; transient search results, selection, transcript and proposal preview live in React state; the process-local session holds the raw proposal nonce and selected-note gate; no long-lived key, audio recording, conversation, tool-session note body or model-applied note change persisted. The only note change is the clicked P24 apply and its `ai` revision. |
 
 ElevenLabs and OpenRouter process requests under their own retention policies;
 zero retention depends on the account/plan. The app does not claim provider-side
@@ -290,7 +294,7 @@ backup.
 | `pnpm typecheck` | Strict TypeScript check without emitting files |
 | `pnpm test` | Vitest unit/API tests, including the `tests/security/privacy.test.ts` audit; the DB suite also runs when both URLs are present |
 | `pnpm test:db` | Migrate the isolated `_test` database and run `tests/db` |
-| `pnpm test:e2e` | Build and run the offline Playwright Stage 1-4, meeting, search and recovery flows against the isolated test DB |
+| `pnpm test:e2e` | Build and run the offline Playwright Stage 1-5, meeting, search and recovery flows against the isolated test DB, including the mocked Gemini Live voice-agent approval flow |
 | `pnpm eval:search` | Optional 20-query search evaluation; paid modes require a fresh cost approval and ready fixture vectors |
 | `pnpm db:seed` | Explicitly replace the `demo-v1:*` demo notes in the dev database |
 | `pnpm db:migrate:test` | Apply committed migrations to the guarded test database |
@@ -407,12 +411,77 @@ pnpm test:e2e
 
 The command builds Next.js, starts `scripts/test-server.ts` on
 `127.0.0.1:3100`, asserts the guarded `_test` targets, migrates and truncates
-only the isolated test database, and runs the offline Stage 1-4 flows:
+only the isolated test database, and runs the offline Stage 1-5 flows:
 typed notes/editor/autosave/Trash, mocked dictation and supporting AI, summary/
-meeting proposals, full-text search, exports and a simulated provider outage.
-The privacy audit is `tests/security/privacy.test.ts` and runs under `pnpm
-test`, not under Playwright. Browser SDK/WebSocket doubles and loopback mocks
-replace real providers; no seed, real key or public egress is used.
+meeting proposals, full-text search, exports, a simulated provider outage and
+the mocked Gemini Live voice-agent flow in `e2e/voice-agent-mock.spec.ts`
+(connect -> select note -> preview edit -> reject -> approve -> Undo -> Stop).
+That flow uses the loopback Gemini token mock and a Playwright WebSocket double
+for the constrained Gemini Live endpoint; it proves the note stays unchanged
+until the explicit `Potvrdit` click, exactly one `ai` revision is written, and
+Undo restores the previous content. The privacy and Stage 5 boundary audit is
+`tests/security/privacy.test.ts` plus
+`tests/security/voice-agent-boundary.test.ts`, which run under `pnpm test`, not
+under Playwright. Browser SDK/WebSocket doubles and loopback mocks replace real
+providers; no seed, real key or public egress is used.
+
+## Five-stage release gate (P54)
+
+A reproducible release check does not need a provider account. Typed notes,
+Markdown/DOCX export, version history, full-text search, mocked dictation and
+all mocked AI/meeting/voice-agent flows work with **no keys**. The voice agent
+itself is an explicit `/voice-agent` mode and is never part of note editing or
+startup; it is disabled with a Czech message when `GEMINI_API_KEY` is empty.
+There is no OpenAI key or OpenAI transport in the current application.
+
+Fresh clone:
+
+```bash
+git clone <repository-url> ai-voice-notes
+cd ai-voice-notes
+nvm install
+nvm use
+corepack enable
+pnpm install
+cp .env.example .env.local
+docker compose up -d db
+pnpm db:migrate
+pnpm dev
+```
+
+For the full offline release gate, use the isolated test database and no real
+credentials:
+
+```bash
+docker compose --profile test up -d db-test
+cat > .env.test.local <<'EOF'
+DATABASE_URL=postgresql://ai_voice_notes:ai_voice_notes@127.0.0.1:5432/ai_voice_notes
+TEST_DATABASE_URL=postgresql://ai_voice_notes:ai_voice_notes@127.0.0.1:5433/ai_voice_notes_test
+EOF
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm test:db
+pnpm test:e2e
+pnpm build
+```
+
+Adjust the host ports in `.env.test.local` when a local `.env` overrides the
+compose ports; both targets must be distinct and the test name must end in
+`_test`. The file is gitignored and is read only by test-scoped commands.
+
+`pnpm db:seed` is an optional CLI for demo notes and is not part of the gate.
+Meetings additionally need host FFmpeg (`ffprobe` and `ffmpeg` on `PATH`); the
+voice-agent browser path needs a Chromium-family browser with Web Locks and
+microphone permission. Playwright installs its own Chromium once with
+`pnpm exec playwright install chromium`.
+
+Mock evidence is not live evidence. `pnpm test:e2e` exercises the exact
+Gemini Live message shapes, the real local tool/API routes and the real
+P23/P24/P25 database transactions, but it never contacts Google, ElevenLabs or
+OpenRouter. Real Czech speech, Gemini tool-call continuation, barge-in and
+audible quality remain `live unverified` until separately authorized and
+observed; see `docs/PROVIDER_SMOKE_TESTS.md` and `docs/QUALITY_REPORT.md`.
 
 ## HTTP boundary
 

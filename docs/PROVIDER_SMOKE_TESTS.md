@@ -1098,3 +1098,20 @@ tool dispatcher and does not need `OPENAI_API_KEY`.
 | Bounds | One intent and one note per turn; search max 3; summary source max 8,000 graphemes; client session timer 10 minutes; exclusive microphone lock and playback lease. |
 | Tests | `tests/voice-agent/chained.test.ts` covers strict intent rejection, prompt data minimisation, search without session, selection gating, exact section, task normalisation, transcript accumulation, truncated read, summary offer without a provider call, a real summary call, proposal version binding/no mutation, ambiguity/provider errors, the grapheme bound and guarded route. `tests/voice-agent/chained-ui.test.tsx` covers find -> select -> read -> proposal -> approve -> Undo, draft retention with a provider error, TTS/mic handoff and push-to-talk starts/stops. |
 | Live status | Mock verified; live unverified. No paid Scribe/OpenRouter/TTS turn was run. Real Czech intent quality, provider latency and the 10-minute acoustic session remain unverified. |
+
+## P54 five-stage regression and reproducible release (offline gate)
+
+P54 does not add a provider call. It separates reproducible offline evidence
+from real smokes and documents the exact release gate. There is **no OpenAI
+key, entitlement check or transport** in the current application; the voice
+agent is Google Gemini Live through a server-minted one-use token. The retired
+P45 OpenAI rows above are historical only.
+
+| Item | Value |
+|---|---|
+| Offline gate | `pnpm lint && pnpm typecheck && pnpm test && pnpm test:db && pnpm test:e2e && pnpm build` pass with no provider credentials, no seed and the isolated `_test` database. |
+| Voice-agent mock | `e2e/voice-agent-mock.spec.ts` uses `scripts/test-server.ts` as a loopback Gemini token mock (`POST /v1beta/auth_tokens` with the exact dummy `x-goog-api-key`, returning a synthetic `auth_tokens/mock-gemini-*`) and `tests/helpers/webrtc-double.ts` as a Playwright WebSocket double for the constrained Gemini Live endpoint. Tool calls, note selection, the P23 preview, reject, the explicit P24 confirm, the P25 Undo and Stop all run against the real local routes and the real test database. The test proves zero note mutation before the click, exactly one `ai` revision after it, Undo restoring the previous content, Stop/reconnect releasing the microphone lease, and no transcript/note text in browser storage. |
+| Browser boundary | `tests/security/voice-agent-boundary.test.ts` checks that the voice-agent client components and the browser-shipped modules under `src/lib/voice-agent/` use no `localStorage`/`sessionStorage`/`indexedDB`/`sendBeacon` and do not log conversation data, that client components do not import server-only voice/proposal modules, that the browser WebSocket host is pinned and the token URL resolves from config, that exactly seven bounded tools are declared, and that a provider outage maps to a Czech error without the server key. |
+| Real smokes still separate | A real Czech Gemini Live audio/tool/barge-in session, the real OpenRouter summary click through Gemini, real Scribe/TTS chained turns and the formal >=5-trial comparison remain opt-in and `live unverified`. The mock proves message wiring and local safety, not provider behaviour, latency or Czech quality. |
+| No-key operation | Typed notes, Markdown/DOCX export, version history, full-text search and mocked automated flows need no key. An empty `GEMINI_API_KEY` disables only `/voice-agent` with a Czech message; the rest of the app stays usable. The P44 no-key production run remains the recorded evidence for Stage 1-4; P54 rechecks the same offline import/config boundary in unit tests. |
+| FFmpeg / browser prerequisites | Meetings require host `ffprobe` and `ffmpeg`; the voice-agent browser path requires a Chromium-family browser with Web Locks and microphone permission. Playwright Chromium is installed once with `pnpm exec playwright install chromium`. No provider key is needed for the offline gate. |

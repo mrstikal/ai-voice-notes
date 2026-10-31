@@ -48,6 +48,7 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     allowForwardedLoopback: false,
     elevenLabsApiKey: "test-only-elevenlabs",
     elevenLabsApiBaseUrl: "https://api.elevenlabs.io",
+    geminiApiBaseUrl: "https://generativelanguage.googleapis.com",
     openRouterApiKey: null,
     openRouterLlmModel: "deepseek/deepseek-v4.1-flash-1017",
     openRouterEmbeddingModel: "openai/text-embedding-3-small",

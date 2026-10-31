@@ -5,6 +5,7 @@ import {
   DEFAULT_AI_REQUEST_BUDGET_USD,
   DEFAULT_APP_ORIGIN,
   DEFAULT_ELEVENLABS_API_BASE_URL,
+  DEFAULT_GEMINI_API_BASE_URL,
   DEFAULT_MEETING_MAX_MINUTES,
   DEFAULT_NOTE_MAX_CHARACTERS,
   TEST_MODE_PROVIDER_KEYS,
@@ -24,6 +25,7 @@ const TEST_MODE_ENV: Environment = {
     "postgresql://ai_voice_notes:ai_voice_notes@127.0.0.1:55433/ai_voice_notes_test",
   ELEVENLABS_API_KEY: TEST_MODE_PROVIDER_KEYS.ELEVENLABS_API_KEY,
   ELEVENLABS_API_BASE_URL: "http://127.0.0.1:4010",
+  GEMINI_API_BASE_URL: "http://127.0.0.1:4010",
   OPENROUTER_API_KEY: TEST_MODE_PROVIDER_KEYS.OPENROUTER_API_KEY,
   GEMINI_API_KEY: TEST_MODE_PROVIDER_KEYS.GEMINI_API_KEY,
 };
@@ -48,6 +50,7 @@ describe("loadConfig", () => {
       allowForwardedLoopback: false,
       elevenLabsApiKey: null,
       elevenLabsApiBaseUrl: DEFAULT_ELEVENLABS_API_BASE_URL,
+      geminiApiBaseUrl: DEFAULT_GEMINI_API_BASE_URL,
       openRouterApiKey: null,
       openRouterLlmModel: "deepseek/deepseek-v4.1-flash-1017",
       openRouterEmbeddingModel: "openai/text-embedding-3-small",

@@ -43,6 +43,7 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     allowForwardedLoopback: false,
     elevenLabsApiKey: null,
     elevenLabsApiBaseUrl: "https://api.elevenlabs.io",
+    geminiApiBaseUrl: "https://generativelanguage.googleapis.com",
     openRouterApiKey: null,
     openRouterLlmModel: "deepseek/deepseek-v4.1-flash-1017",
     openRouterEmbeddingModel: "openai/text-embedding-3-small",
@@ -171,6 +172,21 @@ describe("Gemini Live token", () => {
       "languageCode" in body.bidiGenerateContentSetup.generationConfig.speechConfig,
     ).toBe(false);
     expect(JSON.stringify(result)).not.toContain(API_KEY);
+  });
+
+  it("uses the configured loopback token base for the offline test mock", async () => {
+    const fetcher = successFetcher();
+
+    await mintGeminiToken({
+      config: testConfig({ geminiApiBaseUrl: "http://127.0.0.1:4010" }),
+      voice: "Aoede",
+      fetchImpl: fetcher,
+      now: () => NOW,
+    });
+
+    expect(fetcher.calls[0]?.url).toBe(
+      "http://127.0.0.1:4010/v1beta/auth_tokens",
+    );
   });
 
   it("rejects a missing key, a changed model and an unknown voice before egress", async () => {
