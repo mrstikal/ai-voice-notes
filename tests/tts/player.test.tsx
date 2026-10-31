@@ -345,6 +345,7 @@ describe("AudioPlayer", () => {
       scope: "full",
       sectionIndex: 0,
       expectedSourceHash: SOURCE_HASH,
+      expectCached: false,
       voice: "sarah",
     });
     expect(audio.instances[0]!.playCalls).toBe(1);
@@ -352,6 +353,50 @@ describe("AudioPlayer", () => {
     const sections = screen.getByTestId("tts-section-list");
     const first = within(sections).getByText("První odstavec.").closest("li");
     expect(first?.getAttribute("aria-current")).toBe("true");
+  });
+
+  it("drops the approved cache quote when a section becomes paid", async () => {
+    const cachedSections = manifestSections(["První odstavec."]).map(
+      (section) => ({ ...section, cached: true }),
+    );
+    const { audio, network } = await renderPlayer({
+      handler: (body) =>
+        body.sectionIndex === undefined
+          ? jsonResponse(
+              manifest(["První odstavec."], {
+                cacheHit: true,
+                estimatedMaxCostUsd: "0.000000",
+                sections: cachedSections,
+              }),
+            )
+          : jsonResponse(
+              {
+                error: {
+                  code: "tts_cache_changed",
+                  message:
+                    "Tato sekce už není v cache. Načtěte znovu rozsah a cenu.",
+                },
+              },
+              409,
+            ),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Zjistit rozsah a cenu" }));
+    await screen.findByTestId("tts-section-list");
+    fireEvent.click(screen.getByTestId("tts-consent"));
+    fireEvent.click(screen.getByRole("button", { name: "Přehrát" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toContain(
+        "Načtěte znovu rozsah a cenu",
+      );
+    });
+    expect(network.calls.at(-1)?.body).toMatchObject({
+      expectCached: true,
+      sectionIndex: 0,
+    });
+    expect(screen.queryByTestId("tts-section-list")).toBeNull();
+    expect(audio.instances).toHaveLength(0);
   });
 
   it("sends range, paragraph and task-list selections to the P19 manifest", async () => {

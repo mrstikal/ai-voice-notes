@@ -12,6 +12,7 @@ import {
 import { UnsupportedMarkdownError } from "@/lib/notes/markdown";
 import {
   DocxExportTooLargeError,
+  DocxListDepthError,
   renderNoteDocx,
 } from "@/lib/notes/export-docx";
 import { buildDownloadContentDisposition } from "@/lib/notes/export-filename";
@@ -72,6 +73,10 @@ function exportErrorResponse(error: unknown): Response {
       undefined,
       { reasons: error.reasons },
     );
+  }
+
+  if (error instanceof DocxListDepthError) {
+    return jsonError(422, "docx_list_too_deep", error.message);
   }
 
   if (error instanceof DocxExportTooLargeError) {

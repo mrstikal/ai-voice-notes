@@ -584,6 +584,8 @@ export function GeminiConversation() {
   const autoEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attemptRef = useRef(0);
   const mountedRef = useRef(true);
+  const selectedNoteRef = useRef<typeof selectedNote>(null);
+  const summaryOfferRef = useRef<NoteSummaryOffer | null>(null);
   const streamingRef = useRef(false);
   const stoppingRef = useRef(false);
   const sessionIdRef = useRef<string | null>(null);
@@ -741,6 +743,14 @@ export function GeminiConversation() {
       pendingProposalMetricsTurnRef.current = null;
     });
   }, []);
+
+  useEffect(() => {
+    selectedNoteRef.current = selectedNote;
+  }, [selectedNote]);
+
+  useEffect(() => {
+    summaryOfferRef.current = summaryOffer;
+  }, [summaryOffer]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -1495,11 +1505,13 @@ export function GeminiConversation() {
 
   async function approveSummary(): Promise<void> {
     const session = sessionIdRef.current;
+    const offer = summaryOffer;
 
-    if (!session || summaryOffer === null || summaryBusy) {
+    if (!session || offer === null || summaryBusy) {
       return;
     }
 
+    const attempt = attemptRef.current;
     setSummaryBusy(true);
     setSummaryError(null);
 
@@ -1532,7 +1544,15 @@ export function GeminiConversation() {
         throw new Error("Server nepotvrdil vytvořené shrnutí.");
       }
 
-      if (!mountedRef.current) {
+      if (
+        !mountedRef.current ||
+        attempt !== attemptRef.current ||
+        sessionIdRef.current !== session ||
+        selectedNoteRef.current?.noteId !== offer.noteId ||
+        summaryOfferRef.current !== offer ||
+        result.noteId !== offer.noteId ||
+        result.noteVersion !== offer.noteVersion
+      ) {
         return;
       }
 
@@ -1566,7 +1586,11 @@ export function GeminiConversation() {
         );
       }
     } catch (caught) {
-      if (mountedRef.current) {
+      if (
+        mountedRef.current &&
+        attempt === attemptRef.current &&
+        sessionIdRef.current === session
+      ) {
         setSummary(null);
         setSummaryOffer(null);
         setSummaryError(
@@ -1576,7 +1600,7 @@ export function GeminiConversation() {
         );
       }
     } finally {
-      if (mountedRef.current) {
+      if (mountedRef.current && attempt === attemptRef.current) {
         setSummaryBusy(false);
       }
     }

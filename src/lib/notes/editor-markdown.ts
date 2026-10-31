@@ -1012,7 +1012,7 @@ export function convertMarkdownToVisual(markdown: string): JSONContent {
 
 export function serializeVisualJson(input: JSONContent): string {
   const json = normalizeTaskItemHardBreaks(
-    ensureListItemContent(decodeLinkAttributes(input)),
+    ensureListItemContent(input),
   );
   const expected = canonicalizeEditorJson(json);
 

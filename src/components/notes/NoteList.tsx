@@ -132,6 +132,7 @@ export function NoteList({ mode, items, page, hasNext }: NoteListProps) {
             </label>
             <input
               className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-stone-950 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+              disabled={isCreating}
               id="new-note-title"
               onChange={(event) => setTitle(event.target.value)}
               required
@@ -153,6 +154,7 @@ export function NoteList({ mode, items, page, hasNext }: NoteListProps) {
             <textarea
               aria-describedby="new-note-content-hint"
               className="min-h-32 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-stone-950 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+              disabled={isCreating}
               id="new-note-content"
               onChange={(event) => setContentMd(event.target.value)}
               rows={5}

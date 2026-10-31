@@ -277,6 +277,43 @@ describe("P49 agent proposals", () => {
     expect(current.notes.get("note-a")?.contentMd).toBe(CONTENT);
   });
 
+  it("reserves the single pending slot before proposal creation settles", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const current = harness({
+      create: async (noteId, input) => {
+        await gate;
+
+        return {
+          ...created("proposal-1"),
+          noteId,
+          operation: input.operation,
+        };
+      },
+    });
+    await select(current);
+
+    const first = call(current, "add_todo", {
+      noteId: "note-a",
+      text: "První úkol",
+    });
+    const second = await call(current, "add_todo", {
+      noteId: "note-a",
+      text: "Druhý úkol",
+    });
+
+    expect(second).toMatchObject({
+      ok: false,
+      response: { error: { code: "proposal_pending" } },
+    });
+    expect(current.createForSession).toHaveBeenCalledTimes(1);
+
+    release();
+    await expect(first).resolves.toMatchObject({ ok: true });
+  });
+
   it("rejects model-supplied versions and clarifies ambiguous targets", async () => {
     const current = harness();
     await select(current);

@@ -2,6 +2,7 @@
 
 import { createElement } from "react";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -132,11 +133,13 @@ function installFetch(): void {
               noteId: "11111111-1111-4111-8111-111111111111",
               preview: "Migrace databáze.",
               title: "Migrace",
+              version: 3,
             },
             {
               noteId: "22222222-2222-4222-8222-222222222222",
               preview: "Migrace API.",
               title: "Migrace API",
+              version: 3,
             },
           ],
           speechText: null,
@@ -328,6 +331,61 @@ describe("P52 chained comparison UI", () => {
     expect(chainedBodies.every((body) => !("openaiSessionId" in body))).toBe(
       true,
     );
+    expect(
+      chainedBodies.filter((body) => body.kind === "turn").at(-1)
+        ?.selectedNoteVersion,
+    ).toBe(3);
+  });
+
+  it("refuses chained Undo when the note has a newer change", async () => {
+    const original = fetchMock.getMockImplementation() as (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => Promise<Response>;
+
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input).endsWith("/revisions")) {
+        return jsonResponse({
+          canUndo: true,
+          currentSnapshot: {
+            category: null,
+            contentMd: "Migrace",
+            tags: [],
+            title: "Migrace",
+          },
+          currentVersion: 5,
+          revisions: [],
+          undoRevisionId: "44444444-4444-4444-8444-444444444444",
+        });
+      }
+
+      return original(input, init);
+    });
+
+    renderMode();
+
+    await send("Najdi migraci.");
+    expect(await screen.findByText("Migrace API")).toBeDefined();
+    fireEvent.click(screen.getAllByRole("button", { name: "Vybrat" })[0]!);
+    await send("Přečti poslední odstavec.");
+    expect(await screen.findByText("Poslední odstavec o API.")).toBeDefined();
+    await send("Přidej úkol koupit mléko.");
+    expect(await screen.findByTestId("chained-proposal")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Potvrdit" }));
+    expect(await screen.findByText(/verzi 4/)).toBeDefined();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Vrátit poslední změnu" }),
+    );
+
+    expect(
+      (await screen.findByRole("alert")).textContent,
+    ).toContain("Poznámka se mezitím změnila");
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).includes("/restore"),
+      ),
+    ).toBe(false);
   });
 
   it("stops chained TTS before opening the microphone for the next turn", async () => {
@@ -360,6 +418,115 @@ describe("P52 chained comparison UI", () => {
 
     expect(FakeAudio.instances[0]?.paused).toBe(true);
     expect(scribe.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not start a chained TTS playback after the session was reset", async () => {
+    const original = fetchMock.getMockImplementation() as (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => Promise<Response>;
+    let resolveTts!: (response: Response) => void;
+    const ttsResponse = new Promise<Response>((resolve) => {
+      resolveTts = resolve;
+    });
+
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input) === "/api/tts") {
+        return ttsResponse;
+      }
+
+      return original(input, init);
+    });
+
+    renderMode();
+
+    await send("Najdi migraci.");
+    expect(await screen.findByText("Migrace API")).toBeDefined();
+    fireEvent.click(screen.getAllByRole("button", { name: "Vybrat" })[0]!);
+    await send("Přečti poslední odstavec.");
+    expect(
+      await screen.findByText("Poslední odstavec o API."),
+    ).toBeDefined();
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) => String(input) === "/api/tts"),
+      ).toBe(true),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Nová relace" }));
+
+    await act(async () => {
+      resolveTts({
+        blob: async () => new Blob(["mp3"]),
+        headers: new Headers({ "content-type": "audio/mpeg" }),
+        json: async () => ({}),
+        ok: true,
+        status: 200,
+      } as Response);
+      await ttsResponse;
+    });
+
+    expect(FakeAudio.instances).toHaveLength(0);
+  });
+
+  it("enables a new turn immediately after resetting an in-flight session", async () => {
+    const original = fetchMock.getMockImplementation() as (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => Promise<Response>;
+    let resolveTurn!: (response: Response) => void;
+    const pendingTurn = new Promise<Response>((resolve) => {
+      resolveTurn = resolve;
+    });
+
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input) === "/api/voice-agent/chained") {
+        return pendingTurn;
+      }
+
+      return original(input, init);
+    });
+
+    renderMode();
+    await send("Najdi migraci.");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Nová relace" }));
+    fireEvent.change(screen.getByLabelText("Přepis příkazu"), {
+      target: { value: "Nový příkaz." },
+    });
+    expect(
+      (screen.getByRole("button", { name: "Odeslat příkaz" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+
+    await act(async () => {
+      resolveTurn(
+        outcome({
+          empty: false,
+          intent: { action: "search_notes", query: "migrace" },
+          kind: "search",
+          query: "migrace",
+          results: [
+            {
+              noteId: "11111111-1111-4111-8111-111111111111",
+              preview: "Migrace databáze.",
+              title: "Migrace",
+              version: 3,
+            },
+          ],
+          speechText: null,
+        }),
+      );
+      await pendingTurn;
+    });
+
+    expect(screen.queryByText("Migrace databáze.")).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: "Odeslat příkaz" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
   });
 
   it("includes a trailing partial and shows the incomplete-turn notice", async () => {

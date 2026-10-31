@@ -435,12 +435,13 @@ function computePendingBlockBoundary(
       case "list_end":
         pending = true;
         break;
+      case "stop":
+        break;
       case "paragraph_break":
       case "heading":
       case "list_start":
       case "list_item":
       case "text":
-      case "stop":
         pending = false;
         break;
       default:
@@ -608,6 +609,12 @@ export class VoiceFormattingSession {
     this.nextBatchIndex = 0;
   }
 
+  startNewSession(): void {
+    const pendingBlockBoundary = this.pendingBlockBoundary;
+    this.reset();
+    this.pendingBlockBoundary = pendingBlockBoundary;
+  }
+
   accept(segment: string): VoiceFormattingBatch {
     const stateBefore = this.state;
     const parsed = parseVoiceCommands(segment, stateBefore);
@@ -649,9 +656,15 @@ export class VoiceFormattingSession {
     });
 
     this.state = INITIAL_VOICE_FORMAT_STATE;
-    this.listHasItem = false;
-    this.pendingBlockBoundary = false;
-    this.pendingListItem = null;
+    this.listHasItem = computeListHasItem(
+      flushed.instructions,
+      this.listHasItem,
+    );
+    this.pendingBlockBoundary = computePendingBlockBoundary(
+      flushed.instructions,
+      this.pendingBlockBoundary,
+    );
+    this.pendingListItem = rendered.pendingListItem;
 
     return {
       batchIndex: this.nextBatchIndex++,

@@ -55,6 +55,15 @@ vi.mock("@/lib/notes/service", async (importOriginal) => {
 });
 
 function request(body: unknown): Request {
+  const withVersion =
+    typeof body === "object" &&
+    body !== null &&
+    "kind" in body &&
+    (body as { kind: string }).kind !== "task_apply" &&
+    !("expectedVersion" in body)
+      ? { expectedVersion: 1, ...body }
+      : body;
+
   return new Request(`${APP_ORIGIN}/api/notes/${NOTE_ID}/ai-suggest`, {
     method: "POST",
     headers: {
@@ -62,7 +71,7 @@ function request(body: unknown): Request {
       origin: APP_ORIGIN,
       "content-type": "application/json",
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(withVersion),
   });
 }
 
@@ -365,6 +374,19 @@ describe("cleanup suggestion API", () => {
       error: { code: "cleanup_name_missing" },
     });
     expect(llmRequest).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale reviewed version before any provider request", async () => {
+    const response = await suggestCleanupRoute(
+      request({ expectedVersion: 2, kind: "tag_suggestions" }),
+      context(),
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: { code: "note_stale" },
+    });
+    expect(llmTagRequest).not.toHaveBeenCalled();
   });
 
   it("rejects unsupported blocks before billing", async () => {

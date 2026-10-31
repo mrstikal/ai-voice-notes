@@ -113,6 +113,7 @@ export function buildSectionBody(
     ...buildManifestBody(manifest.noteId, manifest.voice, manifest.selection),
     sectionIndex,
     expectedSourceHash: manifest.sourceHash,
+    expectCached: manifest.sections[sectionIndex]?.cached === true,
   };
 }
 

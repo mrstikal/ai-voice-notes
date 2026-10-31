@@ -35,6 +35,15 @@ const LIST_INDENT = 720;
 const QUOTE_INDENT = 720;
 const MAX_LIST_LEVEL = 8;
 
+export class DocxListDepthError extends Error {
+  constructor() {
+    super(
+      `Seznam je vnořený hlouběji než ${MAX_LIST_LEVEL + 1} úrovní, které DOCX umí věrně zobrazit.`,
+    );
+    this.name = "DocxListDepthError";
+  }
+}
+
 export class DocxExportTooLargeError extends Error {
   readonly maxBytes: number;
 
@@ -414,6 +423,10 @@ function renderList(
   depth: number,
   quoteDepth: number,
 ): Paragraph[] {
+  if (depth > MAX_LIST_LEVEL) {
+    throw new DocxListDepthError();
+  }
+
   const definition = list.ordered
     ? orderedListDefinition(list.start ?? 1, context)
     : null;

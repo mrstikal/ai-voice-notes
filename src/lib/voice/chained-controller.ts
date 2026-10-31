@@ -50,6 +50,7 @@ export type ChainedOutcome =
         readonly noteId: string;
         readonly title: string;
         readonly preview: string;
+        readonly version?: number;
       }[];
       readonly speechText: null;
     }
@@ -117,11 +118,13 @@ export interface ChainedSummaryResult {
 export interface ChainedTurnInput {
   readonly transcript: string;
   readonly selectedNoteId?: string;
+  readonly selectedNoteVersion?: number;
   readonly selection?: MarkedSelection | null;
 }
 
 export interface ChainedSummaryInput {
   readonly noteId: string;
+  readonly expectedVersion: number;
   readonly selection?: MarkedSelection | null;
 }
 
@@ -179,6 +182,29 @@ function assertTranscript(transcript: string): string {
   }
 
   return trimmed;
+}
+
+function assertNoteVersion(
+  actualVersion: number,
+  expectedVersion: number | undefined,
+): void {
+  if (expectedVersion === undefined) {
+    throw new ChainedControllerError(
+      409,
+      "note_stale",
+      "Chybí ověřená verze vybrané poznámky. Vyberte ji znovu a zkuste to znovu.",
+      "notes",
+    );
+  }
+
+  if (actualVersion !== expectedVersion) {
+    throw new ChainedControllerError(
+      409,
+      "note_stale",
+      "Vybraná poznámka se mezitím změnila. Načtěte ji znovu a zkuste to znovu.",
+      "notes",
+    );
+  }
 }
 
 function assertNoteId(noteId: string): string {
@@ -346,6 +372,7 @@ export async function runChainedTurn(
           noteId: item.noteId,
           preview: item.preview,
           title: item.title,
+          version: item.version,
         })),
         speechText: null,
       };
@@ -359,6 +386,7 @@ export async function runChainedTurn(
       const note = await deps.readServices.getNote({
         noteId: selectedNoteId,
       });
+      assertNoteVersion(note.version, input.selectedNoteVersion);
 
       return {
         intent,
@@ -385,6 +413,7 @@ export async function runChainedTurn(
         section: intent.section,
         selection,
       });
+      assertNoteVersion(section.version, input.selectedNoteVersion);
 
       return {
         intent,
@@ -402,6 +431,7 @@ export async function runChainedTurn(
       const note = await deps.readServices.getNoteDetail({
         noteId: selectedNoteId,
       });
+      assertNoteVersion(note.version, input.selectedNoteVersion);
       const source = prepareNoteSummarySource(note, selection);
       const offer = describeNoteSummaryOffer(source.sourceText);
 
@@ -426,6 +456,7 @@ export async function runChainedTurn(
       const note = await deps.readServices.getNoteDetail({
         noteId: selectedNoteId,
       });
+      assertNoteVersion(note.version, input.selectedNoteVersion);
       const operation = isTodoCommand(transcript)
         ? normalizeTodoOperation(intent.operation)
         : intent.operation;
@@ -458,6 +489,7 @@ export async function generateChainedSummary(
   try {
     const noteId = assertNoteId(input.noteId);
     const note = await deps.readServices.getNoteDetail({ noteId });
+    assertNoteVersion(note.version, input.expectedVersion);
     const selection = input.selection ?? null;
     const source = prepareNoteSummarySource(note, selection);
     const generated = await generateNoteSummary(

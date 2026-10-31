@@ -156,8 +156,18 @@ describe("CleanupAction", () => {
     );
     const body = JSON.parse(
       String((fetchMock.mock.calls[0]?.[1] as RequestInit).body),
-    ) as { blockIndex: number; kind: string; properNames: string[] };
-    expect(body).toEqual({ blockIndex: 0, kind: "cleanup", properNames: [] });
+    ) as {
+      blockIndex: number;
+      expectedVersion: number;
+      kind: string;
+      properNames: string[];
+    };
+    expect(body).toEqual({
+      blockIndex: 0,
+      expectedVersion: 1,
+      kind: "cleanup",
+      properNames: [],
+    });
     expect(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body)).not.toContain(
       "Druhý odstavec",
     );

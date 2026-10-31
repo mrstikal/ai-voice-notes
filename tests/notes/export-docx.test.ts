@@ -182,6 +182,21 @@ describe("DOCX export", () => {
     }
   });
 
+  it("rejects list nesting deeper than the nine DOCX levels", async () => {
+    const list = (levels: number) =>
+      Array.from(
+        { length: levels },
+        (_, index) => `${"  ".repeat(index)}- úroveň ${index + 1}`,
+      ).join("\n");
+
+    await expect(renderNoteDocx("Poznámka", list(9))).resolves.toBeInstanceOf(
+      Buffer,
+    );
+    await expect(renderNoteDocx("Poznámka", list(10))).rejects.toMatchObject({
+      name: "DocxListDepthError",
+    });
+  });
+
   it("bounds the packed output size", async () => {
     await expect(
       renderNoteDocx("Poznámka", "Text", { maxBytes: 1 }),

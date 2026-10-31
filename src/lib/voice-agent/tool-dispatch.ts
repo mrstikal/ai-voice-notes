@@ -167,6 +167,7 @@ interface ToolSession {
   selection: MarkedSelection | null;
   readonly pendingProposals: Map<string, PendingProposalEntry>;
   readonly confirmingProposals: Set<string>;
+  proposalCreationInFlight: boolean;
   pendingSummary: PendingSummary | null;
   cachedSummary: CachedSummary | null;
   summaryInFlight: boolean;
@@ -365,6 +366,7 @@ export class ToolSessionStore {
       lastSearchNoteIds: [],
       pendingProposals: new Map(),
       confirmingProposals: new Set(),
+      proposalCreationInFlight: false,
       pendingSummary: null,
       seenCallIds: new Set(),
       selectedNoteId: null,
@@ -1120,7 +1122,7 @@ export class ToolSessionStore {
 
     this.pruneProposals(session);
 
-    if (session.pendingProposals.size > 0) {
+    if (session.pendingProposals.size > 0 || session.proposalCreationInFlight) {
       return toolError(
         input.name,
         input.callId,
@@ -1128,6 +1130,8 @@ export class ToolSessionStore {
         "V panelu už čeká jiný návrh. Nechte uživatele tento návrh v panelu vyřídit a potom vytvořte další.",
       );
     }
+
+    session.proposalCreationInFlight = true;
 
     try {
       const created = await this.proposals().createForSession(
@@ -1139,6 +1143,21 @@ export class ToolSessionStore {
         },
         session.id,
       );
+
+      if (session.ending) {
+        try {
+          await this.proposals().reject(created.noteId, created.id);
+        } catch {
+          // The session already ended; the proposal must not stay pending.
+        }
+
+        return toolError(
+          input.name,
+          input.callId,
+          "session_ended",
+          "Hlasová relace byla ukončena. Vytvořte návrh v nové relaci.",
+        );
+      }
 
       session.pendingProposals.set(created.id, {
         confirmationNonce: created.confirmationNonce,
@@ -1233,6 +1252,8 @@ export class ToolSessionStore {
         "proposal_failed",
         "Návrh úpravy se nepodařilo vytvořit.",
       );
+    } finally {
+      session.proposalCreationInFlight = false;
     }
   }
 

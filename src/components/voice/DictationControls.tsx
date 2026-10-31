@@ -421,6 +421,8 @@ export interface BodyDictationControlsProps {
   readonly targetMode: "source" | "visual";
   readonly disabled?: boolean;
   readonly disabledReason?: string | null;
+  readonly onSessionStart?: () => void;
+  readonly onSessionComplete?: () => void | Promise<void>;
 }
 
 function formatCount(value: number): string {
@@ -457,6 +459,8 @@ export function BodyDictationControls({
   targetMode,
   disabled = false,
   disabledReason = null,
+  onSessionStart,
+  onSessionComplete,
 }: BodyDictationControlsProps) {
   const [insertAtEnd, setInsertAtEnd] = useState(false);
   const [commandLog, setCommandLog] = useState<readonly string[]>([]);
@@ -468,6 +472,8 @@ export function BodyDictationControls({
   const formattingSessionRef = useRef(new VoiceFormattingSession());
   const insertAtEndRef = useRef(insertAtEnd);
   const onApplyBatchRef = useRef(onApplyBatch);
+  const onSessionStartRef = useRef(onSessionStart);
+  const onSessionCompleteRef = useRef(onSessionComplete);
   const applyBatchRef = useRef<(batch: VoiceFormattingBatch) => boolean>(
     () => true,
   );
@@ -498,6 +504,14 @@ export function BodyDictationControls({
   useEffect(() => {
     onApplyBatchRef.current = onApplyBatch;
   }, [onApplyBatch]);
+
+  useEffect(() => {
+    onSessionStartRef.current = onSessionStart;
+  }, [onSessionStart]);
+
+  useEffect(() => {
+    onSessionCompleteRef.current = onSessionComplete;
+  }, [onSessionComplete]);
 
   const applyBatch = useCallback((batch: VoiceFormattingBatch): boolean => {
     setFormatState(batch.stateAfter);
@@ -542,7 +556,9 @@ export function BodyDictationControls({
       const applied = applyBatchRef.current(batch);
 
       if (batch.stopped && applied) {
-        void stopDictationRef.current({ flush: false });
+        void stopDictationRef.current({ flush: false }).then(() => {
+          void onSessionCompleteRef.current?.();
+        });
       }
     },
   });
@@ -587,11 +603,25 @@ export function BodyDictationControls({
     previousStatusRef.current = session.status;
 
     if (session.status === "error" && previous !== "error") {
+      const flushed = formattingSessionRef.current.flush();
       formattingSessionRef.current.reset();
+
+      const applied =
+        flushed.parts.length > 0
+          ? applyBatchRef.current(flushed)
+          : true;
+
+      if (flushed.parts.length === 0) {
+        setApplyError(null);
+        setApplyNotice(null);
+      }
+
       setFormatState(INITIAL_VOICE_FORMAT_STATE);
       setCommandLog([]);
-      setApplyError(null);
-      setApplyNotice(null);
+
+      if (applied) {
+        void onSessionCompleteRef.current?.();
+      }
     }
   }, [session.status]);
 
@@ -600,18 +630,21 @@ export function BodyDictationControls({
       return;
     }
 
-    formattingSessionRef.current.reset();
+    formattingSessionRef.current.startNewSession();
     setFormatState(INITIAL_VOICE_FORMAT_STATE);
     setCommandLog([]);
     setApplyError(null);
     setApplyNotice(null);
+    onSessionStartRef.current?.();
     dictation.clearTranscripts();
     dictation.start();
   }
 
   function handleStop() {
     setApplyError(null);
-    void dictation.stop();
+    void dictation.stop().then(() => {
+      void onSessionCompleteRef.current?.();
+    });
   }
 
   function handleVadSilenceChange(value: string) {

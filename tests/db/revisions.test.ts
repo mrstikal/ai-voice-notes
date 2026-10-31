@@ -147,6 +147,40 @@ describe.skipIf(!hasTestDatabase)("P25 persistent revisions", () => {
     expect(finalList.currentSnapshot.contentMd).toBe("Druhá verze.");
   });
 
+  it("records an undoable voice revision even after the draft autosave stored the dictation", async () => {
+    const note = await createNote("Ruční text.");
+    const baseline = note.contentMd;
+    const dictatedContent = "Ruční text. Diktovaná věta.";
+
+    const draft = await manualChange(note.id, dictatedContent, 1, true);
+    expect(draft.version).toBe(2);
+
+    const checkpoint = await notes.updateNoteVoiceContent(note.id, {
+      baselineContentMd: baseline,
+      contentMd: dictatedContent,
+      expectedVersion: 2,
+    });
+    expect(checkpoint.version).toBe(3);
+
+    const list = await revisions.list(note.id);
+    expect(list.currentVersion).toBe(3);
+    expect(list.canUndo).toBe(true);
+    expect(list.undoRevisionId).not.toBeNull();
+    expect(list.revisions.map((revision) => revision.reason)).toEqual([
+      "voice",
+      "initial",
+    ]);
+    expect(list.revisions[0]?.beforeSnapshot.contentMd).toBe(baseline);
+    expect(list.revisions[0]?.afterSnapshot.contentMd).toBe(dictatedContent);
+
+    const undone = await revisions.restore(note.id, list.undoRevisionId!, {
+      mode: "undo",
+      expectedVersion: 3,
+    });
+    expect(undone.version).toBe(4);
+    expect(undone.contentMd).toBe(baseline);
+  });
+
   it("restores the original transcript from an AI revision after later named changes", async () => {
     const note = await createNote("Původní přepis.");
     const operation: LlmOperation = {

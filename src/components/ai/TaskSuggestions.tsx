@@ -100,6 +100,7 @@ export function TaskSuggestions({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           kind: "task_suggestions",
+          expectedVersion: note.version,
           start: selection.start,
           end: selection.end,
         }),

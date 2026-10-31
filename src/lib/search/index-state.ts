@@ -16,9 +16,18 @@ export const INDEX_STATUS_LABELS: Record<IndexStatus, string> = {
   no_content: "Bez textu",
 };
 
+export interface RefreshNoteChunksOptions {
+  /**
+   * Metadata and title edits keep the body text unchanged, so ready embeddings
+   * from the previous version stay valid for chunks with identical text.
+   */
+  readonly reuseReadyEmbeddingsFromVersion?: number;
+}
+
 export async function refreshNoteChunks(
   db: NotesExecutor,
   note: { readonly id: string; readonly contentMd: string; readonly version: number },
+  options: RefreshNoteChunksOptions = {},
 ): Promise<void> {
   const chunks = chunkNoteMarkdown(note.contentMd);
 
@@ -45,6 +54,25 @@ export async function refreshNoteChunks(
       text: chunk.text,
     })),
   );
+
+  const reuseFrom = options.reuseReadyEmbeddingsFromVersion;
+
+  if (reuseFrom !== undefined && reuseFrom !== note.version) {
+    await db.execute(sql`
+      UPDATE note_chunks AS current
+      SET status = 'ready', model = previous.model, embedding = previous.embedding
+      FROM note_chunks AS previous
+      WHERE current.note_id = ${note.id}
+        AND current.note_version = ${note.version}
+        AND current.status = 'pending'
+        AND previous.note_id = ${note.id}
+        AND previous.note_version = ${reuseFrom}
+        AND previous.status = 'ready'
+        AND previous.embedding IS NOT NULL
+        AND previous.chunk_index = current.chunk_index
+        AND previous.text = current.text
+    `);
+  }
 }
 
 export async function getNoteIndexStatus(

@@ -18,6 +18,7 @@ import {
   NoteApiError,
   fetchNote,
   formatCzechDateTime,
+  saveVoiceContent,
   updateNote,
   type NoteDetail,
 } from "@/lib/notes/client";
@@ -277,15 +278,6 @@ function VisualMarkdownEditor({
     onTaskToggleRef.current = onTaskToggle;
   }, [onTaskToggle]);
 
-  useEffect(
-    () => () => {
-      if (serializationTimeoutRef.current !== null) {
-        clearTimeout(serializationTimeoutRef.current);
-      }
-    },
-    [],
-  );
-
   const editor = useEditor({
     content: initialContent,
     editorProps: {
@@ -340,6 +332,28 @@ function VisualMarkdownEditor({
       }, 250);
     },
   });
+
+  useEffect(() => {
+    return () => {
+      if (serializationTimeoutRef.current === null) {
+        return;
+      }
+
+      clearTimeout(serializationTimeoutRef.current);
+      serializationTimeoutRef.current = null;
+
+      if (!editor) {
+        return;
+      }
+
+      try {
+        onChangeRef.current(serializeVisualJson(editor.getJSON()));
+      } catch {
+        // The editor is being disposed; the parent already reports conversion
+        // failures through its own mode switch or save path.
+      }
+    };
+  }, [editor]);
 
   useEffect(() => {
     if (editor) {
@@ -566,6 +580,7 @@ export function NoteEditor({ note, onSaved, onDirtyChange }: NoteEditorProps) {
   const controllerRef = useRef<DraftAutosaveController | null>(null);
   const taskSaveChainRef = useRef<Promise<void>>(Promise.resolve());
   const taskSavePendingRef = useRef(0);
+  const bodyVoiceBaselineRef = useRef<string | null>(null);
   const onSavedRef = useRef(onSaved);
   const onDirtyChangeRef = useRef(onDirtyChange);
 
@@ -1255,6 +1270,97 @@ export function NoteEditor({ note, onSaved, onDirtyChange }: NoteEditorProps) {
     ],
   );
 
+  const handleBodyDictationStart = useCallback(() => {
+    bodyVoiceBaselineRef.current = readCurrentContent();
+  }, [readCurrentContent]);
+
+  const handleBodyDictationComplete = useCallback(async () => {
+    const baseline = bodyVoiceBaselineRef.current;
+    bodyVoiceBaselineRef.current = null;
+
+    if (baseline === null || conflictRef.current !== null) {
+      return;
+    }
+
+    controllerRef.current?.cancelPending();
+    setIsExplicitSaving(true);
+
+    try {
+      await controllerRef.current?.waitForIdle();
+      await taskSaveChainRef.current;
+      controllerRef.current?.cancelPending();
+
+      if (conflictRef.current !== null) {
+        return;
+      }
+
+      const contentMd = readCurrentContent();
+
+      if (contentMd === null || contentMd === baseline) {
+        return;
+      }
+
+      controllerRef.current?.pause();
+      const updated = await saveVoiceContent(note.id, {
+        baselineContentMd: baseline,
+        contentMd,
+        expectedVersion: versionRef.current,
+      });
+
+      versionRef.current = updated.version;
+      savedContentRef.current = updated.contentMd;
+      restoreBaseVersionRef.current = null;
+      setLocalVersion(updated.version);
+      setLocalSavedContent(updated.contentMd);
+      setHasAutosavedContent(false);
+      setAutosaveError(null);
+      setRecoveryDismissed(true);
+      setStatus(
+        `Hlasový přepis uložen · verze ${updated.version} · ${formatCzechDateTime(updated.updatedAt)}`,
+      );
+
+      syncStoredDraft({
+        noteId: note.id,
+        acknowledgedContentMd: updated.contentMd,
+        currentContentMd: readCurrentContent(),
+        baseVersion: updated.version,
+      });
+      onSaved?.(updated);
+    } catch (saveError) {
+      if (saveError instanceof NoteApiError && saveError.status === 409) {
+        await showConflict(
+          saveError.latestVersion ?? versionRef.current,
+          saveError.message,
+        );
+      } else {
+        const current = readCurrentContent();
+
+        if (current !== null) {
+          storeDraft(current);
+        }
+
+        setStatus(null);
+        setError(
+          saveError instanceof NoteApiError
+            ? `${saveError.message} Váš text zůstal v editoru.`
+            : "Hlasový přepis se nepodařilo uložit. Váš text zůstal v editoru.",
+        );
+      }
+    } finally {
+      setIsExplicitSaving(false);
+
+      if (conflictRef.current === null) {
+        controllerRef.current?.resume();
+      }
+    }
+  }, [
+    note.id,
+    onSaved,
+    readCurrentContent,
+    showConflict,
+    storeDraft,
+  ]);
+
   function handleSourceChange(value: string) {
     setSource(value);
     sourceTextRef.current = value;
@@ -1705,6 +1811,8 @@ export function NoteEditor({ note, onSaved, onDirtyChange }: NoteEditorProps) {
         disabled={bodyDictationDisabled}
         disabledReason={bodyDictationDisabledReason}
         onApplyBatch={applyVoiceBatch}
+        onSessionComplete={handleBodyDictationComplete}
+        onSessionStart={handleBodyDictationStart}
         targetMode={mode}
       />
 

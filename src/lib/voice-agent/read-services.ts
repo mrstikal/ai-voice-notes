@@ -57,6 +57,7 @@ export interface SearchNotesToolResult {
     readonly noteId: string;
     readonly title: string;
     readonly preview: string;
+    readonly version?: number;
   }>;
   readonly total: number;
   readonly empty: boolean;
@@ -445,6 +446,7 @@ export function createReadServices(
             READ_TOOL_PREVIEW_MAX_GRAPHEMES,
           ).text,
           title: item.title,
+          version: item.version,
         })),
         total: found.total,
       };

@@ -179,6 +179,50 @@ describe.skipIf(!hasTestDatabase)("P35 pending chunk index state", () => {
     ).toBe(true);
   });
 
+  it("reuses ready embeddings when only metadata or the title changes", async () => {
+    const note = await notes.createNote({
+      title: "Původní titulek",
+      contentMd: "Obsah bez změny.",
+    });
+    await connection.pool.query(
+      `update note_chunks
+       set status = 'ready',
+           model = 'test-model',
+           embedding = array_fill(0.0::real, ARRAY[1536])::vector
+       where note_id = $1 and note_version = 1`,
+      [note.id],
+    );
+
+    const tagged = await notes.updateNoteMetadata(note.id, {
+      category: "Práce",
+      tags: ["archiv"],
+      expectedVersion: 1,
+    });
+    expect(await getNoteIndexStatus(connection.db, note.id)).toBe("ready");
+    const taggedChunks = (await chunkRows(note.id)).filter(
+      (chunk) => chunk.note_version === tagged.version,
+    );
+    expect(taggedChunks.length).toBeGreaterThan(0);
+    expect(
+      taggedChunks.every(
+        (chunk) => chunk.status === "ready" && chunk.model === "test-model",
+      ),
+    ).toBe(true);
+
+    const titled = await notes.updateNoteTitle(note.id, {
+      title: "Nový titulek",
+      expectedVersion: tagged.version,
+    });
+    expect(await getNoteIndexStatus(connection.db, note.id)).toBe("ready");
+    expect(
+      (await chunkRows(note.id))
+        .filter((chunk) => chunk.note_version === titled.version)
+        .every(
+          (chunk) => chunk.status === "ready" && chunk.model === "test-model",
+        ),
+    ).toBe(true);
+  });
+
   it("draft autosave creates pending current-version chunks and makes no AI call", async () => {
     const note = await notes.createNote({
       title: "Autosave",

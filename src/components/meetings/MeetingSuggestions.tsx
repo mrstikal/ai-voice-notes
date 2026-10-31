@@ -364,6 +364,7 @@ function MeetingSuggestionEditor({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           kind: "meeting_summary_decisions",
+          expectedVersion: note.version,
           ...requestRange(),
         }),
       });
@@ -436,7 +437,11 @@ function MeetingSuggestionEditor({
       const response = await fetch(`/api/notes/${note.id}/ai-suggest`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ kind: "meeting_tasks", ...requestRange() }),
+        body: JSON.stringify({
+          kind: "meeting_tasks",
+          expectedVersion: note.version,
+          ...requestRange(),
+        }),
       });
       const body = (await response.json().catch(() => null)) as
         | TaskSuggestion

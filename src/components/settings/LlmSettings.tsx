@@ -97,9 +97,9 @@ export function LlmSettings({ status, error }: LlmSettingsProps) {
             </p>
           ) : (
             <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm leading-6 text-emerald-950">
-              Model a serverový klíč jsou připravené. AI úpravy se v této fázi
-              ještě nezobrazují v poznámkách; návazné fáze použijí stejný
-              validovaný klient.
+              Model a serverový klíč jsou připravené. AI úpravy poznámek jsou
+              dostupné; každý návrh se zobrazí jako náhled a aplikuje se až po
+              výslovném potvrzení.
             </p>
           )}
         </>

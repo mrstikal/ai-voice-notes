@@ -223,6 +223,16 @@ function parseOptionalPostgresUrl(
     );
   }
 
+  for (const queryHost of url.searchParams.getAll("host")) {
+    const hostname = queryHost.trim();
+
+    if (hostname !== "" && !isLoopbackHostname(hostname)) {
+      throw new ConfigurationError(
+        `${name} musí používat pouze loopback hostitele (127.0.0.1, localhost nebo ::1); parametr host nesmí přesměrovat připojení jinam.`,
+      );
+    }
+  }
+
   return value;
 }
 

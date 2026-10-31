@@ -73,6 +73,7 @@ const noteRequestSchema = z
       .string()
       .regex(/^[a-f0-9]{64}$/u)
       .optional(),
+    expectCached: z.boolean().optional(),
   })
   .strict()
   .superRefine((value, context) => {
@@ -420,6 +421,21 @@ export function createReadAloudRouteHandler(
             ...commonHeaders,
             "x-tts-cache": "hit",
           });
+        }
+
+        if (data.expectCached === true) {
+          const changedCostUsd = await preflightBudget(usageFactory(), 1);
+
+          return jsonError(
+            409,
+            "tts_cache_changed",
+            "Tato sekce už není v cache. Načtěte znovu rozsah a cenu a potvrďte novou cenu, než se text odešle poskytovateli.",
+            undefined,
+            {
+              estimatedMaxCostUsd: changedCostUsd.toFixed(6),
+              sectionIndex: data.sectionIndex,
+            },
+          );
         }
 
         const result = await ttsServiceFactory().synthesize({

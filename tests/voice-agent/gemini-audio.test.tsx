@@ -907,6 +907,156 @@ describe("GeminiConversation", () => {
     expect(setItem).not.toHaveBeenCalled();
   });
 
+  it("discards a summary response that arrives after the session was stopped", async () => {
+    let resolveApproval!: (response: Response) => void;
+    const approval = new Promise<Response>((resolve) => {
+      resolveApproval = resolve;
+    });
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<
+        string,
+        unknown
+      >;
+
+      if (url.endsWith("/api/voice-agent/gemini-token")) {
+        tokenBodies.push(body as { voice: string });
+        return tokenResponse(body.voice as string);
+      }
+
+      if (url.endsWith("/api/voice-agent/tool")) {
+        if (body.action === "select") {
+          return jsonResponse(200, {
+            ok: true,
+            selected: {
+              noteId: "note-b",
+              preview: "Druhý text pro shrnutí.",
+              previewTruncated: false,
+              selection: null,
+              title: "Druhá",
+              version: 2,
+            },
+          });
+        }
+
+        if (body.name === "search_notes") {
+          return jsonResponse(200, {
+            ok: true,
+            response: {
+              empty: false,
+              query: "ahoj",
+              results: [
+                {
+                  noteId: "note-a",
+                  preview: "Ahoj z první poznámky.",
+                  title: "První",
+                },
+                {
+                  noteId: "note-b",
+                  preview: "Ahoj z druhé poznámky.",
+                  title: "Druhá",
+                },
+              ],
+              total: 2,
+            },
+          });
+        }
+
+        if (body.name === "summarize_note") {
+          return jsonResponse(200, {
+            ok: true,
+            response: {
+              blockedReason: null,
+              configured: true,
+              estimatedMaxCostUsd: 0.004,
+              message: "Shrnutí čeká na povolení.",
+              model: "deepseek/test",
+              noteId: "note-b",
+              noteTitle: "Druhá",
+              noteVersion: 2,
+              selection: null,
+              sourceGraphemes: 6,
+              status: "needs_user_cost_confirmation",
+            },
+          });
+        }
+
+        if (body.action === "approve_summary") {
+          return approval;
+        }
+
+        if (body.action === "end") {
+          return jsonResponse(200, { ok: true });
+        }
+      }
+
+      return jsonResponse(404, {
+        error: { code: "not_found", message: "Nenalezeno." },
+      });
+    });
+
+    render(createElement(GeminiConversation));
+    const { socket } = await connectGemini();
+
+    await act(async () => {
+      socket.message({
+        toolCall: {
+          functionCalls: [
+            { args: { query: "ahoj" }, id: "call-search", name: "search_notes" },
+          ],
+        },
+      });
+    });
+    expect(await screen.findByText("První")).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("button", { name: "Vybrat" })[1]!);
+    await screen.findByTestId("voice-agent-selected-preview");
+
+    await act(async () => {
+      socket.message({
+        toolCall: {
+          functionCalls: [
+            {
+              args: { noteId: "note-b" },
+              id: "call-summary",
+              name: "summarize_note",
+            },
+          ],
+        },
+      });
+    });
+    await screen.findByTestId("voice-agent-summary-consent");
+    fireEvent.click(screen.getByTestId("voice-agent-approve-summary"));
+    fireEvent.click(screen.getByRole("button", { name: "Ukončit" }));
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("voice-agent-summary-consent")).toBeNull(),
+    );
+
+    await act(async () => {
+      resolveApproval(
+        jsonResponse(200, {
+          ok: true,
+          summary: {
+            noteId: "note-b",
+            noteTitle: "Druhá",
+            noteVersion: 2,
+            sourceGraphemes: 6,
+            status: "generated",
+            summaryText: "Pozdní shrnutí.",
+          },
+        }),
+      );
+      await approval;
+    });
+
+    expect(screen.queryByTestId("voice-agent-summary")).toBeNull();
+    expect(screen.queryByText("Pozdní shrnutí.")).toBeNull();
+    expect(
+      socket.sent.some((value) => value.includes("Pozdní shrnutí.")),
+    ).toBe(false);
+  });
+
   it("shows an agent proposal as a preview, rejects it and never confirms from the model", async () => {
     const NONCE = "n".repeat(43);
     const PROPOSAL_ID = "11111111-1111-4111-8111-111111111111";

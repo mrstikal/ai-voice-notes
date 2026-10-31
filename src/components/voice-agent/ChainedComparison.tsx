@@ -107,6 +107,7 @@ export function ChainedComparison({
   const partialRef = useRef("");
   const incompleteRef = useRef<string | null>(null);
   const turnInFlightRef = useRef(false);
+  const turnTokenRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
   const playbackLeaseRef = useRef<MicrophoneLease | null>(null);
@@ -115,6 +116,8 @@ export function ChainedComparison({
   const metricsSessionRef = useRef<number | null>(null);
   const metricsTurnRef = useRef<number | null>(null);
   const lastMetricsTurnRef = useRef<number | null>(null);
+  const sessionGenerationRef = useRef(0);
+  const outcomeRef = useRef<ChainedOutcome | null>(null);
 
   const dictation = useScribeDictation({
     activityKind: "dictation",
@@ -148,7 +151,13 @@ export function ChainedComparison({
   }, [dictation.incompleteNotice]);
 
   useEffect(() => {
+    outcomeRef.current = outcome;
+  }, [outcome]);
+
+  useEffect(() => {
     return () => {
+      sessionGenerationRef.current += 1;
+
       if (sessionTimerRef.current !== null) {
         clearTimeout(sessionTimerRef.current);
       }
@@ -163,6 +172,8 @@ export function ChainedComparison({
     audioRef.current = null;
 
     if (audio !== null) {
+      audio.onended = null;
+      audio.onerror = null;
       audio.pause();
       audio.src = "";
     }
@@ -198,12 +209,49 @@ export function ChainedComparison({
       return;
     }
 
+    const generation = sessionGenerationRef.current;
+    const isStale = () => generation !== sessionGenerationRef.current;
     stopAudio();
 
     let lease: MicrophoneLease | null = null;
+    let audio: HTMLAudioElement | null = null;
+    let url: string | null = null;
+
+    const cleanupStale = () => {
+      if (audio !== null) {
+        audio.onended = null;
+        audio.onerror = null;
+        audio.pause();
+        audio.src = "";
+
+        if (audioRef.current === audio) {
+          audioRef.current = null;
+        }
+      }
+
+      if (url !== null) {
+        URL.revokeObjectURL(url);
+
+        if (audioUrlRef.current === url) {
+          audioUrlRef.current = null;
+        }
+      }
+
+      if (playbackLeaseRef.current === lease) {
+        playbackLeaseRef.current = null;
+      }
+
+      void lease?.release().catch(() => undefined);
+    };
 
     try {
       lease = await tryAcquirePlaybackLease();
+
+      if (isStale()) {
+        cleanupStale();
+        return;
+      }
+
       playbackLeaseRef.current = lease;
       const response = await fetch("/api/tts", {
         body: JSON.stringify({ text: trimmed, voice: ttsVoice }),
@@ -214,6 +262,11 @@ export function ChainedComparison({
         method: "POST",
       });
 
+      if (isStale()) {
+        cleanupStale();
+        return;
+      }
+
       if (!response.ok) {
         const payload: unknown = await response.json().catch(() => null);
         throw new Error(
@@ -222,9 +275,15 @@ export function ChainedComparison({
       }
 
       const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
+
+      if (isStale()) {
+        cleanupStale();
+        return;
+      }
+
+      url = URL.createObjectURL(blob);
       audioUrlRef.current = url;
-      const audio = new Audio(url);
+      audio = new Audio(url);
       audioRef.current = audio;
       audio.onended = () => {
         stopAudio();
@@ -240,12 +299,27 @@ export function ChainedComparison({
         });
       }
 
+      if (isStale()) {
+        cleanupStale();
+        return;
+      }
+
       await audio.play();
+
+      if (isStale()) {
+        cleanupStale();
+        return;
+      }
 
       if (turnId !== null) {
         voiceMetrics.markFirstAudio(turnId);
       }
     } catch (caught) {
+      if (isStale()) {
+        cleanupStale();
+        return;
+      }
+
       stopAudio();
       setError(
         caught instanceof Error
@@ -263,6 +337,11 @@ export function ChainedComparison({
     const startedAt = Date.now();
     setSessionStartedAt(startedAt);
     sessionTimerRef.current = setTimeout(() => {
+      sessionGenerationRef.current += 1;
+      turnTokenRef.current += 1;
+      setSummaryBusy(false);
+      turnInFlightRef.current = false;
+      setBusy(false);
       void dictation.stop({ flush: false });
       stopAudio();
       setSessionStartedAt(null);
@@ -275,6 +354,8 @@ export function ChainedComparison({
   }
 
   function resetSession(): void {
+    sessionGenerationRef.current += 1;
+
     if (sessionTimerRef.current !== null) {
       clearTimeout(sessionTimerRef.current);
       sessionTimerRef.current = null;
@@ -294,6 +375,10 @@ export function ChainedComparison({
     setSummary(null);
     setIncompleteNotice(null);
     setLastApplied(null);
+    setSummaryBusy(false);
+    turnTokenRef.current += 1;
+    turnInFlightRef.current = false;
+    setBusy(false);
     setError(null);
     setNotice("Relace byla ukončena. Můžete začít novou.");
   }
@@ -313,7 +398,13 @@ export function ChainedComparison({
       return;
     }
 
+    sessionGenerationRef.current += 1;
+    const generation = sessionGenerationRef.current;
+    const turnToken = ++turnTokenRef.current;
+    stopAudio();
+
     turnInFlightRef.current = true;
+    setSummaryBusy(false);
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -346,6 +437,7 @@ export function ChainedComparison({
         body: JSON.stringify({
           kind: "turn",
           selectedNoteId: selectedNote?.noteId,
+          selectedNoteVersion: selectedNote?.version,
           selection,
           transcript: trimmed,
         }),
@@ -353,6 +445,11 @@ export function ChainedComparison({
         method: "POST",
       });
       const payload: unknown = await response.json().catch(() => null);
+
+      if (generation !== sessionGenerationRef.current) {
+        return;
+      }
+
       voiceMetrics.recordToolRoundTrip(
         metricsTurn,
         Date.now() - requestStartedAt,
@@ -441,6 +538,10 @@ export function ChainedComparison({
         void speak(candidate.speechText, metricsTurn);
       }
     } catch (caught) {
+      if (generation !== sessionGenerationRef.current) {
+        return;
+      }
+
       if (!recordedError) {
         voiceMetrics.recordError(metricsTurn, "chained_request_failed");
       }
@@ -452,9 +553,12 @@ export function ChainedComparison({
       );
     } finally {
       voiceMetrics.finishTurn(metricsTurn);
-      metricsTurnRef.current = null;
-      turnInFlightRef.current = false;
-      setBusy(false);
+
+      if (turnToken === turnTokenRef.current) {
+        metricsTurnRef.current = null;
+        turnInFlightRef.current = false;
+        setBusy(false);
+      }
     }
   }
 
@@ -470,6 +574,8 @@ export function ChainedComparison({
       voiceMetrics.markBargeIn(bargeTurn);
     }
 
+    sessionGenerationRef.current += 1;
+    setSummaryBusy(false);
     stopAudio();
 
     if (interrupting && bargeTurn !== null) {
@@ -535,14 +641,19 @@ export function ChainedComparison({
       return;
     }
 
+    sessionGenerationRef.current += 1;
+    setSummaryBusy(false);
+    stopAudio();
     setSelection({ end, start });
     setNotice(`Označená pasáž: ${end - start} znaků.`);
   }
 
-  function selectResult(noteId: string, title: string): void {
+  function selectResult(noteId: string, title: string, version?: number): void {
     voiceMetrics.recordSelection("chained", null);
+    sessionGenerationRef.current += 1;
+    setSummaryBusy(false);
     stopAudio();
-    setSelectedNote({ noteId, title });
+    setSelectedNote({ noteId, title, version });
     setSelection(null);
     setLastApplied(null);
     setNotice(`Vybraná poznámka: ${title}.`);
@@ -553,6 +664,8 @@ export function ChainedComparison({
       return;
     }
 
+    const offer = outcome;
+    const generation = sessionGenerationRef.current;
     setSummaryBusy(true);
     setError(null);
 
@@ -560,7 +673,8 @@ export function ChainedComparison({
       const response = await fetch("/api/voice-agent/chained", {
         body: JSON.stringify({
           kind: "summary",
-          noteId: outcome.noteId,
+          noteId: offer.noteId,
+          expectedVersion: offer.noteVersion,
           selection,
         }),
         headers: { "content-type": "application/json" },
@@ -586,6 +700,18 @@ export function ChainedComparison({
       }
 
       const next = result as ChainedSummaryResult;
+
+      if (
+        generation !== sessionGenerationRef.current ||
+        outcomeRef.current?.kind !== "summary_offer" ||
+        outcomeRef.current.noteId !== offer.noteId ||
+        outcomeRef.current.noteVersion !== offer.noteVersion ||
+        next.noteId !== offer.noteId ||
+        next.noteVersion !== offer.noteVersion
+      ) {
+        return;
+      }
+
       setSummary(next);
 
       if (metricsSessionRef.current === null) {
@@ -608,13 +734,17 @@ export function ChainedComparison({
 
       void speak(next.summaryText, null);
     } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "Shrnutí se nepodařilo vytvořit.",
-      );
+      if (generation === sessionGenerationRef.current) {
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : "Shrnutí se nepodařilo vytvořit.",
+        );
+      }
     } finally {
-      setSummaryBusy(false);
+      if (generation === sessionGenerationRef.current) {
+        setSummaryBusy(false);
+      }
     }
   }
 
@@ -744,6 +874,12 @@ export function ChainedComparison({
 
     try {
       const history = await fetchRevisions(applied.noteId);
+
+      if (history.currentVersion !== applied.version) {
+        throw new Error(
+          "Poznámka se mezitím změnila. Vrácení by mohlo zrušit cizí novější změnu; načtěte historii znovu.",
+        );
+      }
 
       if (!history.canUndo || history.undoRevisionId === null) {
         throw new Error("Poslední změna už není k dispozici pro vrácení.");
@@ -977,7 +1113,7 @@ export function ChainedComparison({
                 <button
                   className="rounded-lg border border-stone-300 px-3 py-1.5 text-sm font-semibold text-stone-800 hover:bg-stone-100"
                   onClick={() => {
-                    selectResult(result.noteId, result.title);
+                    selectResult(result.noteId, result.title, result.version);
                   }}
                   type="button"
                 >

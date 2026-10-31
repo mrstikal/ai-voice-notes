@@ -405,6 +405,46 @@ describe("P19 read-aloud route", () => {
     expect(cachedManifest.sections[0]?.cached).toBe(true);
   });
 
+  it("does not turn a quoted cache hit into paid synthesis after the cache was cleared", async () => {
+    const { handler, tts, cache } = route();
+    const manifestResponse = await handler(request({ body: selection }));
+    const manifest = (await manifestResponse.json()) as {
+      sourceHash: string;
+      sections: Array<{ cached: boolean }>;
+    };
+    const sectionBody = {
+      ...selection,
+      sectionIndex: 0,
+      expectedSourceHash: manifest.sourceHash,
+    };
+
+    await handler(request({ body: sectionBody }));
+    expect(tts.synthesize).toHaveBeenCalledTimes(1);
+
+    const cachedManifestResponse = await handler(request({ body: selection }));
+    const cachedManifest = (await cachedManifestResponse.json()) as {
+      cacheHit: boolean;
+      sections: Array<{ cached: boolean }>;
+    };
+
+    expect(cachedManifest.cacheHit).toBe(true);
+    expect(cachedManifest.sections[0]?.cached).toBe(true);
+
+    await cache.clear();
+    tts.synthesize.mockClear();
+
+    const response = await handler(
+      request({ body: { ...sectionBody, expectCached: true } }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "tts_cache_changed" },
+    });
+    expect(tts.synthesize).not.toHaveBeenCalled();
+    expect(manifest.sections[0]?.cached).toBe(false);
+  });
+
   it("rejects a stale source hash before any provider call", async () => {
     const { handler, tts } = route();
     const manifestResponse = await handler(request({ body: selection }));

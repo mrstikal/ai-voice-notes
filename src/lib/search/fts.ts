@@ -38,6 +38,7 @@ export interface SearchResultItem {
   readonly tags: string[];
   readonly snippet: string;
   readonly updatedAt: Date;
+  readonly version?: number;
 }
 
 export interface SearchResult {
@@ -248,6 +249,7 @@ export async function searchNotesFullText(
       n.title,
       n.category,
       n.updated_at,
+      n.version,
       coalesce((
         SELECT array_agg(t.tag ORDER BY t.tag)
         FROM note_tags AS t
@@ -270,6 +272,7 @@ export async function searchNotesFullText(
     tags: string[];
     content_plain: string;
     updated_at: Date;
+    version: number;
     total: number | string;
   }>;
   const total = rows[0] === undefined ? 0 : Number(rows[0].total);
@@ -284,6 +287,7 @@ export async function searchNotesFullText(
       tags: row.tags,
       title: row.title,
       updatedAt: row.updated_at,
+      version: row.version,
     })),
     page: input.page,
     pageSize: SEARCH_PAGE_SIZE,

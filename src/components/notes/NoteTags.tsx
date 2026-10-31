@@ -165,7 +165,10 @@ export function NoteTags({
       const response = await fetch(`/api/notes/${note.id}/ai-suggest`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ kind: "tag_suggestions" }),
+        body: JSON.stringify({
+          kind: "tag_suggestions",
+          expectedVersion: note.version,
+        }),
       });
 
       if (!response.ok) {

@@ -186,6 +186,33 @@ describe("loadConfig", () => {
     ).toThrow(ConfigurationError);
   });
 
+  it("rejects a PostgreSQL host query parameter that leaves loopback", () => {
+    expect(() =>
+      configWith({
+        DATABASE_URL:
+          "postgresql://ai_voice_notes:ai_voice_notes@127.0.0.1:5432/ai_voice_notes?host=db.example.com",
+      }),
+    ).toThrow(/parametr host/);
+    expect(() =>
+      configWith({
+        TEST_DATABASE_URL:
+          "postgresql://127.0.0.1/notes_test?host=10.0.0.5",
+      }),
+    ).toThrow(ConfigurationError);
+    expect(() =>
+      configWith({
+        DATABASE_URL:
+          "postgresql://127.0.0.1/notes?host=127.0.0.1&host=db.example.com",
+      }),
+    ).toThrow(ConfigurationError);
+    expect(
+      configWith({
+        DATABASE_URL:
+          "postgresql://ai_voice_notes:ai_voice_notes@127.0.0.1:5432/ai_voice_notes?host=localhost",
+      }).databaseUrl,
+    ).toContain("host=localhost");
+  });
+
   it("parses bounded numeric settings", () => {
     const config = configWith({
       NOTE_MAX_CHARACTERS: "15000",

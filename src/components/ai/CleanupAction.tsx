@@ -123,6 +123,7 @@ export function CleanupAction({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           kind: "cleanup",
+          expectedVersion: note.version,
           blockIndex: selectedParagraph.blockIndex,
           properNames: validatedNames,
         }),

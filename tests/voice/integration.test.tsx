@@ -590,6 +590,36 @@ describe("P17 pure Markdown rendering", () => {
     expect(markdown).toBe("- První položka\n\nDalší věta.");
   });
 
+  it("keeps an explicit list end across a spoken stop and a new session", () => {
+    const session = new VoiceFormattingSession();
+    let markdown = "";
+    let cursor = 0;
+
+    for (const segment of [
+      "Začni seznam.",
+      "První položka.",
+      "Konec seznamu.",
+      "Stop.",
+    ]) {
+      const batch = session.accept(segment);
+      const applied = applyVoicePartsToMarkdown(
+        markdown,
+        cursor,
+        batch.parts,
+      );
+      markdown = applied.content;
+      cursor = applied.cursor;
+    }
+
+    session.flush();
+    session.startNewSession();
+
+    const batch = session.accept("Další věta.");
+    const applied = applyVoicePartsToMarkdown(markdown, cursor, batch.parts);
+
+    expect(applied.content).toBe("- První položka\n\nDalší věta.");
+  });
+
   it("strips only final sentence punctuation from composed list items", () => {
     const session = new VoiceFormattingSession();
     const parts = [

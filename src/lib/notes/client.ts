@@ -111,6 +111,20 @@ export async function updateNote(
   });
 }
 
+export async function saveVoiceContent(
+  id: string,
+  input: {
+    baselineContentMd: string;
+    contentMd: string;
+    expectedVersion: number;
+  },
+): Promise<NoteDetail> {
+  return requestJson<NoteDetail>(`/api/notes/${id}/voice-content`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
 export async function updateNoteMetadata(
   id: string,
   input: {

@@ -32,14 +32,37 @@ export const chainedRequestSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("turn"),
       selectedNoteId: z.string().uuid().optional(),
+      selectedNoteVersion: z
+        .number()
+        .int()
+        .min(1)
+        .max(2_147_483_647)
+        .optional(),
       selection: selectionSchema.nullable().optional(),
       transcript: z.string().trim().min(1, "Přepis nesmí být prázdný."),
     })
-    .strict(),
+    .strict()
+    .superRefine((value, context) => {
+      if (
+        value.selectedNoteId !== undefined &&
+        value.selectedNoteVersion === undefined
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "Vybraná poznámka musí mít ověřenou verzi.",
+          path: ["selectedNoteVersion"],
+        });
+      }
+    }),
   z
     .object({
       kind: z.literal("summary"),
       noteId: z.string().uuid(),
+      expectedVersion: z
+        .number()
+        .int()
+        .min(1)
+        .max(2_147_483_647),
       selection: selectionSchema.nullable().optional(),
     })
     .strict(),
@@ -74,7 +97,11 @@ export function createChainedRouteHandler(
           return jsonOk({
             kind: "summary",
             summary: await generateChainedSummary(
-              { noteId: data.noteId, selection: data.selection },
+              {
+                noteId: data.noteId,
+                expectedVersion: data.expectedVersion,
+                selection: data.selection,
+              },
               dependencies,
             ),
           });
@@ -85,6 +112,7 @@ export function createChainedRouteHandler(
           outcome: await runChainedTurn(
             {
               selectedNoteId: data.selectedNoteId,
+              selectedNoteVersion: data.selectedNoteVersion,
               selection: data.selection,
               transcript: data.transcript,
             },

@@ -43,7 +43,7 @@ describe("LlmSettings", () => {
     expect(screen.getByText(/ověřená/)).toBeDefined();
     expect(screen.getByText(/2026-10-27/)).toBeDefined();
     expect(
-      screen.getByText(/AI úpravy se v této fázi ještě nezobrazují/),
+      screen.getByText(/AI úpravy poznámek jsou\s+dostupné/),
     ).toBeDefined();
   });
 

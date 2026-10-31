@@ -8,6 +8,7 @@ import type { JSONContent } from "@tiptap/core";
 
 import { NoteEditor } from "../../src/components/notes/NoteEditor";
 import type { NoteDetail } from "../../src/lib/notes/client";
+import { readStoredDraft } from "../../src/lib/notes/draft";
 import {
   VisualConversionError,
   assertVisualEditorRoundTrip,
@@ -31,6 +32,13 @@ const emptyRect = {
   x: 0,
   y: 0,
 } as DOMRect;
+
+if (!document.elementFromPoint) {
+  Object.defineProperty(document, "elementFromPoint", {
+    configurable: true,
+    value: () => document.body,
+  });
+}
 
 if (!Range.prototype.getClientRects) {
   Object.defineProperty(Range.prototype, "getClientRects", {
@@ -361,8 +369,26 @@ describe("NoteEditor visual round trip", () => {
       expect(sourceTextarea().value).toContain("© 2026");
     });
   });
-});
 
+  it("flushes a pending visual edit into recovery storage when unmounted", async () => {
+    const { note, unmount, user } = renderEditor({
+      contentMd: "Původní text.",
+    });
+
+    await user.click(screen.getByRole("button", { name: "Vizuální režim" }));
+    const visual = await screen.findByRole("textbox", {
+      name: "Vizuální editor poznámky",
+    });
+    visual.focus();
+    await user.type(visual, " Přidaný text");
+
+    unmount();
+
+    expect(readStoredDraft(note.id)?.contentMd).toContain(
+      "Přidaný text",
+    );
+  });
+});
 
 describe("Tiptap Markdown subset smoke test", () => {
   const cases: Array<{ label: string; markdown: string }> = [
@@ -463,6 +489,37 @@ describe("Tiptap Markdown subset smoke test", () => {
     expect(() => convertMarkdownToVisual(markdown)).toThrow(
       VisualConversionError,
     );
+  });
+
+  it("keeps entity-like text in a newly entered link destination intact", () => {
+    const json: JSONContent = {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            {
+              text: "odkaz",
+              type: "text",
+              marks: [
+                {
+                  type: "link",
+                  attrs: {
+                    href: "https://example.com/?a=1&copy=2",
+                    title: null,
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    const markdown = serializeVisualJson(json);
+
+    expect(markdown).toContain("https://example.com/?a=1&copy=2");
+    expect(markdown).not.toContain("©");
   });
 
   it("serializes a document with an empty paragraph", () => {

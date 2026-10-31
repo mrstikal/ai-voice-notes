@@ -144,7 +144,7 @@ describe("SummaryAction", () => {
     });
     expect(
       JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body)),
-    ).toEqual({ kind: "summary", scope: "full" });
+    ).toEqual({ expectedVersion: 1, kind: "summary", scope: "full" });
     expect(screen.getByTestId("summary-artifact").textContent).toContain(
       summaryText,
     );

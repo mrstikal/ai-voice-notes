@@ -98,9 +98,14 @@ export function SummaryAction({
         headers: { "content-type": "application/json" },
         body: JSON.stringify(
           scope === "full"
-            ? { kind: "summary", scope: "full" }
+            ? {
+                kind: "summary",
+                expectedVersion: note.version,
+                scope: "full",
+              }
             : {
                 kind: "summary",
+                expectedVersion: note.version,
                 scope: "range",
                 start: selection.start,
                 end: selection.end,

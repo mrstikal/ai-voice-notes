@@ -264,7 +264,7 @@ describe("P52 chained intent", () => {
     );
 
     const outcome = await runChainedTurn(
-      { selectedNoteId: note().id, transcript: "Přečti poslední odstavec." },
+      { selectedNoteId: note().id, selectedNoteVersion: 3, transcript: "Přečti poslední odstavec." },
       current.dependencies,
     );
 
@@ -290,7 +290,7 @@ describe("P52 chained intent", () => {
     );
 
     const outcome = await runChainedTurn(
-      { selectedNoteId: note().id, transcript: "Přečti poznámku." },
+      { selectedNoteId: note().id, selectedNoteVersion: 3, transcript: "Přečti poznámku." },
       current.dependencies,
     );
 
@@ -305,7 +305,7 @@ describe("P52 chained intent", () => {
     const current = harness(intent({ action: "summarize_note" }));
 
     const outcome = await runChainedTurn(
-      { selectedNoteId: note().id, transcript: "Shrň poznámku." },
+      { selectedNoteId: note().id, selectedNoteVersion: 3, transcript: "Shrň poznámku." },
       current.dependencies,
     );
 
@@ -321,7 +321,7 @@ describe("P52 chained intent", () => {
     expect(current.llm.requestSummary).not.toHaveBeenCalled();
 
     const summary = await generateChainedSummary(
-      { noteId: note().id },
+      { noteId: note().id, expectedVersion: 3 },
       current.dependencies,
     );
     expect(summary).toMatchObject({
@@ -329,6 +329,42 @@ describe("P52 chained intent", () => {
       summaryText: "Shrnutí migrace.",
     });
     expect(current.llm.requestSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a selected note version that differs from the reviewed one", async () => {
+    const current = harness(intent({ action: "summarize_note" }));
+
+    await expect(
+      runChainedTurn(
+        {
+          selectedNoteId: note().id,
+          selectedNoteVersion: 2,
+          transcript: "Shrň poznámku.",
+        },
+        current.dependencies,
+      ),
+    ).rejects.toMatchObject({ code: "note_stale", status: 409 });
+    expect(current.llm.requestSummary).not.toHaveBeenCalled();
+
+    await expect(
+      generateChainedSummary(
+        { noteId: note().id, expectedVersion: 2 },
+        current.dependencies,
+      ),
+    ).rejects.toMatchObject({ code: "note_stale", status: 409 });
+    expect(current.llm.requestSummary).not.toHaveBeenCalled();
+  });
+
+  it("refuses a selected note without a reviewed version", async () => {
+    const current = harness(intent({ action: "get_note" }));
+
+    await expect(
+      runChainedTurn(
+        { selectedNoteId: note().id, transcript: "Přečti poznámku." },
+        current.dependencies,
+      ),
+    ).rejects.toMatchObject({ code: "note_stale", status: 409 });
+    expect(current.llm.requestSummary).not.toHaveBeenCalled();
   });
 
   it("accumulates spoken segments and formats a task deterministically", async () => {
@@ -351,7 +387,7 @@ describe("P52 chained intent", () => {
       }),
     );
     const outcome = await runChainedTurn(
-      { selectedNoteId: note().id, transcript: "Přidej úkol koupit mléko." },
+      { selectedNoteId: note().id, selectedNoteVersion: 3, transcript: "Přidej úkol koupit mléko." },
       current.dependencies,
     );
 
@@ -379,7 +415,7 @@ describe("P52 chained intent", () => {
     );
 
     const outcome = await runChainedTurn(
-      { selectedNoteId: note().id, transcript: "Přidej úkol koupit mléko." },
+      { selectedNoteId: note().id, selectedNoteVersion: 3, transcript: "Přidej úkol koupit mléko." },
       current.dependencies,
     );
 
@@ -429,7 +465,7 @@ describe("P52 chained intent", () => {
 
     await expect(
       runChainedTurn(
-        { selectedNoteId: note().id, transcript: "Nahraď větu." },
+        { selectedNoteId: note().id, selectedNoteVersion: 3, transcript: "Nahraď větu." },
         ambiguous.dependencies,
       ),
     ).rejects.toMatchObject({
@@ -448,7 +484,7 @@ describe("P52 chained intent", () => {
     );
     await expect(
       runChainedTurn(
-        { selectedNoteId: note().id, transcript: "Přečti." },
+        { selectedNoteId: note().id, selectedNoteVersion: 3, transcript: "Přečti." },
         unavailable.dependencies,
       ),
     ).rejects.toMatchObject({
@@ -547,6 +583,7 @@ describe("P52 chained route", () => {
         body: JSON.stringify({
           kind: "turn",
           selectedNoteId: note().id,
+          selectedNoteVersion: 3,
           transcript: "Přečti.",
         }),
         headers: {

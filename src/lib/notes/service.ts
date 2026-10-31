@@ -57,6 +57,14 @@ export const updateNoteInputSchema = z
   })
   .strict();
 
+export const updateNoteVoiceContentInputSchema = z
+  .object({
+    baselineContentMd: z.string(),
+    contentMd: z.string(),
+    expectedVersion: expectedVersionSchema,
+  })
+  .strict();
+
 export const updateNoteMetadataInputSchema = z
   .object({
     category: z.string().max(50).nullable(),
@@ -102,6 +110,9 @@ export const saveMeetingInputSchema = z
 
 export type CreateNoteInput = z.infer<typeof createNoteInputSchema>;
 export type UpdateNoteInput = z.infer<typeof updateNoteInputSchema>;
+export type UpdateNoteVoiceContentInput = z.infer<
+  typeof updateNoteVoiceContentInputSchema
+>;
 export type UpdateNoteMetadataInput = z.infer<typeof updateNoteMetadataInputSchema>;
 export type UpdateNoteTitleInput = z.infer<typeof updateNoteTitleInputSchema>;
 export type DeleteNoteInput = z.infer<typeof deleteNoteInputSchema>;
@@ -162,6 +173,10 @@ export interface NoteService {
   getNote(id: string): Promise<NoteDetailDto>;
   createNote(input: CreateNoteInput): Promise<NoteDetailDto>;
   updateNote(id: string, input: UpdateNoteInput): Promise<NoteDetailDto>;
+  updateNoteVoiceContent(
+    id: string,
+    input: UpdateNoteVoiceContentInput,
+  ): Promise<NoteDetailDto>;
   updateNoteMetadata(
     id: string,
     input: UpdateNoteMetadataInput,
@@ -815,6 +830,70 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
       return result;
     },
 
+    async updateNoteVoiceContent(id, input) {
+      assertNoteId(id);
+      let contentChanged = false;
+
+      const result = await db.transaction(async (tx) => {
+        const current = await repository.findNoteByIdForUpdate(tx, id);
+        if (!current || current.deletedAt) {
+          throw new NoteNotFoundError();
+        }
+
+        if (current.version !== input.expectedVersion) {
+          throw new NoteConflictError(current.version);
+        }
+
+        const tags = await repository.getNoteTags(tx, id);
+        contentChanged = current.contentMd !== input.contentMd;
+        prepareNoteContent(current.title, input.baselineContentMd, limits);
+        const prepared = prepareNoteContent(
+          current.title,
+          input.contentMd,
+          limits,
+        );
+        const updated = await repository.updateNoteCas(tx, {
+          id,
+          expectedVersion: input.expectedVersion,
+          title: current.title,
+          contentMd: input.contentMd,
+          contentPlain: prepared.contentPlain,
+        });
+
+        if (!updated) {
+          await throwCasFailure(tx, id, false);
+          throw new NoteConflictError(current.version);
+        }
+
+        await repository.insertRevision(tx, {
+          noteId: id,
+          noteVersion: updated.version,
+          reason: "voice",
+          beforeSnapshot: {
+            title: current.title,
+            contentMd: input.baselineContentMd,
+            category: current.category,
+            tags,
+          },
+          afterSnapshot: toSnapshot(updated, tags),
+        });
+        await refreshNoteSearch(tx, id);
+        await refreshNoteChunks(tx, updated, {
+          reuseReadyEmbeddingsFromVersion: contentChanged
+            ? undefined
+            : current.version,
+        });
+
+        return toDetail(updated, tags);
+      });
+
+      if (contentChanged) {
+        await purgeNoteTtsCacheBestEffort(options.ttsCache, id);
+      }
+
+      return result;
+    },
+
     async updateNoteMetadata(id, input) {
       assertNoteId(id);
       let normalized: ReturnType<typeof normalizeNoteMetadata>;
@@ -869,7 +948,9 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
           afterSnapshot: toSnapshot(updated, normalized.tags),
         });
         await refreshNoteSearch(tx, id);
-        await refreshNoteChunks(tx, updated);
+        await refreshNoteChunks(tx, updated, {
+          reuseReadyEmbeddingsFromVersion: current.version,
+        });
 
         return toDetail(updated, normalized.tags);
       });
@@ -916,7 +997,9 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
           afterSnapshot: toSnapshot(updated, tags),
         });
         await refreshNoteSearch(tx, id);
-        await refreshNoteChunks(tx, updated);
+        await refreshNoteChunks(tx, updated, {
+          reuseReadyEmbeddingsFromVersion: current.version,
+        });
 
         return toDetail(updated, tags);
       });

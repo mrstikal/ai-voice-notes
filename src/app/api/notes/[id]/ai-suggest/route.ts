@@ -54,6 +54,7 @@ export const dynamic = "force-dynamic";
 const cleanupRequestSchema = z
   .object({
     kind: z.literal("cleanup"),
+    expectedVersion: z.number().int().min(1).max(2_147_483_647),
     blockIndex: z.number().int().min(0).max(1_000_000),
     properNames: z
       .array(z.string().min(1).max(200))
@@ -66,6 +67,7 @@ const cleanupRequestSchema = z
 const summaryRequestSchema = z
   .object({
     kind: z.literal("summary"),
+    expectedVersion: z.number().int().min(1).max(2_147_483_647),
     scope: z.enum(["full", "range"]),
     start: z.number().int().nonnegative().optional(),
     end: z.number().int().nonnegative().optional(),
@@ -98,12 +100,14 @@ const summaryRequestSchema = z
 const tagSuggestionsRequestSchema = z
   .object({
     kind: z.literal("tag_suggestions"),
+    expectedVersion: z.number().int().min(1).max(2_147_483_647),
   })
   .strict();
 
 const taskSuggestionsRequestSchema = z
   .object({
     kind: z.literal("task_suggestions"),
+    expectedVersion: z.number().int().min(1).max(2_147_483_647),
     start: z.number().int().nonnegative(),
     end: z.number().int().nonnegative(),
   })
@@ -128,6 +132,7 @@ const taskApplyRequestSchema = z
 const meetingSuggestionRangeRequestSchema = z
   .object({
     kind: z.literal("meeting_summary_decisions"),
+    expectedVersion: z.number().int().min(1).max(2_147_483_647),
     start: z.number().int().nonnegative(),
     end: z.number().int().nonnegative(),
   })
@@ -144,6 +149,7 @@ const meetingSuggestionRangeRequestSchema = z
 const meetingTasksRequestSchema = z
   .object({
     kind: z.literal("meeting_tasks"),
+    expectedVersion: z.number().int().min(1).max(2_147_483_647),
     start: z.number().int().nonnegative(),
     end: z.number().int().nonnegative(),
   })
@@ -184,6 +190,17 @@ export const POST = createGuardedJsonRoute<
     try {
       const { id } = await routeContext!.params;
       const note = await getNoteService().getNote(id);
+
+      if (
+        data.kind !== "task_apply" &&
+        note.version !== data.expectedVersion
+      ) {
+        return jsonError(
+          409,
+          "note_stale",
+          "Poznámka se mezitím změnila. Načtěte ji znovu a zkuste to znovu.",
+        );
+      }
 
       if (data.kind === "meeting_summary_decisions") {
         const suggestion = await suggestMeetingSummaryDecisions({

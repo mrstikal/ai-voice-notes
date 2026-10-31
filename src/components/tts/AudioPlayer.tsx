@@ -671,14 +671,24 @@ export function AudioPlayer({
         }
 
         if (!response.ok) {
+          const cacheChanged = response.status === 409;
           const message = await readTtsErrorMessage(
             response,
             response.status === 429
               ? "Příliš mnoho požadavků na čtení nahlas. Zkuste to za chvíli znovu."
-              : "Tuto sekci se nepodařilo přečíst nahlas.",
+              : cacheChanged
+                ? "Sekce už není v cache. Načtěte znovu rozsah a cenu a potvrďte novou cenu."
+                : "Tuto sekci se nepodařilo přečíst nahlas.",
           );
 
           if (generation === generationRef.current && mountedRef.current) {
+            if (cacheChanged) {
+              manifestRef.current = null;
+              setManifest(null);
+              setConsent(false);
+              setSelectedIndex(0);
+            }
+
             failPlayback(message);
           }
 
