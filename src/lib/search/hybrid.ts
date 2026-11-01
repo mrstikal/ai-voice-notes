@@ -1,8 +1,13 @@
 import type { SearchResultItem } from "./fts.ts";
 import type { SemanticSearchItem } from "./semantic.ts";
 
-export const HYBRID_COMPONENT_LIMIT = 20;
-export const HYBRID_RESULT_LIMIT = 20;
+import { readEnvInt } from "../env-limits.ts";
+
+export const HYBRID_COMPONENT_LIMIT = readEnvInt(
+  "HYBRID_COMPONENT_LIMIT",
+  20,
+);
+export const HYBRID_RESULT_LIMIT = readEnvInt("HYBRID_RESULT_LIMIT", 20);
 export const RRF_K = 60;
 
 export interface HybridSearchResponse {

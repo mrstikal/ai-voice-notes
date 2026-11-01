@@ -10,6 +10,7 @@ import {
   toUsageErrorResponse,
 } from "../ai/usage.ts";
 import { ConfigurationError, loadConfig } from "../config.ts";
+import { readEnvInt, readRateLimit } from "../env-limits.ts";
 import {
   createGuardedJsonRoute,
   jsonError,
@@ -18,14 +19,22 @@ import {
 
 export const TTS_MODEL_ID = "elevenlabs/eleven-v4-turbo" as const;
 export const TTS_RESPONSE_FORMAT = "mp3" as const;
-export const TTS_MAX_INPUT_CODE_UNITS = 3_500;
-export const TTS_MAX_AUDIO_BYTES = 8 * 1024 * 1024;
-export const TTS_TIMEOUT_MS = 60_000;
-export const TTS_REQUEST_MAX_BYTES = 32 * 1024;
+export const TTS_MAX_INPUT_CODE_UNITS = readEnvInt(
+  "TTS_MAX_INPUT_CODE_UNITS",
+  3_500,
+);
+export const TTS_MAX_AUDIO_BYTES = readEnvInt(
+  "TTS_MAX_AUDIO_BYTES",
+  8 * 1024 * 1024,
+);
+export const TTS_TIMEOUT_MS = readEnvInt("TTS_TIMEOUT_MS", 60_000);
+export const TTS_REQUEST_MAX_BYTES = readEnvInt(
+  "TTS_REQUEST_MAX_BYTES",
+  32 * 1024,
+);
 export const TTS_OPERATION = "openrouter_tts";
 export const DEFAULT_TTS_RATE_LIMIT = {
-  limit: 5,
-  windowMs: 60_000,
+  ...readRateLimit("DEFAULT_TTS_RATE_LIMIT", 5),
   key: "tts",
 } as const satisfies RateLimitOptions & { readonly key?: string };
 export const TTS_USD_PER_INPUT_UNIT = 0.00004;

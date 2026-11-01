@@ -15,6 +15,7 @@ import {
   loadConfig,
   type AppConfig,
 } from "../config.ts";
+import { readEnvInt, readRateLimit } from "../env-limits.ts";
 import {
   TOKEN_TOOL_MAX_BYTES,
   createGuardedJsonRoute,
@@ -27,9 +28,18 @@ import { tokenRequestSchema } from "../security/schemas.ts";
 export const SCRIBE_REALTIME_MODEL_ID = "scribe_v2_realtime";
 export const SCRIBE_TOKEN_TYPE =
   ElevenLabs.SingleUseTokenType.RealtimeScribe;
-export const SCRIBE_TOKEN_TTL_SECONDS = 15 * 60;
-export const SCRIBE_TOKEN_TIMEOUT_SECONDS = 10;
-export const SCRIBE_SESSION_MAX_SECONDS = 180;
+export const SCRIBE_TOKEN_TTL_SECONDS = readEnvInt(
+  "SCRIBE_TOKEN_TTL_SECONDS",
+  15 * 60,
+);
+export const SCRIBE_TOKEN_TIMEOUT_SECONDS = readEnvInt(
+  "SCRIBE_TOKEN_TIMEOUT_SECONDS",
+  10,
+);
+export const SCRIBE_SESSION_MAX_SECONDS = readEnvInt(
+  "SCRIBE_SESSION_MAX_SECONDS",
+  180,
+);
 export const SCRIBE_REALTIME_USD_PER_HOUR = 0.39;
 export const SCRIBE_TOKEN_ESTIMATED_MAX_COST_USD = 0.0195;
 export const SCRIBE_TOKEN_OPERATION = "elevenlabs_scribe_token";
@@ -356,8 +366,7 @@ export function toScribeTokenErrorResponse(error: unknown): Response {
 }
 
 export const DEFAULT_SCRIBE_TOKEN_RATE_LIMIT = {
-  limit: 5,
-  windowMs: 60_000,
+  ...readRateLimit("DEFAULT_SCRIBE_TOKEN_RATE_LIMIT", 5),
   key: "scribe-token",
 } as const satisfies RateLimitOptions & { readonly key?: string };
 

@@ -8,6 +8,7 @@ import {
 } from "../ai/openrouter.ts";
 import { UsageServiceError } from "../ai/usage.ts";
 import { loadConfig } from "../config.ts";
+import { readEnvInt } from "../env-limits.ts";
 import { countCl100kTokens } from "./chunking.ts";
 
 export const EMBEDDING_MODEL_ID = "openai/text-embedding-3-small";
@@ -16,10 +17,22 @@ export const EMBEDDING_OPERATION = "embedding_reindex";
 export const EMBEDDING_QUERY_OPERATION = "embedding_query";
 export const EMBEDDING_REINDEX_REQUEST_KIND = "embedding_reindex";
 export const EMBEDDING_QUERY_REQUEST_KIND = "embedding_query";
-export const EMBEDDING_BATCH_MAX_TEXTS = 20;
-export const EMBEDDING_TEXT_MAX_CODE_UNITS = 8_000;
-export const EMBEDDING_RESPONSE_MAX_BYTES = 4 * 1024 * 1024;
-export const EMBEDDING_TIMEOUT_MS = 60_000;
+export const EMBEDDING_BATCH_MAX_TEXTS = readEnvInt(
+  "EMBEDDING_BATCH_MAX_TEXTS",
+  20,
+);
+export const EMBEDDING_TEXT_MAX_CODE_UNITS = readEnvInt(
+  "EMBEDDING_TEXT_MAX_CODE_UNITS",
+  8_000,
+);
+export const EMBEDDING_RESPONSE_MAX_BYTES = readEnvInt(
+  "EMBEDDING_RESPONSE_MAX_BYTES",
+  4 * 1024 * 1024,
+);
+export const EMBEDDING_TIMEOUT_MS = readEnvInt(
+  "EMBEDDING_TIMEOUT_MS",
+  60_000,
+);
 export const EMBEDDING_MIN_ESTIMATE_USD = 0.000001;
 export const EMBEDDING_USD_PER_TOKEN = 0.00000002;
 export const EMBEDDING_ESTIMATE_MARGIN = 1.25;

@@ -14,6 +14,7 @@ import {
   loadConfig,
   type AppConfig,
 } from "../config.ts";
+import { readEnvInt, readEnvNumber, readRateLimit } from "../env-limits.ts";
 import { countGraphemes } from "../notes/limits.ts";
 import {
   MEETING_AUDIO_MAX_BYTES,
@@ -37,16 +38,30 @@ export const SCRIBE_BATCH_PROVIDER = "elevenlabs";
 export const SCRIBE_BATCH_OPERATION = "elevenlabs_scribe_batch";
 export const SCRIBE_BATCH_LANGUAGE_CODE = "cs";
 export const SCRIBE_BATCH_USD_PER_HOUR = 0.22;
-export const SCRIBE_BATCH_TIMEOUT_MS = 240_000;
-export const SCRIBE_BATCH_MAX_WORDS = 300_000;
-export const SCRIBE_BATCH_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
-export const MEETING_TRANSCRIPT_MAX_GRAPHEMES = 60_000;
-export const MEETING_TRANSCRIPT_MAX_APPROVAL_USD = 1;
+export const SCRIBE_BATCH_TIMEOUT_MS = readEnvInt(
+  "SCRIBE_BATCH_TIMEOUT_MS",
+  240_000,
+);
+export const SCRIBE_BATCH_MAX_WORDS = readEnvInt(
+  "SCRIBE_BATCH_MAX_WORDS",
+  300_000,
+);
+export const SCRIBE_BATCH_MAX_RESPONSE_BYTES = readEnvInt(
+  "SCRIBE_BATCH_MAX_RESPONSE_BYTES",
+  8 * 1024 * 1024,
+);
+export const MEETING_TRANSCRIPT_MAX_GRAPHEMES = readEnvInt(
+  "MEETING_TRANSCRIPT_MAX_GRAPHEMES",
+  60_000,
+);
+export const MEETING_TRANSCRIPT_MAX_APPROVAL_USD = readEnvNumber(
+  "MEETING_TRANSCRIPT_MAX_APPROVAL_USD",
+  1,
+);
 export const MEETING_TRANSCRIPT_FILE_NAME = "meeting-upload";
 
 export const DEFAULT_MEETING_TRANSCRIBE_RATE_LIMIT = {
-  limit: 3,
-  windowMs: 60_000,
+  ...readRateLimit("DEFAULT_MEETING_TRANSCRIBE_RATE_LIMIT", 3),
   key: "meeting-transcribe",
 } as const satisfies RateLimitOptions & { readonly key?: string };
 

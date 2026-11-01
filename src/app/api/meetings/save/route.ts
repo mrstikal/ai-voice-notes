@@ -10,6 +10,7 @@ import {
   type SaveMeetingResult,
 } from "@/lib/notes/service";
 import { MEETING_SAVE_MAX_BYTES } from "@/lib/meetings/save-shared";
+import { readRateLimit } from "@/lib/env-limits";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,8 +25,7 @@ export function createMeetingSaveHandler(service: MeetingSaveService) {
     schema: saveMeetingInputSchema,
     methods: ["POST"],
     rateLimit: {
-      limit: 5,
-      windowMs: 60_000,
+      ...readRateLimit("MEETING_SAVE_RATE_LIMIT", 5),
       key: "meeting-save",
     },
     handler: async ({ data }) => {

@@ -9,6 +9,7 @@ import {
 } from "@/lib/ai/usage";
 import { ConfigurationError } from "@/lib/config";
 import { getDb } from "@/lib/db/client";
+import { readRateLimit } from "@/lib/env-limits";
 import {
   EMBEDDING_MODEL_ID,
   EmbeddingError,
@@ -32,8 +33,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export const DEFAULT_REINDEX_RATE_LIMIT = {
-  limit: 6,
-  windowMs: 60_000,
+  ...readRateLimit("DEFAULT_REINDEX_RATE_LIMIT", 6),
   key: "search-reindex",
 } as const satisfies RateLimitOptions & { readonly key?: string };
 

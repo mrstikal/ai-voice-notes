@@ -17,6 +17,10 @@ import {
 } from "react";
 
 import {
+  FINAL_COMMIT_TIMEOUT_MS,
+  FLUSH_SETTLE_MS,
+} from "@/lib/voice/dictation-timing";
+import {
   setMicrophoneOwnerActive,
 } from "@/lib/media/activity";
 import {
@@ -40,8 +44,10 @@ import {
   type AcceptedTranscriptSegment,
 } from "@/lib/voice/transcript-session";
 
-export const FINAL_COMMIT_TIMEOUT_MS = 1500;
-export const FLUSH_SETTLE_MS = 150;
+export {
+  FINAL_COMMIT_TIMEOUT_MS,
+  FLUSH_SETTLE_MS,
+} from "@/lib/voice/dictation-timing";
 
 const subscribeToWebLocks = () => () => undefined;
 const getWebLocksSnapshot = () => isWebLocksSupported();

@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { readRateLimit } from "../../../../../lib/env-limits.ts";
 import {
   createGuardedJsonRoute,
   jsonError,
@@ -42,9 +43,8 @@ export function createVoiceAgentPendingRouteHandler(
     maxBytes: voiceAgentPendingMaxBytes,
     methods: ["POST"],
     rateLimit: options.rateLimit ?? {
+      ...readRateLimit("VOICE_AGENT_PENDING_RATE_LIMIT", 60),
       key: "voice-agent-pending",
-      limit: 60,
-      windowMs: 60_000,
     },
     schema: voiceAgentPendingRequestSchema,
     handler: async ({ data, routeContext }) => {

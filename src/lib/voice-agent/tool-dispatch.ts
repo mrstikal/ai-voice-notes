@@ -41,10 +41,20 @@ import {
   type SearchNotesToolResult,
   type SummaryGenerator,
 } from "./read-services.ts";
+import { readEnvInt } from "../env-limits.ts";
 
-export const MAX_TOOL_CALLS_PER_TURN = 4;
-export const MAX_TOOL_CALLS_PER_SESSION = 20;
-export const MAX_ACTIVE_TOOL_SESSIONS = 20;
+export const MAX_TOOL_CALLS_PER_TURN = readEnvInt(
+  "MAX_TOOL_CALLS_PER_TURN",
+  4,
+);
+export const MAX_TOOL_CALLS_PER_SESSION = readEnvInt(
+  "MAX_TOOL_CALLS_PER_SESSION",
+  20,
+);
+export const MAX_ACTIVE_TOOL_SESSIONS = readEnvInt(
+  "MAX_ACTIVE_TOOL_SESSIONS",
+  20,
+);
 const TOOL_NAMES = new Set([
   "search_notes",
   "get_note",

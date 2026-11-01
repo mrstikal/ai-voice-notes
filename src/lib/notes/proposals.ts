@@ -12,6 +12,7 @@ import {
   type LlmOperation,
 } from "../ai/schemas.ts";
 import { getDb, type AppDatabase } from "../db/client.ts";
+import { readEnvInt } from "../env-limits.ts";
 import { editProposals } from "../db/schema.ts";
 import { loadConfig } from "../config.ts";
 import { jsonError } from "../security/http.ts";
@@ -46,8 +47,14 @@ import {
 } from "./operations.ts";
 
 
-export const PROPOSAL_EXPIRY_MS = 5 * 60_000;
-export const PROPOSAL_TEXT_MAX_BYTES = 32 * 1024;
+export const PROPOSAL_EXPIRY_MS = readEnvInt(
+  "PROPOSAL_EXPIRY_MS",
+  5 * 60_000,
+);
+export const PROPOSAL_TEXT_MAX_BYTES = readEnvInt(
+  "PROPOSAL_TEXT_MAX_BYTES",
+  32 * 1024,
+);
 
 const expectedVersionSchema = z
   .number()

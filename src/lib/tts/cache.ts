@@ -9,9 +9,13 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
+import { readEnvInt } from "../env-limits.ts";
 import { TTS_RESPONSE_FORMAT } from "./provider.ts";
 
-export const TTS_CACHE_MAX_BYTES = 200 * 1024 * 1024;
+export const TTS_CACHE_MAX_BYTES = readEnvInt(
+  "TTS_CACHE_MAX_BYTES",
+  200 * 1024 * 1024,
+);
 export const TTS_CACHE_VERSION = 1;
 
 const CACHE_KEY_PATTERN = /^[a-f0-9]{64}$/u;

@@ -1,4 +1,10 @@
-export const DRAFT_AUTOSAVE_DEBOUNCE_MS = 800;
+import { publicEnvInt } from "../env-limits.ts";
+
+export const DRAFT_AUTOSAVE_DEBOUNCE_MS = publicEnvInt(
+  process.env.NEXT_PUBLIC_DRAFT_AUTOSAVE_DEBOUNCE_MS,
+  "NEXT_PUBLIC_DRAFT_AUTOSAVE_DEBOUNCE_MS",
+  800,
+);
 
 export const DRAFT_STORAGE_PREFIX = "note-draft:";
 

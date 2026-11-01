@@ -4,6 +4,7 @@ import type { NodePgQueryResultHKT } from "drizzle-orm/node-postgres";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 
 import { loadConfig } from "../config.ts";
+import { readEnvInt } from "../env-limits.ts";
 import { getDb, type AppDatabase } from "../db/client.ts";
 import { aiBudget, aiUsage } from "../db/schema.ts";
 import type * as schema from "../db/schema.ts";
@@ -12,8 +13,11 @@ const USD_SCALE = 6;
 const MICROS_PER_USD = 1_000_000n;
 const MAX_USD_MICROS = 999_999_999_999n;
 const MAX_LABEL_LENGTH = 200;
-const MAX_PROVIDER_USAGE_BYTES = 16 * 1024;
-const SUMMARY_OPERATION_LIMIT = 50;
+const MAX_PROVIDER_USAGE_BYTES = readEnvInt(
+  "MAX_PROVIDER_USAGE_BYTES",
+  16 * 1024,
+);
+const SUMMARY_OPERATION_LIMIT = readEnvInt("SUMMARY_OPERATION_LIMIT", 50);
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

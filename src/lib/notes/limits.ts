@@ -1,4 +1,11 @@
-export const TITLE_MAX_GRAPHEMES = 160;
+import { publicEnvInt } from "../env-limits.ts";
+
+export const TITLE_MAX_GRAPHEMES = publicEnvInt(
+  process.env.NEXT_PUBLIC_TITLE_MAX_GRAPHEMES,
+  "NEXT_PUBLIC_TITLE_MAX_GRAPHEMES",
+  160,
+);
+
 export const CONTENT_MAX_GRAPHEMES = 20_000;
 
 const graphemeSegmenter = new Intl.Segmenter("cs", { granularity: "grapheme" });

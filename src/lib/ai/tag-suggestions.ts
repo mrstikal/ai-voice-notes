@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { StructuredLlmService } from "./structured.ts";
+import { readEnvInt } from "../env-limits.ts";
 import { countGraphemes } from "../notes/limits.ts";
 import {
   NOTE_CATEGORIES,
@@ -11,10 +12,22 @@ import {
 } from "../notes/tags.ts";
 
 export const TAG_SUGGESTIONS_SCHEMA_NAME = "note_tag_suggestions";
-export const TAG_SUGGESTION_MAX_TAGS = 5;
-export const TAG_SUGGESTION_MAX_SOURCE_GRAPHEMES = 8_000;
-export const TAG_SUGGESTION_MAX_PROMPT_CODE_UNITS = 12_000;
-export const TAG_SUGGESTION_TTL_MS = 5 * 60 * 1_000;
+export const TAG_SUGGESTION_MAX_TAGS = readEnvInt(
+  "TAG_SUGGESTION_MAX_TAGS",
+  5,
+);
+export const TAG_SUGGESTION_MAX_SOURCE_GRAPHEMES = readEnvInt(
+  "TAG_SUGGESTION_MAX_SOURCE_GRAPHEMES",
+  8_000,
+);
+export const TAG_SUGGESTION_MAX_PROMPT_CODE_UNITS = readEnvInt(
+  "TAG_SUGGESTION_MAX_PROMPT_CODE_UNITS",
+  12_000,
+);
+export const TAG_SUGGESTION_TTL_MS = readEnvInt(
+  "TAG_SUGGESTION_TTL_MS",
+  5 * 60 * 1_000,
+);
 
 export const TAG_SUGGESTIONS_JSON_SCHEMA = {
   type: "object",

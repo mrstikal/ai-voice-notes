@@ -5,10 +5,17 @@ import {
   type UsageService,
 } from "./usage.ts";
 import { ConfigurationError, loadConfig } from "../config.ts";
+import { readEnvInt } from "../env-limits.ts";
 
 export const OPENROUTER_API_BASE_URL = "https://openrouter.ai/api/v1";
-export const OPENROUTER_DEFAULT_TIMEOUT_MS = 60_000;
-export const OPENROUTER_ERROR_BODY_MAX_BYTES = 64 * 1024;
+export const OPENROUTER_DEFAULT_TIMEOUT_MS = readEnvInt(
+  "OPENROUTER_DEFAULT_TIMEOUT_MS",
+  60_000,
+);
+export const OPENROUTER_ERROR_BODY_MAX_BYTES = readEnvInt(
+  "OPENROUTER_ERROR_BODY_MAX_BYTES",
+  64 * 1024,
+);
 
 export interface OpenRouterTransportRequest {
   readonly url: string;

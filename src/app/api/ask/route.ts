@@ -4,6 +4,7 @@ import { OpenRouterHttpError } from "@/lib/ai/openrouter";
 import { UsageServiceError, toUsageErrorResponse } from "@/lib/ai/usage";
 import { ConfigurationError } from "@/lib/config";
 import { getDb } from "@/lib/db/client";
+import { readRateLimit } from "@/lib/env-limits";
 import {
   EMBEDDING_MODEL_ID,
   EMBEDDING_QUERY_OPERATION,
@@ -35,8 +36,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export const ASK_RATE_LIMIT = {
-  limit: process.env.NODE_ENV === "test" ? 1_000 : 6,
-  windowMs: 60_000,
+  ...readRateLimit(
+    "ASK_RATE_LIMIT",
+    process.env.NODE_ENV === "test" ? 1_000 : 6,
+  ),
   key: "ask-notes",
 } as const satisfies RateLimitOptions & { readonly key?: string };
 

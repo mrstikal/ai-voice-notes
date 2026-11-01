@@ -2,7 +2,10 @@
 
 import { useRef, useState, useSyncExternalStore } from "react";
 
-import { isUndoCommand } from "@/lib/ai/edit-prompts";
+import {
+  AI_SNIPPET_MAX_GRAPHEMES,
+  isUndoCommand,
+} from "@/lib/ai/edit-prompts";
 import type { LlmOperation } from "@/lib/ai/schemas";
 import type { LlmProviderStatus } from "@/lib/ai/structured";
 import { formatUsdAmount } from "@/lib/ai/usage-format";
@@ -31,8 +34,6 @@ import {
 import { useScribeDictation } from "@/components/voice/useScribeDictation";
 
 import { ChangePreview } from "./ChangePreview";
-
-const SNIPPET_MAX_GRAPHEMES = 1_200;
 
 interface InterpretResponse {
   readonly kind: "operation" | "unclear" | "undo";
@@ -173,10 +174,10 @@ export function AiEditControls({
 
     if (
       snippet.length > 0 &&
-      countGraphemes(snippet) > SNIPPET_MAX_GRAPHEMES
+      countGraphemes(snippet) > AI_SNIPPET_MAX_GRAPHEMES
     ) {
       setError(
-        `Vybraný text může mít nejvýše ${SNIPPET_MAX_GRAPHEMES} znaků.`,
+        `Vybraný text může mít nejvýše ${AI_SNIPPET_MAX_GRAPHEMES} znaků.`,
       );
       return;
     }
@@ -460,7 +461,7 @@ export function AiEditControls({
 
       <label className="mt-3 block text-sm font-medium text-stone-700">
         Vybraný text pro AI ({countGraphemes(snippet)} /{" "}
-        {SNIPPET_MAX_GRAPHEMES})
+        {AI_SNIPPET_MAX_GRAPHEMES})
         <textarea
           className="mt-1 min-h-24 w-full rounded-lg border border-stone-300 p-3 font-mono text-sm disabled:bg-stone-100"
           disabled={busy || disabled}

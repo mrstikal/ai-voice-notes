@@ -23,12 +23,16 @@ import type {
   RootContent,
 } from "mdast";
 
+import { readEnvInt } from "../env-limits.ts";
 import {
   assertLosslessConversionSupported,
   parseNoteMarkdown,
 } from "./markdown.ts";
 
-export const DOCX_EXPORT_MAX_BYTES = 8 * 1024 * 1024;
+export const DOCX_EXPORT_MAX_BYTES = readEnvInt(
+  "DOCX_EXPORT_MAX_BYTES",
+  8 * 1024 * 1024,
+);
 
 const CZECH_LANGUAGE = { value: "cs-CZ" } as const;
 const LIST_INDENT = 720;

@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { readRateLimit } from "../../../../lib/env-limits.ts";
 import {
   createGuardedJsonRoute,
   jsonError,
@@ -36,9 +37,8 @@ export function createVoiceAgentConfirmRouteHandler(
     maxBytes: voiceAgentConfirmMaxBytes,
     methods: ["POST"],
     rateLimit: options.rateLimit ?? {
+      ...readRateLimit("VOICE_AGENT_CONFIRM_RATE_LIMIT", 30),
       key: "voice-agent-confirm",
-      limit: 30,
-      windowMs: 60_000,
     },
     schema: voiceAgentConfirmRequestSchema,
     handler: async ({ data }) => {

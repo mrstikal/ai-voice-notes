@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { ConfigurationError } from "@/lib/config";
+import { readRateLimit } from "@/lib/env-limits";
 
 import { getStructuredLlmService } from "@/lib/ai/structured";
 import { getEditProposalService } from "@/lib/notes/proposals";
@@ -80,9 +81,8 @@ export function createChainedRouteHandler(
     maxBytes: 8 * 1024,
     methods: ["POST"],
     rateLimit: options.rateLimit ?? {
+      ...readRateLimit("VOICE_AGENT_CHAINED_RATE_LIMIT", 30),
       key: "voice-agent-chained",
-      limit: 30,
-      windowMs: 60_000,
     },
     schema: chainedRequestSchema,
     handler: async ({ data }) => {

@@ -1,10 +1,14 @@
 import { sql } from "drizzle-orm";
 
+import { readEnvInt } from "../env-limits.ts";
 import { countGraphemes } from "../notes/limits.ts";
 import type { NotesExecutor } from "../notes/repository.ts";
 
-export const SEARCH_PAGE_SIZE = 10;
-export const SEARCH_QUERY_MAX_GRAPHEMES = 200;
+export const SEARCH_PAGE_SIZE = readEnvInt("SEARCH_PAGE_SIZE", 10);
+export const SEARCH_QUERY_MAX_GRAPHEMES = readEnvInt(
+  "SEARCH_QUERY_MAX_GRAPHEMES",
+  200,
+);
 
 const SEARCH_VECTOR_EXPRESSION = sql`
   CASE

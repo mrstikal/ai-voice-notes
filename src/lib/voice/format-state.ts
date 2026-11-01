@@ -1,3 +1,5 @@
+import { publicEnvInt } from "../env-limits.ts";
+
 export type InlineMark = "strong" | "emphasis";
 export type VoiceListVariant = "bullet" | "task";
 
@@ -59,7 +61,11 @@ export const MAX_VOICE_COMMAND_LENGTH = Math.max(
   ...VOICE_COMMANDS.map((command) => command.normalized.length),
 );
 
-export const HEADING_MAX_GRAPHEMES = 160;
+export const HEADING_MAX_GRAPHEMES = publicEnvInt(
+  process.env.NEXT_PUBLIC_HEADING_MAX_GRAPHEMES,
+  "NEXT_PUBLIC_HEADING_MAX_GRAPHEMES",
+  160,
+);
 
 export function normalizeVoiceText(value: string): string {
   return value

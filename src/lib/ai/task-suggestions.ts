@@ -9,6 +9,7 @@ import {
   TASK_SUGGESTION_TTL_MS,
   type TaskSuggestion,
 } from "./task-suggestion-types.ts";
+import { readEnvInt } from "../env-limits.ts";
 import { countGraphemes } from "../notes/limits.ts";
 import { listExistingTaskLabels } from "../notes/operations.ts";
 import { normalizeMatchText } from "../notes/sentences.ts";
@@ -27,8 +28,14 @@ export type {
   TaskSuggestion,
 } from "./task-suggestion-types.ts";
 
-export const TASK_SUGGESTION_MAX_PROMPT_CODE_UNITS = 12_000;
-export const TASK_SECTION_MAX_GRAPHEMES = 2_000;
+export const TASK_SUGGESTION_MAX_PROMPT_CODE_UNITS = readEnvInt(
+  "TASK_SUGGESTION_MAX_PROMPT_CODE_UNITS",
+  12_000,
+);
+export const TASK_SECTION_MAX_GRAPHEMES = readEnvInt(
+  "TASK_SECTION_MAX_GRAPHEMES",
+  2_000,
+);
 
 export const TASK_SUGGESTIONS_JSON_SCHEMA = {
   type: "object",

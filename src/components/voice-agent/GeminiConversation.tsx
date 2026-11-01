@@ -26,7 +26,13 @@ import {
   pcm16ToFloat32,
   resamplePcm16,
 } from "@/lib/voice-agent/pcm-audio";
-import { GEMINI_LIVE_SESSION_MAX_SECONDS } from "@/lib/voice-agent/gemini-session-shared";
+import {
+  GEMINI_LIVE_SESSION_MAX_SECONDS,
+  GEMINI_MAX_SEARCH_RESULTS as MAX_SEARCH_RESULTS,
+  GEMINI_MAX_TRANSCRIPT_CHARACTERS as MAX_TRANSCRIPT_CHARACTERS,
+  GEMINI_PENDING_PCM_CHUNKS as MAX_PENDING_PCM_CHUNKS,
+  GEMINI_SETUP_TIMEOUT_MS as SETUP_TIMEOUT_MS,
+} from "@/lib/voice-agent/gemini-session-shared";
 
 import {
   ConnectionStatus,
@@ -37,12 +43,8 @@ import {
 export const GEMINI_TOKEN_ENDPOINT = "/api/voice-agent/gemini-token";
 export const GEMINI_TOOL_ENDPOINT = "/api/voice-agent/tool";
 export const LOCAL_BARGE_IN_RMS = 0.02;
-const MAX_PENDING_PCM_CHUNKS = 128;
 export const GEMINI_WEBSOCKET_URL =
   "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained";
-const SETUP_TIMEOUT_MS = 15_000;
-const MAX_TRANSCRIPT_CHARACTERS = 2_000;
-const MAX_SEARCH_RESULTS = 5;
 const MICROPHONE_CONSTRAINTS: MediaTrackConstraints = {
   echoCancellation: true,
   noiseSuppression: true,

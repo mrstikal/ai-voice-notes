@@ -2,6 +2,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 
 import type { AppDatabase } from "../db/client.ts";
 import { noteChunks, notes } from "../db/schema.ts";
+import { readEnvInt } from "../env-limits.ts";
 import { refreshNoteChunks } from "./index-state.ts";
 import {
   EMBEDDING_BATCH_MAX_TEXTS,
@@ -11,10 +12,16 @@ import {
   type EmbeddingService,
 } from "./embeddings.ts";
 
-export const REINDEX_MAX_NOTES = 3;
+export const REINDEX_MAX_NOTES = readEnvInt("REINDEX_MAX_NOTES", 3);
 export const REINDEX_MAX_CHUNKS = EMBEDDING_BATCH_MAX_TEXTS;
-export const REINDEX_PREPARE_MAX_NOTES = 10;
-export const REINDEX_CANDIDATE_SCAN_LIMIT = 200;
+export const REINDEX_PREPARE_MAX_NOTES = readEnvInt(
+  "REINDEX_PREPARE_MAX_NOTES",
+  10,
+);
+export const REINDEX_CANDIDATE_SCAN_LIMIT = readEnvInt(
+  "REINDEX_CANDIDATE_SCAN_LIMIT",
+  200,
+);
 
 export class ReindexError extends Error {
   readonly status: number;

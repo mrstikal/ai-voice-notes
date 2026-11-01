@@ -1,10 +1,19 @@
+import { publicEnvInt } from "../env-limits.ts";
 import { countGraphemes } from "../notes/limits.ts";
 import { normalizeMatchText } from "../notes/sentences.ts";
 import type { LlmEditResponse } from "./schemas.ts";
 import type { StructuredLlmService } from "./structured.ts";
 
-export const AI_COMMAND_MAX_GRAPHEMES = 600;
-export const AI_SNIPPET_MAX_GRAPHEMES = 1_200;
+export const AI_COMMAND_MAX_GRAPHEMES = publicEnvInt(
+  process.env.NEXT_PUBLIC_AI_COMMAND_MAX_GRAPHEMES,
+  "NEXT_PUBLIC_AI_COMMAND_MAX_GRAPHEMES",
+  600,
+);
+export const AI_SNIPPET_MAX_GRAPHEMES = publicEnvInt(
+  process.env.NEXT_PUBLIC_AI_SNIPPET_MAX_GRAPHEMES,
+  "NEXT_PUBLIC_AI_SNIPPET_MAX_GRAPHEMES",
+  1_200,
+);
 
 export type AiInterpretResult =
   | LlmEditResponse

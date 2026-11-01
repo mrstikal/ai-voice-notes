@@ -4,6 +4,7 @@ import { OpenRouterHttpError } from "@/lib/ai/openrouter";
 import { UsageServiceError, toUsageErrorResponse } from "@/lib/ai/usage";
 import { ConfigurationError } from "@/lib/config";
 import { getDb } from "@/lib/db/client";
+import { readRateLimit } from "@/lib/env-limits";
 import {
   InvalidPageError,
   parsePageParam,
@@ -46,8 +47,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export const SEARCH_SEMANTIC_RATE_LIMIT = {
-  limit: 10,
-  windowMs: 60_000,
+  ...readRateLimit("SEARCH_SEMANTIC_RATE_LIMIT", 10),
   key: "search-semantic",
 } as const satisfies RateLimitOptions & { readonly key?: string };
 

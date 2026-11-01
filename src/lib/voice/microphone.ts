@@ -1,5 +1,11 @@
+import { publicEnvInt } from "../env-limits.ts";
+
 export const MICROPHONE_LOCK_NAME = "ai-voice-notes:microphone";
-export const MICROPHONE_SESSION_MAX_MS = 180_000;
+export const MICROPHONE_SESSION_MAX_MS = publicEnvInt(
+  process.env.NEXT_PUBLIC_MICROPHONE_SESSION_MAX_MS,
+  "NEXT_PUBLIC_MICROPHONE_SESSION_MAX_MS",
+  180_000,
+);
 export const SCRIBE_MODEL_ID = "scribe_v2_realtime";
 export const SCRIBE_LANGUAGE_CODE = "cs";
 export const SCRIBE_VAD_SILENCE_THRESHOLD_SECS = 1.2;

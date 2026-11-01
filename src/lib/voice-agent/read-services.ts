@@ -26,14 +26,30 @@ import {
   searchNotesFullText,
   type SearchResult,
 } from "../search/fts.ts";
+import { readEnvInt } from "../env-limits.ts";
 import { TtsTextError } from "../tts/chunking.ts";
 import { selectTtsText } from "../tts/selection.ts";
 
-export const READ_TOOL_SEARCH_DEFAULT_RESULTS = 3;
-export const READ_TOOL_SEARCH_MAX_RESULTS = 5;
-export const READ_TOOL_PREVIEW_MAX_GRAPHEMES = 240;
-export const READ_TOOL_NOTE_MAX_GRAPHEMES = 1_200;
-export const READ_TOOL_SECTION_MAX_GRAPHEMES = 1_200;
+export const READ_TOOL_SEARCH_DEFAULT_RESULTS = readEnvInt(
+  "READ_TOOL_SEARCH_DEFAULT_RESULTS",
+  3,
+);
+export const READ_TOOL_SEARCH_MAX_RESULTS = readEnvInt(
+  "READ_TOOL_SEARCH_MAX_RESULTS",
+  5,
+);
+export const READ_TOOL_PREVIEW_MAX_GRAPHEMES = readEnvInt(
+  "READ_TOOL_PREVIEW_MAX_GRAPHEMES",
+  240,
+);
+export const READ_TOOL_NOTE_MAX_GRAPHEMES = readEnvInt(
+  "READ_TOOL_NOTE_MAX_GRAPHEMES",
+  1_200,
+);
+export const READ_TOOL_SECTION_MAX_GRAPHEMES = readEnvInt(
+  "READ_TOOL_SECTION_MAX_GRAPHEMES",
+  1_200,
+);
 export const READ_TOOL_SUMMARY_MAX_SOURCE_GRAPHEMES =
   SUMMARY_MAX_SOURCE_GRAPHEMES;
 export const READ_TOOL_SECTIONS = [

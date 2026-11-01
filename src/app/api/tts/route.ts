@@ -10,6 +10,7 @@ import {
   type UsageService,
 } from "@/lib/ai/usage";
 import { ConfigurationError } from "@/lib/config";
+import { readRateLimit } from "@/lib/env-limits";
 import {
   NoteServiceError,
   getNoteService,
@@ -96,8 +97,7 @@ export const readAloudRequestSchema = z.union([
 ]);
 
 export const DEFAULT_READ_ALOUD_RATE_LIMIT = {
-  limit: 30,
-  windowMs: 60_000,
+  ...readRateLimit("DEFAULT_READ_ALOUD_RATE_LIMIT", 30),
   key: "tts-read-aloud",
 } as const satisfies RateLimitOptions & { readonly key?: string };
 

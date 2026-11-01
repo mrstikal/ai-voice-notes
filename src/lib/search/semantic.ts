@@ -1,14 +1,24 @@
 import { sql } from "drizzle-orm";
 
+import { readEnvInt, readEnvNumber } from "../env-limits.ts";
 import type { NotesExecutor } from "../notes/repository.ts";
 import { countGraphemes } from "../notes/limits.ts";
 import { EMBEDDING_DIMENSIONS } from "./embeddings.ts";
 import { SEARCH_QUERY_MAX_GRAPHEMES } from "./fts.ts";
 
-export const SEMANTIC_PAGE_SIZE = 10;
-export const SEMANTIC_QUERY_MAX_CODE_UNITS = 2_000;
-export const SEMANTIC_QUERY_APPROVAL_USD = 0.0005;
-export const SEMANTIC_EXCERPT_MAX_GRAPHEMES = 240;
+export const SEMANTIC_PAGE_SIZE = readEnvInt("SEMANTIC_PAGE_SIZE", 10);
+export const SEMANTIC_QUERY_MAX_CODE_UNITS = readEnvInt(
+  "SEMANTIC_QUERY_MAX_CODE_UNITS",
+  2_000,
+);
+export const SEMANTIC_QUERY_APPROVAL_USD = readEnvNumber(
+  "SEMANTIC_QUERY_APPROVAL_USD",
+  0.0005,
+);
+export const SEMANTIC_EXCERPT_MAX_GRAPHEMES = readEnvInt(
+  "SEMANTIC_EXCERPT_MAX_GRAPHEMES",
+  240,
+);
 
 const excerptSegmenter = new Intl.Segmenter("cs", {
   granularity: "grapheme",

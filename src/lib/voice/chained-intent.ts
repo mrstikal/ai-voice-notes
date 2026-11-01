@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { publicEnvInt } from "../env-limits.ts";
+
 import {
   llmOperationSchema,
   type LlmOperation,
@@ -7,9 +9,21 @@ import {
 import type { StructuredLlmService } from "../ai/structured.ts";
 
 export const CHAINED_INTENT_SCHEMA_NAME = "chained_voice_intent";
-export const CHAINED_TRANSCRIPT_MAX_GRAPHEMES = 600;
-export const CHAINED_SESSION_MAX_MS = 10 * 60 * 1000;
-export const CHAINED_NOTE_PREVIEW_MAX_GRAPHEMES = 1_200;
+export const CHAINED_TRANSCRIPT_MAX_GRAPHEMES = publicEnvInt(
+  process.env.NEXT_PUBLIC_CHAINED_TRANSCRIPT_MAX_GRAPHEMES,
+  "NEXT_PUBLIC_CHAINED_TRANSCRIPT_MAX_GRAPHEMES",
+  600,
+);
+export const CHAINED_SESSION_MAX_MS = publicEnvInt(
+  process.env.NEXT_PUBLIC_CHAINED_SESSION_MAX_MS,
+  "NEXT_PUBLIC_CHAINED_SESSION_MAX_MS",
+  10 * 60 * 1000,
+);
+export const CHAINED_NOTE_PREVIEW_MAX_GRAPHEMES = publicEnvInt(
+  process.env.NEXT_PUBLIC_CHAINED_NOTE_PREVIEW_MAX_GRAPHEMES,
+  "NEXT_PUBLIC_CHAINED_NOTE_PREVIEW_MAX_GRAPHEMES",
+  1_200,
+);
 
 export const CHAINED_INTENT_ACTIONS = [
   "search_notes",

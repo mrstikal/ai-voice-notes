@@ -1,3 +1,4 @@
+import { publicEnvInt } from "../env-limits.ts";
 import { countGraphemes } from "./limits.ts";
 import { parseNoteMarkdown } from "./markdown.ts";
 import { TtsTextError } from "../tts/chunking.ts";
@@ -7,8 +8,16 @@ import {
 } from "../tts/source-options.ts";
 import { selectTtsText } from "../tts/selection.ts";
 
-export const READ_SELECTION_MAX_PARAGRAPHS = 5;
-export const READ_SELECTION_TRANSCRIPT_MAX_GRAPHEMES = 500;
+export const READ_SELECTION_MAX_PARAGRAPHS = publicEnvInt(
+  process.env.NEXT_PUBLIC_READ_SELECTION_MAX_PARAGRAPHS,
+  "NEXT_PUBLIC_READ_SELECTION_MAX_PARAGRAPHS",
+  5,
+);
+export const READ_SELECTION_TRANSCRIPT_MAX_GRAPHEMES = publicEnvInt(
+  process.env.NEXT_PUBLIC_READ_SELECTION_TRANSCRIPT_MAX_GRAPHEMES,
+  "NEXT_PUBLIC_READ_SELECTION_TRANSCRIPT_MAX_GRAPHEMES",
+  500,
+);
 
 export type ReadSelectionScope =
   | "full"

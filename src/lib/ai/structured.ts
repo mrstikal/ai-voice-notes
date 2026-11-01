@@ -4,6 +4,7 @@ import {
   DEFAULT_OPENROUTER_LLM_MODEL,
   loadConfig,
 } from "../config.ts";
+import { readEnvInt, readEnvNumber } from "../env-limits.ts";
 import {
   OpenRouterClient,
   OpenRouterHttpError,
@@ -52,12 +53,24 @@ export const TAG_SUGGESTIONS_OPERATION = "llm_tag_suggestions";
 export const TASK_SUGGESTIONS_OPERATION = "llm_task_suggestions";
 export const SUMMARY_OPERATION = "llm_summary";
 export const CHAINED_INTENT_OPERATION = "llm_chained_intent";
-export const LLM_INPUT_MAX_CODE_UNITS = 12_000;
-export const LLM_MAX_OUTPUT_TOKENS = 1_200;
-export const LLM_TIMEOUT_MS = 20_000;
-export const LLM_RESPONSE_MAX_BYTES = 64 * 1024;
-export const LLM_PROMPT_OVERHEAD_TOKENS = 256;
-export const LLM_MAX_ESTIMATED_COST_USD = 0.02;
+export const LLM_INPUT_MAX_CODE_UNITS = readEnvInt(
+  "LLM_INPUT_MAX_CODE_UNITS",
+  12_000,
+);
+export const LLM_MAX_OUTPUT_TOKENS = readEnvInt("LLM_MAX_OUTPUT_TOKENS", 1_200);
+export const LLM_TIMEOUT_MS = readEnvInt("LLM_TIMEOUT_MS", 20_000);
+export const LLM_RESPONSE_MAX_BYTES = readEnvInt(
+  "LLM_RESPONSE_MAX_BYTES",
+  64 * 1024,
+);
+export const LLM_PROMPT_OVERHEAD_TOKENS = readEnvInt(
+  "LLM_PROMPT_OVERHEAD_TOKENS",
+  256,
+);
+export const LLM_MAX_ESTIMATED_COST_USD = readEnvNumber(
+  "LLM_MAX_ESTIMATED_COST_USD",
+  0.02,
+);
 export const LLM_WORST_CASE_PROMPT_USD_PER_TOKEN = 0.0000003;
 export const LLM_WORST_CASE_COMPLETION_USD_PER_TOKEN = 0.0000012;
 export const LLM_SCHEMA_NAME = "note_edit_proposal";

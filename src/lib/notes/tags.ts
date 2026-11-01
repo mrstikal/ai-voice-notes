@@ -1,3 +1,4 @@
+import { publicEnvInt } from "../env-limits.ts";
 import { countGraphemes } from "./limits.ts";
 
 export const NOTE_CATEGORIES = [
@@ -10,8 +11,16 @@ export const NOTE_CATEGORIES = [
 
 export type NoteCategory = (typeof NOTE_CATEGORIES)[number];
 
-export const NOTE_TAGS_MAX = 20;
-export const NOTE_TAG_MAX_GRAPHEMES = 32;
+export const NOTE_TAGS_MAX = publicEnvInt(
+  process.env.NEXT_PUBLIC_NOTE_TAGS_MAX,
+  "NEXT_PUBLIC_NOTE_TAGS_MAX",
+  20,
+);
+export const NOTE_TAG_MAX_GRAPHEMES = publicEnvInt(
+  process.env.NEXT_PUBLIC_NOTE_TAG_MAX_GRAPHEMES,
+  "NEXT_PUBLIC_NOTE_TAG_MAX_GRAPHEMES",
+  32,
+);
 
 export class NoteMetadataError extends Error {
   readonly code: string;

@@ -11,13 +11,17 @@ import {
 import path from "node:path";
 import { promisify } from "node:util";
 
+import { readEnvInt } from "../env-limits.ts";
 import { MEETING_AUDIO_MAX_BYTES } from "../security/http.ts";
 
 const execFileAsync = promisify(execFile);
 
 export const MEETING_TEMP_PREFIX = "meeting-";
 export const MEETING_TEMP_SUFFIX = ".bin";
-export const MEETING_TEMP_MAX_AGE_MS = 60 * 60 * 1_000;
+export const MEETING_TEMP_MAX_AGE_MS = readEnvInt(
+  "MEETING_TEMP_MAX_AGE_MS",
+  60 * 60 * 1_000,
+);
 export const MEETING_TEMP_NAME_PATTERN =
   /^meeting-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.bin$/u;
 
@@ -27,11 +31,23 @@ export const DEFAULT_MEETING_UPLOAD_DIR = path.join(
   "uploads",
 );
 
-export const MEETING_DEFAULT_MAX_DURATION_SECONDS = 15 * 60;
-export const FFPROBE_TIMEOUT_MS = 5_000;
-export const FFPROBE_VERSION_TIMEOUT_MS = 3_000;
-export const FFPROBE_MAX_OUTPUT_BYTES = 1024 * 1024;
-export const FFPROBE_PACKET_MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
+export const MEETING_DEFAULT_MAX_DURATION_SECONDS = readEnvInt(
+  "MEETING_DEFAULT_MAX_DURATION_SECONDS",
+  15 * 60,
+);
+export const FFPROBE_TIMEOUT_MS = readEnvInt("FFPROBE_TIMEOUT_MS", 5_000);
+export const FFPROBE_VERSION_TIMEOUT_MS = readEnvInt(
+  "FFPROBE_VERSION_TIMEOUT_MS",
+  3_000,
+);
+export const FFPROBE_MAX_OUTPUT_BYTES = readEnvInt(
+  "FFPROBE_MAX_OUTPUT_BYTES",
+  1024 * 1024,
+);
+export const FFPROBE_PACKET_MAX_OUTPUT_BYTES = readEnvInt(
+  "FFPROBE_PACKET_MAX_OUTPUT_BYTES",
+  4 * 1024 * 1024,
+);
 export const MEETING_ALLOWED_FORMATS = ["mp3", "wav", "webm"] as const;
 
 export type MeetingMediaFormat = (typeof MEETING_ALLOWED_FORMATS)[number];

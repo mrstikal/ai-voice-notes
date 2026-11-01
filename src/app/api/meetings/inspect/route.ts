@@ -1,6 +1,7 @@
 import { unlink } from "node:fs/promises";
 
 import { loadConfig } from "@/lib/config";
+import { readRateLimit } from "@/lib/env-limits";
 import {
   MeetingMediaError,
   MeetingUploadError,
@@ -21,8 +22,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export const MEETING_INSPECT_RATE_LIMIT = {
-  limit: 10,
-  windowMs: 60_000,
+  ...readRateLimit("MEETING_INSPECT_RATE_LIMIT", 10),
   key: "meeting-inspect",
 } as const;
 

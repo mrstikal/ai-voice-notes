@@ -18,6 +18,7 @@ import {
 } from "../ai/openrouter.ts";
 import { UsageServiceError } from "../ai/usage.ts";
 import { chatCompletionResponseSchema } from "../ai/schemas.ts";
+import { readEnvInt } from "../env-limits.ts";
 import { loadConfig } from "../config.ts";
 import type { AppDatabase } from "../db/client.ts";
 import { noteChunks, notes } from "../db/schema.ts";
@@ -41,15 +42,36 @@ import {
   type SemanticSearchItem,
 } from "./semantic.ts";
 
-export const ASK_QUESTION_MAX_GRAPHEMES = 300;
-export const ASK_QUESTION_MAX_CODE_UNITS = 3_000;
-export const GROUNDING_MAX_SOURCES = 6;
-export const GROUNDING_SOURCE_MAX_GRAPHEMES = 700;
-export const GROUNDING_SOURCE_MAX_CODE_UNITS = 900;
-export const GROUNDING_MAX_CLAIMS = 6;
-export const GROUNDING_CLAIM_MAX_GRAPHEMES = 400;
-export const GROUNDING_CLAIM_MAX_CITATIONS = 3;
-export const GROUNDING_MAX_OUTPUT_TOKENS = 4_000;
+export const ASK_QUESTION_MAX_GRAPHEMES = readEnvInt(
+  "ASK_QUESTION_MAX_GRAPHEMES",
+  300,
+);
+export const ASK_QUESTION_MAX_CODE_UNITS = readEnvInt(
+  "ASK_QUESTION_MAX_CODE_UNITS",
+  3_000,
+);
+export const GROUNDING_MAX_SOURCES = readEnvInt("GROUNDING_MAX_SOURCES", 6);
+export const GROUNDING_SOURCE_MAX_GRAPHEMES = readEnvInt(
+  "GROUNDING_SOURCE_MAX_GRAPHEMES",
+  700,
+);
+export const GROUNDING_SOURCE_MAX_CODE_UNITS = readEnvInt(
+  "GROUNDING_SOURCE_MAX_CODE_UNITS",
+  900,
+);
+export const GROUNDING_MAX_CLAIMS = readEnvInt("GROUNDING_MAX_CLAIMS", 6);
+export const GROUNDING_CLAIM_MAX_GRAPHEMES = readEnvInt(
+  "GROUNDING_CLAIM_MAX_GRAPHEMES",
+  400,
+);
+export const GROUNDING_CLAIM_MAX_CITATIONS = readEnvInt(
+  "GROUNDING_CLAIM_MAX_CITATIONS",
+  3,
+);
+export const GROUNDING_MAX_OUTPUT_TOKENS = readEnvInt(
+  "GROUNDING_MAX_OUTPUT_TOKENS",
+  4_000,
+);
 export const GROUNDING_LLM_MAX_COST_USD = estimateStructuredLlmMaxCostUsd(
   LLM_INPUT_MAX_CODE_UNITS,
   GROUNDING_MAX_OUTPUT_TOKENS,

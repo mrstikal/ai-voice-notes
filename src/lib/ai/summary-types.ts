@@ -1,6 +1,20 @@
-export const SUMMARY_MAX_SOURCE_GRAPHEMES = 8_000;
-export const SUMMARY_MAX_GRAPHEMES = 2_000;
-export const SUMMARY_MAX_TTS_CODE_UNITS = 3_500;
+import { publicEnvInt } from "../env-limits.ts";
+
+export const SUMMARY_MAX_SOURCE_GRAPHEMES = publicEnvInt(
+  process.env.NEXT_PUBLIC_SUMMARY_MAX_SOURCE_GRAPHEMES,
+  "NEXT_PUBLIC_SUMMARY_MAX_SOURCE_GRAPHEMES",
+  8_000,
+);
+export const SUMMARY_MAX_GRAPHEMES = publicEnvInt(
+  process.env.NEXT_PUBLIC_SUMMARY_MAX_GRAPHEMES,
+  "NEXT_PUBLIC_SUMMARY_MAX_GRAPHEMES",
+  2_000,
+);
+export const SUMMARY_MAX_TTS_CODE_UNITS = publicEnvInt(
+  process.env.NEXT_PUBLIC_SUMMARY_MAX_TTS_CODE_UNITS,
+  "NEXT_PUBLIC_SUMMARY_MAX_TTS_CODE_UNITS",
+  3_500,
+);
 
 export interface SummaryArtifact {
   readonly noteId: string;

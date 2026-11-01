@@ -4,6 +4,7 @@ import {
   StructuredLlmError,
   type StructuredLlmService,
 } from "../ai/structured.ts";
+import { publicEnvInt } from "../env-limits.ts";
 import { countGraphemes } from "../notes/limits.ts";
 import { hashNoteSource } from "../notes/operations.ts";
 import {
@@ -33,9 +34,21 @@ import {
 } from "./chained-intent.ts";
 import type { LlmOperation } from "../ai/schemas.ts";
 
-export const CHAINED_SEARCH_MAX_RESULTS = 3;
-export const CHAINED_MAX_NOTES_PER_TURN = 1;
-export const CHAINED_SUMMARY_TEXT_MAX_GRAPHEMES = 2_000;
+export const CHAINED_SEARCH_MAX_RESULTS = publicEnvInt(
+  process.env.NEXT_PUBLIC_CHAINED_SEARCH_MAX_RESULTS,
+  "NEXT_PUBLIC_CHAINED_SEARCH_MAX_RESULTS",
+  3,
+);
+export const CHAINED_MAX_NOTES_PER_TURN = publicEnvInt(
+  process.env.NEXT_PUBLIC_CHAINED_MAX_NOTES_PER_TURN,
+  "NEXT_PUBLIC_CHAINED_MAX_NOTES_PER_TURN",
+  1,
+);
+export const CHAINED_SUMMARY_TEXT_MAX_GRAPHEMES = publicEnvInt(
+  process.env.NEXT_PUBLIC_CHAINED_SUMMARY_TEXT_MAX_GRAPHEMES,
+  "NEXT_PUBLIC_CHAINED_SUMMARY_TEXT_MAX_GRAPHEMES",
+  2_000,
+);
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

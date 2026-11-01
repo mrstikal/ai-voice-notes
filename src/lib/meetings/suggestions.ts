@@ -20,6 +20,7 @@ import {
 } from "../ai/task-suggestions.ts";
 import { getDb, type AppDatabase } from "../db/client.ts";
 import { meetingSaves, notes } from "../db/schema.ts";
+import { readEnvInt } from "../env-limits.ts";
 import { countGraphemes } from "../notes/limits.ts";
 import {
   OPERATION_TEXT_MAX_GRAPHEMES,
@@ -31,7 +32,10 @@ export const MEETING_DECISIONS_HEADING = "## Rozhodnutí";
 export const MEETING_DECISIONS_MAX_GRAPHEMES = OPERATION_TEXT_MAX_GRAPHEMES;
 export const MEETING_DECISIONS_MAX_SOURCE_GRAPHEMES =
   SUMMARY_MAX_SOURCE_GRAPHEMES;
-export const MEETING_SUGGESTIONS_DEFAULT_LIMIT = 10;
+export const MEETING_SUGGESTIONS_DEFAULT_LIMIT = readEnvInt(
+  "MEETING_SUGGESTIONS_DEFAULT_LIMIT",
+  10,
+);
 
 export interface SavedMeetingNote {
   readonly noteId: string;

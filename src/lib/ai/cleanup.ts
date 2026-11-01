@@ -1,13 +1,26 @@
+import { readEnvInt } from "../env-limits.ts";
 import type { LlmOperation } from "./schemas.ts";
 import type { StructuredLlmService } from "./structured.ts";
 import { countGraphemes } from "../notes/limits.ts";
 import { parseNoteMarkdown } from "../notes/markdown.ts";
 import { collectProseBlocks } from "../notes/sentences.ts";
 
-export const CLEANUP_PARAGRAPH_MAX_GRAPHEMES = 2_000;
-export const CLEANUP_PROPER_NAMES_MAX = 20;
-export const CLEANUP_PROPER_NAME_MAX_GRAPHEMES = 80;
-export const CLEANUP_TARGET_PHRASE_MAX_GRAPHEMES = 160;
+export const CLEANUP_PARAGRAPH_MAX_GRAPHEMES = readEnvInt(
+  "CLEANUP_PARAGRAPH_MAX_GRAPHEMES",
+  2_000,
+);
+export const CLEANUP_PROPER_NAMES_MAX = readEnvInt(
+  "CLEANUP_PROPER_NAMES_MAX",
+  20,
+);
+export const CLEANUP_PROPER_NAME_MAX_GRAPHEMES = readEnvInt(
+  "CLEANUP_PROPER_NAME_MAX_GRAPHEMES",
+  80,
+);
+export const CLEANUP_TARGET_PHRASE_MAX_GRAPHEMES = readEnvInt(
+  "CLEANUP_TARGET_PHRASE_MAX_GRAPHEMES",
+  160,
+);
 
 export const CLEANUP_SYSTEM_PROMPT =
   "Jsi opatrný český jazykový editor diktovaného přepisu. " +

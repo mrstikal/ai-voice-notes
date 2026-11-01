@@ -19,9 +19,23 @@ import {
   type SentenceSpan,
 } from "./sentences.ts";
 
-export const OPERATION_TEXT_MAX_GRAPHEMES = 2_000;
-export const OPERATION_HEADING_MAX_GRAPHEMES = 160;
-export const OPERATION_TASK_MAX_GRAPHEMES = 200;
+import { publicEnvInt } from "../env-limits.ts";
+
+export const OPERATION_TEXT_MAX_GRAPHEMES = publicEnvInt(
+  process.env.NEXT_PUBLIC_OPERATION_TEXT_MAX_GRAPHEMES,
+  "NEXT_PUBLIC_OPERATION_TEXT_MAX_GRAPHEMES",
+  2_000,
+);
+export const OPERATION_HEADING_MAX_GRAPHEMES = publicEnvInt(
+  process.env.NEXT_PUBLIC_OPERATION_HEADING_MAX_GRAPHEMES,
+  "NEXT_PUBLIC_OPERATION_HEADING_MAX_GRAPHEMES",
+  160,
+);
+export const OPERATION_TASK_MAX_GRAPHEMES = publicEnvInt(
+  process.env.NEXT_PUBLIC_OPERATION_TASK_MAX_GRAPHEMES,
+  "NEXT_PUBLIC_OPERATION_TASK_MAX_GRAPHEMES",
+  200,
+);
 
 export interface ResolveOperationInput {
   readonly contentMd: string;

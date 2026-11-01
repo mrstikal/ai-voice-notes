@@ -17,6 +17,7 @@ import { isGeminiVoice, type GeminiVoice } from "./gemini-voices.ts";
 import { GEMINI_LIVE_SESSION_MAX_SECONDS } from "./gemini-session-shared.ts";
 
 export { GEMINI_LIVE_SESSION_MAX_SECONDS } from "./gemini-session-shared.ts";
+import { readEnvInt, readRateLimit } from "../env-limits.ts";
 import { GEMINI_VOICE_TOOL_DECLARATIONS } from "./read-services.ts";
 import {
   ToolSessionError,
@@ -27,8 +28,14 @@ import {
 export const GEMINI_LIVE_MODEL_ID = DEFAULT_GEMINI_LIVE_MODEL;
 export const GEMINI_LIVE_TOKEN_PATH = "/v1beta/auth_tokens";
 export const GEMINI_LIVE_TOKEN_URL = `${DEFAULT_GEMINI_API_BASE_URL}${GEMINI_LIVE_TOKEN_PATH}`;
-export const GEMINI_LIVE_TOKEN_TIMEOUT_MS = 15_000;
-export const GEMINI_TOKEN_REQUEST_MAX_BYTES = 4 * 1024;
+export const GEMINI_LIVE_TOKEN_TIMEOUT_MS = readEnvInt(
+  "GEMINI_LIVE_TOKEN_TIMEOUT_MS",
+  15_000,
+);
+export const GEMINI_TOKEN_REQUEST_MAX_BYTES = readEnvInt(
+  "GEMINI_TOKEN_REQUEST_MAX_BYTES",
+  4 * 1024,
+);
 
 export const GEMINI_LIVE_INSTRUCTIONS = [
   "Jsi český jednolingvní hlasový asistent. Jazyk konverzace je pevně čeština; určuj ho podle tohoto pokynu, ne podle zvuku, přízvuku ani automatické detekce.",
@@ -385,8 +392,7 @@ export function createGeminiTokenRouteHandler(options: {
     schema: geminiTokenRequestSchema,
     methods: ["POST"],
     rateLimit: options.rateLimit ?? {
-      limit: 5,
-      windowMs: 60_000,
+      ...readRateLimit("GEMINI_TOKEN_RATE_LIMIT", 5),
       key: "gemini-token",
     },
     handler: async ({ data }) => {
