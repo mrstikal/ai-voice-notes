@@ -345,7 +345,8 @@ async function readMagicFormat(
 
     if (
       header.length >= 12 &&
-      header.subarray(0, 4).toString("ascii") === "RIFF" &&
+      (header.subarray(0, 4).toString("ascii") === "RIFF" ||
+        header.subarray(0, 4).toString("ascii") === "RF64") &&
       header.subarray(8, 12).toString("ascii") === "WAVE"
     ) {
       return "wav";
@@ -498,9 +499,11 @@ function validateFfprobeOutput(
 
   const formatMatches =
     format === "wav"
-      ? formatName.includes("wav") && codec.startsWith("pcm_")
+      ? (formatName.includes("wav") || formatName.includes("rf64")) &&
+        codec.startsWith("pcm_")
       : format === "mp3"
-        ? formatName.includes("mp3") && codec === "mp3"
+        ? formatName.includes("mp3") &&
+          (codec === "mp3" || codec === "mp3float")
         : formatName.includes("webm") && codec === "opus";
 
   if (!formatMatches) {

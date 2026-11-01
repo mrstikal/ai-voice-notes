@@ -1,0 +1,1 @@
+export const GEMINI_LIVE_SESSION_MAX_SECONDS = 9 * 60;

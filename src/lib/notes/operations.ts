@@ -97,6 +97,7 @@ export interface InvalidOperation extends OperationResolutionBase {
     | "unsupported_inline_markup"
     | "unsupported_task"
     | "text_too_large"
+    | "text_invalid"
     | "heading_invalid"
     | "paragraph_too_large"
     | "invalid_target"
@@ -278,6 +279,73 @@ function validateText(
   return null;
 }
 
+const INLINE_TEXT_BLOCK_PATTERN =
+  /^(?:#{1,6}(?:\s|$)|>|(?:[-*+]|\d{1,9}[.)])\s|```|~~~|(?:-{3,}|\*{3,}|_{3,})\s*$|=+\s*$)/u;
+const INLINE_TEXT_LINK_PATTERN =
+  /!?\[[^\]]*\]\([^)]*\)|!?\[[^\]]*\]\[[^\]]*\]|<[^>\s]+>/u;
+const LINK_DEFINITION_PATTERN = /^\[[^\]]+\]:\s*\S+/u;
+
+function containsMarkdownLink(text: string): boolean {
+  let found = false;
+
+  visit(parseNoteMarkdown(text).ast, (node) => {
+    if (
+      node.type === "link" ||
+      node.type === "image" ||
+      node.type === "definition"
+    ) {
+      found = true;
+    }
+  });
+
+  return found;
+}
+
+function validateInlineText(
+  input: ResolveOperationInput,
+  text: string,
+  maxGraphemes: number,
+): InvalidOperation | null {
+  const textError = validateText(input, text, maxGraphemes);
+
+  if (textError !== null) {
+    return textError;
+  }
+
+  if (/[\r\n]/u.test(text)) {
+    return invalid(
+      input,
+      "text_invalid",
+      "Text operace musí být jednoduchý text bez zalomení řádku.",
+    );
+  }
+
+  if (
+    /^(?: {4,}|\t)/u.test(text) ||
+    INLINE_TEXT_BLOCK_PATTERN.test(text.trimStart())
+  ) {
+    return invalid(
+      input,
+      "text_invalid",
+      "Text operace nesmí začínat blokovým Markdownem (nadpis, seznam, citace ani kód).",
+    );
+  }
+
+  if (
+    INLINE_TEXT_LINK_PATTERN.test(text) ||
+    LINK_DEFINITION_PATTERN.test(text.trimStart()) ||
+    containsMarkdownLink(text)
+  ) {
+    return invalid(
+      input,
+      "text_invalid",
+      "Text operace nesmí obsahovat Markdown odkaz ani obrázek.",
+    );
+  }
+
+  return null;
+}
+
 function targetIsEmpty(startPhrase: string, endPhrase: string): boolean {
   return (
     normalizeMatchText(startPhrase) === "" ||
@@ -353,7 +421,7 @@ function replaceSentence(
   operation: Extract<LlmOperation, { readonly type: "replace_sentence" }>,
   prose: ProseCollection,
 ): OperationResolution {
-  const textError = validateText(
+  const textError = validateInlineText(
     input,
     operation.text,
     OPERATION_TEXT_MAX_GRAPHEMES,
@@ -372,7 +440,7 @@ function insertBeforeSentence(
   operation: Extract<LlmOperation, { readonly type: "insert_before_sentence" }>,
   prose: ProseCollection,
 ): OperationResolution {
-  const textError = validateText(
+  const textError = validateInlineText(
     input,
     operation.text,
     OPERATION_TEXT_MAX_GRAPHEMES,
@@ -398,7 +466,7 @@ function insertAfterSentence(
   operation: Extract<LlmOperation, { readonly type: "insert_after_sentence" }>,
   prose: ProseCollection,
 ): OperationResolution {
-  const textError = validateText(
+  const textError = validateInlineText(
     input,
     operation.text,
     OPERATION_TEXT_MAX_GRAPHEMES,
@@ -454,7 +522,7 @@ function replaceLastSentence(
   operation: Extract<LlmOperation, { readonly type: "replace_last_sentence" }>,
   prose: ProseCollection,
 ): OperationResolution {
-  const textError = validateText(
+  const textError = validateInlineText(
     input,
     operation.text,
     OPERATION_TEXT_MAX_GRAPHEMES,
@@ -543,7 +611,7 @@ function replaceParagraph(
   operation: Extract<LlmOperation, { readonly type: "replace_paragraph" }>,
   prose: ProseCollection,
 ): OperationResolution {
-  const textError = validateText(
+  const textError = validateInlineText(
     input,
     operation.text,
     OPERATION_TEXT_MAX_GRAPHEMES,

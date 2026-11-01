@@ -26,6 +26,7 @@ import {
   pcm16ToFloat32,
   resamplePcm16,
 } from "@/lib/voice-agent/pcm-audio";
+import { GEMINI_LIVE_SESSION_MAX_SECONDS } from "@/lib/voice-agent/gemini-session-shared";
 
 import {
   ConnectionStatus,
@@ -2333,7 +2334,8 @@ export function GeminiConversation() {
         data-testid="voice-agent-cost-warning"
       >
         Cena Gemini je neznámá a aplikace ji neměří ani neomezuje pevným
-        dolarovým stropem. Relace se po nejvýše 10 minutách ukončí.
+        dolarovým stropem. Relace se po nejvýše{" "}
+        {GEMINI_LIVE_SESSION_MAX_SECONDS / 60} minutách ukončí.
       </p>
 
       <ConnectionStatus

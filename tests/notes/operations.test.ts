@@ -297,6 +297,73 @@ describe("P22 pure AST operation resolver", () => {
     }
   });
 
+  it("rejects block Markdown, links and line breaks in sentence and paragraph text", () => {
+    const cases: LlmOperation[] = [
+      { ...replaceFirst, text: "Nová věta.\nDruhá věta." },
+      {
+        type: "insert_before_sentence",
+        target: { startPhrase: "Druhá", endPhrase: "věta" },
+        text: "# Nadpis",
+      },
+      {
+        type: "insert_after_sentence",
+        target: { startPhrase: "Druhá", endPhrase: "věta" },
+        text: "- položka seznamu",
+      },
+      {
+        type: "insert_after_sentence",
+        target: { startPhrase: "Druhá", endPhrase: "věta" },
+        text: "> citace",
+      },
+      {
+        type: "replace_last_sentence",
+        text: "[odkaz](https://example.com)",
+      },
+      {
+        type: "replace_paragraph",
+        target: { startPhrase: "První", endPhrase: "věta" },
+        text: "Odstavec.\n\nDruhý odstavec.",
+      },
+      {
+        type: "replace_paragraph",
+        target: { startPhrase: "První", endPhrase: "věta" },
+        text: "    console.log(1)",
+      },
+      {
+        type: "insert_after_sentence",
+        target: { startPhrase: "Druhá", endPhrase: "věta" },
+        text: "<https://example.com>",
+      },
+      {
+        type: "insert_after_sentence",
+        target: { startPhrase: "Druhá", endPhrase: "věta" },
+        text: "[odkaz][ref]",
+      },
+      {
+        type: "replace_paragraph",
+        target: { startPhrase: "První", endPhrase: "věta" },
+        text: "[ref]: https://example.com",
+      },
+      { ...replaceFirst, text: "[viz [poznámka] 2](https://example.com)" },
+      { ...replaceFirst, text: "https://example.com" },
+    ];
+
+    for (const operation of cases) {
+      const result = resolve(BASE, operation);
+      expect(result.status).toBe("invalid");
+      expect(result).toMatchObject({ code: "text_invalid" });
+    }
+  });
+
+  it("still allows a multi-line bounded section append", () => {
+    const result = resolve("Původní text.", {
+      type: "append_bounded_section",
+      text: "## Rozhodnutí\n\n- První bod.",
+    });
+
+    expect(result.status).toBe("resolved");
+  });
+
   it("rejects model-supplied offsets and whole-document operations", () => {
     const offsetOperation = {
       ...replaceFirst,

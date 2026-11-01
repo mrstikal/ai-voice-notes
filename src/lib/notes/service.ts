@@ -23,6 +23,7 @@ import {
   MEETING_SAVE_LABEL_MAX_GRAPHEMES,
   MEETING_SAVE_MAX_BYTES,
   MEETING_SAVE_MAX_PARTS,
+  MEETING_SAVE_TITLE_MAX_GRAPHEMES,
 } from "../meetings/save-shared.ts";
 import {
   getTtsCache,
@@ -33,6 +34,7 @@ import { parseNoteMarkdown } from "./markdown.ts";
 import { refreshNoteSearch } from "../search/fts.ts";
 import { refreshNoteChunks } from "../search/index-state.ts";
 import {
+  NOTE_CATEGORIES,
   NoteMetadataError,
   normalizeNoteMetadata,
   sortTags,
@@ -67,7 +69,9 @@ export const updateNoteVoiceContentInputSchema = z
 
 export const updateNoteMetadataInputSchema = z
   .object({
-    category: z.string().max(50).nullable(),
+    category: z
+      .union([z.enum(NOTE_CATEGORIES), z.literal("")])
+      .nullable(),
     tags: z.array(z.string()).max(100),
     expectedVersion: expectedVersionSchema,
   })
@@ -496,11 +500,12 @@ export class MeetingTitleEmptyError extends NoteServiceError {
 }
 
 export class MeetingTitleTooLongError extends NoteServiceError {
-  constructor(limit: number) {
+  constructor(limit: number, message?: string) {
     super(
       400,
       "meeting_title_too_long",
-      `Název zápisu včetně číslování částí může mít nejvýše ${limit} znaků.`,
+      message ??
+        `Název zápisu včetně číslování částí může mít nejvýše ${limit} znaků.`,
     );
     this.name = "MeetingTitleTooLongError";
   }
@@ -606,8 +611,16 @@ export function planMeetingSave(
     throw new MeetingTitleEmptyError();
   }
 
-  if (countGraphemes(baseTitle) > limits.title) {
-    throw new MeetingTitleTooLongError(limits.title);
+  const baseTitleLimit = Math.min(
+    limits.title,
+    MEETING_SAVE_TITLE_MAX_GRAPHEMES,
+  );
+
+  if (countGraphemes(baseTitle) > baseTitleLimit) {
+    throw new MeetingTitleTooLongError(
+      baseTitleLimit,
+      `Název zápisu může mít nejvýše ${baseTitleLimit} znaků. Číslování částí se přidává automaticky.`,
+    );
   }
 
   const entries = canonicalMeetingEntries(input);

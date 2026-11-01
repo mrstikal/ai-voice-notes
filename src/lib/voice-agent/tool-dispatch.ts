@@ -45,6 +45,15 @@ import {
 export const MAX_TOOL_CALLS_PER_TURN = 4;
 export const MAX_TOOL_CALLS_PER_SESSION = 20;
 export const MAX_ACTIVE_TOOL_SESSIONS = 20;
+const TOOL_NAMES = new Set([
+  "search_notes",
+  "get_note",
+  "read_note_section",
+  "summarize_note",
+  "add_todo",
+  "propose_edit",
+  "confirm_edit",
+]);
 
 export interface ToolSessionHandle {
   readonly sessionId: string;
@@ -522,6 +531,15 @@ export class ToolSessionStore {
         input.callId,
         "invalid_arguments",
         "Neplatné ID tahu nebo volání nástroje.",
+      );
+    }
+
+    if (!TOOL_NAMES.has(input.name)) {
+      return toolError(
+        input.name,
+        input.callId,
+        "unknown_tool",
+        "Takový nástroj není dostupný.",
       );
     }
 

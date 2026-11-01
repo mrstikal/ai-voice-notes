@@ -194,6 +194,14 @@ describe("P19 chunking", () => {
     assertExactChunks(text, chunks);
   });
 
+  it("does not split a paragraph at a lone hard-break newline", () => {
+    const text = "První část\npokračuje. Druhá věta.";
+    const chunks = chunkText(text, 30);
+
+    expect(chunks[0]?.text).toBe("První část\npokračuje. ");
+    assertExactChunks(text, chunks);
+  });
+
   it("splits an oversized paragraph at sentence boundaries", () => {
     const text = "První věta. Druhá věta. Třetí věta.";
     const chunks = chunkText(text, 20);

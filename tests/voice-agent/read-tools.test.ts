@@ -536,6 +536,35 @@ describe("session-bound tool dispatch", () => {
     });
   });
 
+  it("does not consume the call budget for unknown tools", async () => {
+    const { session, sessionStore } = store();
+
+    for (let index = 0; index < MAX_TOOL_CALLS_PER_TURN + 1; index += 1) {
+      await expect(
+        sessionStore.dispatch({
+          arguments: {},
+          callId: `unknown-${index}`,
+          name: "delete_note",
+          sessionId: session.sessionId,
+          turnId: "turn-1",
+        }),
+      ).resolves.toMatchObject({
+        ok: false,
+        response: { error: { code: "unknown_tool" } },
+      });
+    }
+
+    await expect(
+      sessionStore.dispatch({
+        arguments: { query: "ahoj" },
+        callId: "valid-after-unknown",
+        name: "search_notes",
+        sessionId: session.sessionId,
+        turnId: "turn-1",
+      }),
+    ).resolves.toMatchObject({ ok: true });
+  });
+
   it("rejects a new session once the active-session cap is reached", () => {
     const sessionStore = new ToolSessionStore(fixedServices(), () => NOW);
     const sessions = Array.from(

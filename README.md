@@ -31,7 +31,7 @@ This repository implements **P01-P54**, with P46 delivered as the approved Gemin
    proposal, and rejecting one leaves the note untouched. Barge-in clears the
    scheduled reply on speech, the microphone can be muted or opened only while
    a push-to-talk button is held, captions can be hidden, and the session is
-   capped at 10 minutes with a visible cost warning. Czech output is
+   capped at 9 minutes with a visible cost warning. Czech output is
    pinned through Czech-only `systemInstruction` plus a Czech ASR hint, not the
    `languageCode` parameter. After a previously observed Spanish switch, the
    user re-tested with a real microphone, confirmed Czech replies and accepted
@@ -46,7 +46,7 @@ This repository implements **P01-P54**, with P46 delivered as the approved Gemin
 
 P44 adds the four-stage offline integration, privacy/recovery audit and this
 quality report. P45 added the OpenAI realtime bootstrap, which was retired; P46
-is delivered as the Gemini Live replacement (10-minute sessions, selectable
+is delivered as the Gemini Live replacement (9-minute sessions, selectable
 voice, transient Czech audio/subtitles), P47 adds session-bound search and
 selected-note fetch, P48 adds bounded sections and approved summaries, P49-P50
 add preview-only proposals plus an explicit on-screen confirmation that applies

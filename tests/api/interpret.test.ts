@@ -112,7 +112,7 @@ describe("P26 interpret route", () => {
       request({
         noteId: NOTE_ID,
         command: "Udělej to lepší.",
-        snippet: "Nějaký text.",
+        snippet: "Druhá věta.",
       }),
     );
 
@@ -200,6 +200,20 @@ describe("P26 interpret route", () => {
     );
     expect(missingSnippet.status).toBe(400);
     expect(await errorCode(missingSnippet)).toBe("ai_snippet_empty");
+    expect(llm.request).not.toHaveBeenCalled();
+  });
+
+  it("rejects a snippet that is not part of the note before any LLM call", async () => {
+    const response = await interpretRoute(
+      request({
+        noteId: NOTE_ID,
+        command: "Nahraď první větu.",
+        snippet: "Text, který v poznámce není.",
+      }),
+    );
+
+    expect(response.status).toBe(422);
+    expect(await errorCode(response)).toBe("ai_snippet_unbound");
     expect(llm.request).not.toHaveBeenCalled();
   });
 

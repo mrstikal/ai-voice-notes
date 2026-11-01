@@ -55,7 +55,7 @@ function maxBoundaryAtOrBefore(
 
 function paragraphBoundaries(text: string): number[] {
   const boundaries: number[] = [];
-  const pattern = /\n+/gu;
+  const pattern = /\r?\n[ \t]*\r?\n+/gu;
   let match: RegExpExecArray | null;
 
   while ((match = pattern.exec(text)) !== null) {

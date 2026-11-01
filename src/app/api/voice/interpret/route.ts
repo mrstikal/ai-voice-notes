@@ -17,6 +17,7 @@ import {
   getNoteService,
   toNoteErrorResponse,
 } from "@/lib/notes/service";
+import { normalizeMatchText } from "@/lib/notes/sentences";
 import {
   createGuardedJsonRoute,
   jsonError,
@@ -46,6 +47,20 @@ export const POST = createGuardedJsonRoute<InterpretInput>({
 
       if (isUndoCommand(data.command)) {
         return jsonOk({ kind: "undo" });
+      }
+
+      const normalizedSnippet = normalizeMatchText(data.snippet);
+
+      if (
+        normalizedSnippet !== "" &&
+        !normalizeMatchText(note.contentMd).includes(normalizedSnippet) &&
+        !normalizeMatchText(note.contentPlain).includes(normalizedSnippet)
+      ) {
+        return jsonError(
+          422,
+          "ai_snippet_unbound",
+          "Vybraný text není součástí této poznámky. Vyberte text v náhledu poznámky.",
+        );
       }
 
       const result = await interpretAiEdit({

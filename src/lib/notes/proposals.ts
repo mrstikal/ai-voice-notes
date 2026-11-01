@@ -23,6 +23,8 @@ import {
 import * as repository from "./repository.ts";
 import {
   NoteServiceError,
+  NoteTooLargeError,
+  NoteValidationError,
   assertNoteId,
   getNoteService,
   prepareNoteContent,
@@ -499,6 +501,27 @@ export function createEditProposalService(
 
     if (resolution.status !== "resolved") {
       throw resolveFailureToProposalError(resolution);
+    }
+
+    try {
+      prepareNoteContent(note.title, resolution.afterMd, limits);
+    } catch (error) {
+      if (error instanceof NoteTooLargeError) {
+        throw new EditProposalInvalidError(
+          "proposal_too_large",
+          "Navržená poznámka překračuje povolenou velikost.",
+          413,
+        );
+      }
+
+      if (error instanceof NoteValidationError) {
+        throw new EditProposalInvalidError(
+          "proposal_too_large",
+          error.message,
+        );
+      }
+
+      throw error;
     }
 
     const confirmationNonce = nonceFactory();

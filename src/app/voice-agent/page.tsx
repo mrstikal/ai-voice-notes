@@ -114,7 +114,8 @@ export default function VoiceAgentPage() {
           <li>
             Když začnete mluvit, aplikace okamžitě ztiší rozehranou odpověď.
             Mikrofon lze ztlumit nebo používat jen po dobu stisku tlačítka
-            Držet a mluvit. Relace je omezená na 10 minut a cena Gemini není
+            Držet a mluvit. Relace je omezená na{" "}
+            {GEMINI_LIVE_SESSION_MAX_SECONDS / 60} minut a cena Gemini není
             pevně zastropovaná.
           </li>
         </ul>

@@ -12,12 +12,21 @@ import {
   MEETING_AUDIO_MAX_BYTES,
   checkLocalHost,
   checkMutationOrigin,
+  createRateLimiter,
   jsonError,
   jsonOk,
 } from "@/lib/security/http";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+export const MEETING_INSPECT_RATE_LIMIT = {
+  limit: 10,
+  windowMs: 60_000,
+  key: "meeting-inspect",
+} as const;
+
+const inspectLimiter = createRateLimiter(MEETING_INSPECT_RATE_LIMIT);
 
 function uploadErrorResponse(error: unknown): Response {
   if (error instanceof MeetingMediaError) {
@@ -72,6 +81,17 @@ export async function POST(request: Request): Promise<Response> {
 
   if (originError) {
     return originError;
+  }
+
+  const decision = inspectLimiter.check(MEETING_INSPECT_RATE_LIMIT.key);
+
+  if (!decision.allowed) {
+    return jsonError(
+      429,
+      "rate_limited",
+      "Příliš mnoho požadavků na kontrolu nahrávky. Zkuste to znovu později.",
+      { "Retry-After": String(decision.retryAfterSeconds) },
+    );
   }
 
   const contentType =

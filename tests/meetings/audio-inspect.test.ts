@@ -58,6 +58,26 @@ async function wavForFakeProbe(): Promise<string> {
   return filePath;
 }
 
+async function rf64ForFakeProbe(): Promise<string> {
+  const filePath = path.join(scriptDirectory, "fake-input-rf64.wav");
+  const buffer = Buffer.alloc(12);
+  buffer.write("RF64", 0, "ascii");
+  buffer.writeUInt32LE(36, 4);
+  buffer.write("WAVE", 8, "ascii");
+
+  await writeFile(filePath, buffer);
+
+  return filePath;
+}
+
+async function mp3ForFakeProbe(): Promise<string> {
+  const filePath = path.join(scriptDirectory, "fake-input.mp3");
+
+  await writeFile(filePath, Buffer.from([0xff, 0xfb, 0x90, 0x00]));
+
+  return filePath;
+}
+
 async function webmForFakeProbe(): Promise<string> {
   const filePath = path.join(scriptDirectory, "fake-input.webm");
   // Minimal valid EBML header: EBML ID, size 7, DocType 0x4282 = "webm".
@@ -270,6 +290,41 @@ describe("P41B ffprobe failure and parser paths", () => {
         maxDurationSeconds: 900,
       }),
     ).rejects.toMatchObject({ status: 422, code: "invalid_media" });
+  });
+
+  it("accepts RF64 WAV and mp3float MP3 codec variants", async () => {
+    const rf64Probe = await script(
+      "rf64-ffprobe",
+      '#!/bin/sh\ncase "$1" in -version) echo "ffprobe version fake"; exit 0;; esac\nprintf \'%s\' \'{"format":{"format_name":"rf64","duration":"1.000000"},"streams":[{"codec_type":"audio","codec_name":"pcm_s16le","duration":"1.000000"}]}\'\n',
+    );
+    const mp3FloatProbe = await script(
+      "mp3float-ffprobe",
+      '#!/bin/sh\ncase "$1" in -version) echo "ffprobe version fake"; exit 0;; esac\nprintf \'%s\' \'{"format":{"format_name":"mp3","duration":"1.000000"},"streams":[{"codec_type":"audio","codec_name":"mp3float","duration":"1.000000"}]}\'\n',
+    );
+    const rf64 = await rf64ForFakeProbe();
+    const mp3 = await mp3ForFakeProbe();
+
+    await expect(
+      inspectMeetingAudio(rf64, {
+        ffprobePath: rf64Probe,
+        maxDurationSeconds: 900,
+      }),
+    ).resolves.toMatchObject({
+      format: "wav",
+      codec: "pcm_s16le",
+      durationSeconds: 1,
+    });
+
+    await expect(
+      inspectMeetingAudio(mp3, {
+        ffprobePath: mp3FloatProbe,
+        maxDurationSeconds: 900,
+      }),
+    ).resolves.toMatchObject({
+      format: "mp3",
+      codec: "mp3float",
+      durationSeconds: 1,
+    });
   });
 
   it("derives a headerless WebM duration from packet timestamps", async () => {

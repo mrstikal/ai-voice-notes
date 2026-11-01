@@ -20,6 +20,7 @@ import { countGraphemes } from "../../src/lib/notes/limits";
 import { parseNoteMarkdown } from "../../src/lib/notes/markdown";
 import {
   MeetingSaveConflictError,
+  MeetingTitleTooLongError,
   MeetingTranscriptEmptyError,
   MeetingTranscriptTooLongError,
   createNoteService,
@@ -155,6 +156,17 @@ describe("meeting save canonicalization", () => {
     expect(() =>
       planMeetingSave({ title: "Zápis", segments: [{ label: "Petra", text: "  " }] }),
     ).toThrowError(MeetingTranscriptEmptyError);
+  });
+
+  it("enforces the advertised 100-grapheme title cap on the server", () => {
+    expect(() =>
+      planMeetingSave({ title: "a".repeat(101), text: "Text." }),
+    ).toThrowError(MeetingTitleTooLongError);
+
+    expect(
+      planMeetingSave({ title: "a".repeat(100), text: "Text." }).parts[0]
+        ?.title,
+    ).toBe("a".repeat(100));
   });
 });
 

@@ -19,6 +19,7 @@ import {
   EditProposalConflictError,
   EditProposalDiffMismatchError,
   EditProposalExpiredError,
+  EditProposalInvalidError,
   EditProposalNonceError,
   EditProposalStaleError,
   PROPOSAL_EXPIRY_MS,
@@ -312,7 +313,7 @@ describe.skipIf(!hasTestDatabase)("P24 proposal application", () => {
     ).rejects.toBeInstanceOf(EditProposalConflictError);
   });
 
-  it("honours the configured note content limit during apply", async () => {
+  it("honours the configured note content limit on create and during apply", async () => {
     const note = await baseNote();
     const limited = createEditProposalService({
       db: connection.db,
@@ -326,7 +327,15 @@ describe.skipIf(!hasTestDatabase)("P24 proposal application", () => {
         ) => Promise<number>,
       },
     });
-    const created = await limited.create(note.id, {
+
+    await expect(
+      limited.create(note.id, {
+        operation,
+        expectedVersion: 1,
+      }),
+    ).rejects.toBeInstanceOf(EditProposalInvalidError);
+
+    const created = await proposals.create(note.id, {
       operation,
       expectedVersion: 1,
     });

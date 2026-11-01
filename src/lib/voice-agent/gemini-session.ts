@@ -14,6 +14,9 @@ import {
   type RateLimitOptions,
 } from "../security/http.ts";
 import { isGeminiVoice, type GeminiVoice } from "./gemini-voices.ts";
+import { GEMINI_LIVE_SESSION_MAX_SECONDS } from "./gemini-session-shared.ts";
+
+export { GEMINI_LIVE_SESSION_MAX_SECONDS } from "./gemini-session-shared.ts";
 import { GEMINI_VOICE_TOOL_DECLARATIONS } from "./read-services.ts";
 import {
   ToolSessionError,
@@ -24,7 +27,6 @@ import {
 export const GEMINI_LIVE_MODEL_ID = DEFAULT_GEMINI_LIVE_MODEL;
 export const GEMINI_LIVE_TOKEN_PATH = "/v1beta/auth_tokens";
 export const GEMINI_LIVE_TOKEN_URL = `${DEFAULT_GEMINI_API_BASE_URL}${GEMINI_LIVE_TOKEN_PATH}`;
-export const GEMINI_LIVE_SESSION_MAX_SECONDS = 10 * 60;
 export const GEMINI_LIVE_TOKEN_TIMEOUT_MS = 15_000;
 export const GEMINI_TOKEN_REQUEST_MAX_BYTES = 4 * 1024;
 

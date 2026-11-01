@@ -309,6 +309,27 @@ describe.skipIf(!hasTestDatabase)("P23 edit proposals", () => {
     ).rejects.toBeInstanceOf(EditProposalInvalidError);
   });
 
+  it("rejects an oversized proposed result before storing a pending proposal", async () => {
+    const note = await createBaseNote("a".repeat(19_000));
+
+    await expect(
+      proposals.create(note.id, {
+        operation: {
+          type: "append_bounded_section",
+          text: "b".repeat(2_000),
+        },
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({
+      status: 422,
+      code: "proposal_invalid",
+      details: { reason: "proposal_too_large" },
+    });
+
+    expect(await proposalRows()).toHaveLength(0);
+    expect((await noteService.getNote(note.id)).version).toBe(1);
+  });
+
   it("rejects stale versions, hash mismatches and deleted notes without a proposal", async () => {
     const note = await createBaseNote();
 

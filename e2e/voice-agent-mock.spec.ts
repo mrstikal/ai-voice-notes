@@ -11,6 +11,7 @@ import {
   GEMINI_LIVE_WEBSOCKET_PATTERN,
   GeminiLiveSocketDouble,
 } from "../tests/helpers/webrtc-double";
+import { GEMINI_LIVE_SESSION_MAX_SECONDS } from "../src/lib/voice-agent/gemini-session-shared";
 
 test.setTimeout(180_000);
 
@@ -146,7 +147,7 @@ test("mock voice agent: connect, select, reject, approve, undo and stop without 
     "Cena Gemini je neznámá",
   );
   await expect(page.getByTestId("voice-agent-cost-warning")).toContainText(
-    "10 minut",
+    `${GEMINI_LIVE_SESSION_MAX_SECONDS / 60} minut`,
   );
 
   await page.getByTestId("voice-agent-connect").click();

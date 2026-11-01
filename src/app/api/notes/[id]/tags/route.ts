@@ -1,5 +1,4 @@
 import {
-  NOTE_EDIT_MAX_BYTES,
   createGuardedJsonRoute,
   jsonOk,
 } from "@/lib/security/http";
@@ -14,6 +13,8 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const NOTE_TAGS_MAX_BYTES = 16 * 1024;
 
 type NoteTagsRouteContext = {
   params: Promise<{ id: string }>;
@@ -35,7 +36,7 @@ export const PATCH = createGuardedJsonRoute<
   UpdateNoteMetadataInput,
   NoteTagsRouteContext
 >({
-  maxBytes: NOTE_EDIT_MAX_BYTES,
+  maxBytes: NOTE_TAGS_MAX_BYTES,
   schema: updateNoteMetadataInputSchema,
   methods: ["PATCH"],
   handler: async ({ data, routeContext }) => {
