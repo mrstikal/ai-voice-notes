@@ -58,6 +58,7 @@ export interface ElevenLabsTransport {
 
 export interface ScribeTokenResult {
   readonly token: string;
+  readonly usageId: string;
   readonly expiresInSeconds: number;
   readonly expiresAt: string;
   readonly modelId: typeof SCRIBE_REALTIME_MODEL_ID;
@@ -310,6 +311,7 @@ export function createScribeTokenService(
 
       return {
         token,
+        usageId: reservation.id,
         expiresInSeconds: SCRIBE_TOKEN_TTL_SECONDS,
         expiresAt: new Date(
           issuedAt + SCRIBE_TOKEN_TTL_SECONDS * 1000,

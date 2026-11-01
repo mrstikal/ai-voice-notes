@@ -6,6 +6,7 @@ import type { UsageOperationDto, UsageSummaryDto } from "@/lib/ai/usage";
 import {
   formatUsageCost,
   formatUsdAmount,
+  hasAudioDurationCharge,
 } from "@/lib/ai/usage-format";
 
 const dateFormatter = new Intl.DateTimeFormat("cs-CZ", {
@@ -125,9 +126,10 @@ export function UsageSettings({
               Odhadovaný místní rozpočet
             </h2>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-stone-600">
-              Rezervace se odečítají před operací. Vyúčtované položky používají
-              cenu oznámenou poskytovatelem; nejisté položky zůstávají
-              rezervované jako neznámá cena.
+              Rezervace se odečítají před operací. U OpenRouteru se používá cena
+              oznámená poskytovatelem; u ElevenLabs Scribe se cena počítá
+              z délky odeslaného audia. Nejisté položky zůstávají rezervované
+              jako neznámá cena.
             </p>
           </div>
           <button
@@ -201,8 +203,8 @@ export function UsageSettings({
             </dl>
 
             <p className="mt-4 text-sm text-stone-600">
-              Aktivní rezervace: {summary.activeCount}. Vyúčtováno
-              poskytovatelem: {formatUsdAmount(summary.reportedUsd)}.
+              Aktivní rezervace: {summary.activeCount}. Vyúčtováno:{" "}
+              {formatUsdAmount(summary.reportedUsd)}.
             </p>
 
             {summary.activeCount > 0 ? (
@@ -268,46 +270,63 @@ export function UsageSettings({
                       </td>
                     </tr>
                   ) : (
-                    summary.operations.map((operation) => (
-                      <tr
-                        className="border-b border-stone-100 align-top"
-                        key={operation.id}
-                      >
-                        <td className="px-3 py-3">
-                          <p className="font-medium text-stone-950">
-                            {operation.operation}
-                          </p>
-                          <p className="mt-1 text-xs text-stone-600">
-                            {operation.model}
-                          </p>
-                          {operation.providerUsage !== null ? (
-                            <details className="mt-2">
-                              <summary className="cursor-pointer text-xs font-medium text-stone-600">
-                                Údaje od poskytovatele
-                              </summary>
-                              <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-stone-100 p-2 text-xs text-stone-800">
-                                {JSON.stringify(operation.providerUsage, null, 2)}
-                              </pre>
-                            </details>
-                          ) : null}
-                        </td>
-                        <td className="px-3 py-3 text-stone-700">
-                          {operation.provider}
-                        </td>
-                        <td className="px-3 py-3 text-stone-700">
-                          {statusLabels[operation.status]}
-                        </td>
-                        <td className="px-3 py-3 text-stone-700">
-                          {formatUsdAmount(operation.reservedCostUsd)}
-                        </td>
-                        <td className="px-3 py-3 font-medium text-stone-900">
-                          {formatUsageCost(operation)}
-                        </td>
-                        <td className="px-3 py-3 text-stone-700">
-                          {dateFormatter.format(new Date(operation.startedAt))}
-                        </td>
-                      </tr>
-                    ))
+                    summary.operations.map((operation) => {
+                      const audioDurationCharge =
+                        operation.status === "settled" &&
+                        hasAudioDurationCharge(operation.providerUsage);
+
+                      return (
+                        <tr
+                          className="border-b border-stone-100 align-top"
+                          key={operation.id}
+                        >
+                          <td className="px-3 py-3">
+                            <p className="font-medium text-stone-950">
+                              {operation.operation}
+                            </p>
+                            <p className="mt-1 text-xs text-stone-600">
+                              {operation.model}
+                            </p>
+                            {operation.providerUsage !== null ? (
+                              <details className="mt-2">
+                                <summary className="cursor-pointer text-xs font-medium text-stone-600">
+                                  Údaje od poskytovatele
+                                </summary>
+                                <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-stone-100 p-2 text-xs text-stone-800">
+                                  {JSON.stringify(
+                                    operation.providerUsage,
+                                    null,
+                                    2,
+                                  )}
+                                </pre>
+                              </details>
+                            ) : null}
+                          </td>
+                          <td className="px-3 py-3 text-stone-700">
+                            {operation.provider}
+                          </td>
+                          <td className="px-3 py-3 text-stone-700">
+                            {statusLabels[operation.status]}
+                          </td>
+                          <td className="px-3 py-3 text-stone-700">
+                            {formatUsdAmount(operation.reservedCostUsd)}
+                          </td>
+                          <td className="px-3 py-3 font-medium text-stone-900">
+                            {formatUsageCost(operation)}
+                            {audioDurationCharge ? (
+                              <span className="mt-1 block text-xs font-normal text-stone-600">
+                                Cena z délky audia
+                              </span>
+                            ) : null}
+                          </td>
+                          <td className="px-3 py-3 text-stone-700">
+                            {dateFormatter.format(
+                              new Date(operation.startedAt),
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>

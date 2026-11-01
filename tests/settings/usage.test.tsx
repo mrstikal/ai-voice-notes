@@ -56,6 +56,31 @@ describe("UsageSettings", () => {
     expect(screen.getByText("1,75 USD")).toBeDefined();
   });
 
+  it("marks a settled ElevenLabs row as priced from audio duration", () => {
+    render(
+      <UsageSettings
+        initialError={null}
+        initialSummary={{
+          ...summary,
+          operations: [
+            {
+              ...summary.operations[0]!,
+              operation: "elevenlabs_scribe_token",
+              provider: "elevenlabs",
+              model: "scribe_v2_realtime",
+              status: "settled",
+              reportedCostUsd: "0.004550",
+              providerUsage: { chargeBasis: "audio_duration" },
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText("0,00455 USD")).toBeDefined();
+    expect(screen.getByText("Cena z délky audia")).toBeDefined();
+  });
+
   it("requires the inline confirmation before resetting usage", async () => {
     const user = userEvent.setup();
     const cleared = {

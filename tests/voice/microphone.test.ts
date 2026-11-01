@@ -318,13 +318,26 @@ describe("Scribe token request", () => {
       .fn<typeof fetch>()
       .mockResolvedValue(jsonResponse({ token: "sutkn_fetch_token" }));
 
-    await expect(requestScribeToken(fetchMock)).resolves.toBe(
-      "sutkn_fetch_token",
-    );
+    await expect(requestScribeToken(fetchMock)).resolves.toEqual({
+      token: "sutkn_fetch_token",
+      usageId: null,
+    });
     expect(fetchMock).toHaveBeenCalledWith("/api/elevenlabs/scribe-token", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: "{}",
+    });
+  });
+
+  it("carries the ledger id used for later duration settlement", async () => {
+    const usageId = "11111111-1111-4111-8111-111111111111";
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({ token: "sutkn_fetch_token", usageId }),
+    );
+
+    await expect(requestScribeToken(fetchMock)).resolves.toEqual({
+      token: "sutkn_fetch_token",
+      usageId,
     });
   });
 

@@ -198,9 +198,14 @@ export async function acquireMicrophoneLease(
   };
 }
 
+export interface ScribeTokenCredential {
+  readonly token: string;
+  readonly usageId: string | null;
+}
+
 export async function requestScribeToken(
   fetchImpl: typeof fetch = fetch,
-): Promise<string> {
+): Promise<ScribeTokenCredential> {
   let response: Response;
 
   try {
@@ -239,10 +244,14 @@ export async function requestScribeToken(
     );
   }
 
-  const token =
-    typeof body === "object" && body !== null
-      ? (body as { token?: unknown }).token
-      : undefined;
+  if (typeof body !== "object" || body === null) {
+    throw new MicrophoneSessionError(
+      "Server vrátil neplatný token pro diktování.",
+    );
+  }
+
+  const token = (body as { token?: unknown }).token;
+  const usageId = (body as { usageId?: unknown }).usageId;
 
   if (typeof token !== "string" || token.length === 0) {
     throw new MicrophoneSessionError(
@@ -250,7 +259,13 @@ export async function requestScribeToken(
     );
   }
 
-  return token;
+  return {
+    token,
+    usageId:
+      typeof usageId === "string" && usageId.trim() !== ""
+        ? usageId
+        : null,
+  };
 }
 
 const PERMISSION_ERROR_PATTERNS = [

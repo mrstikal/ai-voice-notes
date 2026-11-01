@@ -27,6 +27,7 @@ import {
   type MicrophoneSessionState,
   type MicrophoneSessionStatus,
 } from "@/lib/voice/microphone";
+import { reportScribeAudioUsage } from "@/lib/voice/scribe-usage";
 
 const statusLabels: Record<MicrophoneSessionStatus, string> = {
   idle: "Připraveno",
@@ -247,6 +248,11 @@ export function ScribeDiagnostic() {
     INITIAL_MICROPHONE_SESSION_STATE,
   );
   const sessionIdRef = useRef<number | null>(null);
+  const pendingUsageIdRef = useRef<string | null>(null);
+  const activeUsageRef = useRef<{
+    usageId: string;
+    startedAt: number;
+  } | null>(null);
   const scribeRef = useRef<UseScribeReturn | null>(null);
   const controllerRef = useRef<MicrophoneSessionController | null>(null);
 
@@ -375,7 +381,12 @@ export function ScribeDiagnostic() {
 
     if (controller === null) {
       controller = new MicrophoneSessionController({
-        requestToken: () => requestScribeToken(),
+        requestToken: async () => {
+          const credential = await requestScribeToken();
+          pendingUsageIdRef.current = credential.usageId;
+
+          return credential.token;
+        },
         startSession: async (token, sessionId) => {
           const currentScribe = scribeRef.current;
 
@@ -386,9 +397,27 @@ export function ScribeDiagnostic() {
           sessionIdRef.current = sessionId;
           currentScribe.clearTranscripts();
           await currentScribe.connect({ token });
+
+          const usageId = pendingUsageIdRef.current;
+          pendingUsageIdRef.current = null;
+          activeUsageRef.current =
+            usageId === null
+              ? null
+              : { usageId, startedAt: Date.now() };
         },
         stopSession: () => {
           sessionIdRef.current = null;
+
+          const activeUsage = activeUsageRef.current;
+          activeUsageRef.current = null;
+
+          if (activeUsage !== null) {
+            reportScribeAudioUsage(
+              activeUsage.usageId,
+              (Date.now() - activeUsage.startedAt) / 1000,
+            );
+          }
+
           scribeRef.current?.disconnect();
         },
         onStateChange: setSession,

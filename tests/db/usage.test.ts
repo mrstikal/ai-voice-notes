@@ -11,6 +11,7 @@ import {
 import {
   BudgetExceededError,
   PriceUnavailableError,
+  UsageNotFoundError,
   UsageResetBlockedError,
   UsageStateError,
   UsageValidationError,
@@ -19,6 +20,7 @@ import {
   reconcileInterruptedReservations,
   type UsageService,
 } from "../../src/lib/ai/usage";
+import { SCRIBE_TOKEN_OPERATION } from "../../src/lib/elevenlabs/client";
 import { createNoteService } from "../../src/lib/notes/service";
 
 const hasTestDatabase = Boolean(
@@ -130,6 +132,63 @@ describe.skipIf(!hasTestDatabase)("paid-operation usage ledger", () => {
       UsageStateError,
     );
     expect((await service.getSummary()).committedUsd).toBe("0.350000");
+  });
+
+  it("settles an unknown realtime reservation from its later audio duration", async () => {
+    const service = useService();
+    const realtime = await service.reserve({
+      operation: SCRIBE_TOKEN_OPERATION,
+      provider: "elevenlabs",
+      model: "scribe_v2_realtime",
+      estimatedMaxCostUsd: 0.0195,
+    });
+
+    await service.markUnknown(realtime.id, {
+      chargeReason: "realtime_session_usage_unknown",
+    });
+    expect((await service.getSummary()).committedUsd).toBe("0.019500");
+
+    await expect(
+      service.settle(
+        realtime.id,
+        { reportedCostUsd: 0.00455 },
+        {
+          allowUnknown: true,
+          expectedOperation: "other_operation",
+          expectedProvider: "elevenlabs",
+        },
+      ),
+    ).rejects.toBeInstanceOf(UsageNotFoundError);
+
+    const settled = await service.settle(
+      realtime.id,
+      {
+        reportedCostUsd: 0.00455,
+        providerUsage: { chargeBasis: "audio_duration" },
+      },
+      {
+        allowUnknown: true,
+        expectedOperation: SCRIBE_TOKEN_OPERATION,
+        expectedProvider: "elevenlabs",
+      },
+    );
+
+    expect(settled.status).toBe("settled");
+    expect(settled.reportedCostUsd).toBe("0.004550");
+
+    const summary = await service.getSummary();
+    expect(summary.committedUsd).toBe("0.004550");
+    expect(summary.reportedUsd).toBe("0.004550");
+    expect(summary.unknownCount).toBe(0);
+    expect(summary.activeCount).toBe(0);
+
+    await expect(
+      service.settle(
+        realtime.id,
+        { reportedCostUsd: 0.00455 },
+        { allowUnknown: true, expectedOperation: SCRIBE_TOKEN_OPERATION },
+      ),
+    ).rejects.toBeInstanceOf(UsageStateError);
   });
 
   it("does not clear or reset usage when the service or connection is recreated", async () => {

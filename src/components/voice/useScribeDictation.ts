@@ -39,6 +39,7 @@ import {
   recordVoiceCommitLatency,
   recordVoiceManualReconnect,
 } from "@/lib/voice/diagnostics";
+import { reportScribeAudioUsage } from "@/lib/voice/scribe-usage";
 import {
   TranscriptSession,
   type AcceptedTranscriptSegment,
@@ -134,6 +135,11 @@ export function useScribeDictation(
   );
   const mediaOwnerId = useId();
   const sessionIdRef = useRef<number | null>(null);
+  const pendingUsageIdRef = useRef<string | null>(null);
+  const activeUsageRef = useRef<{
+    usageId: string;
+    startedAt: number;
+  } | null>(null);
   const scribeRef = useRef<UseScribeReturn | null>(null);
   const controllerRef = useRef<MicrophoneSessionController | null>(null);
   const committedListenerRef = useRef<{
@@ -246,6 +252,16 @@ export function useScribeDictation(
   }, [scribe]);
 
   const closeTranscriptSession = useCallback(() => {
+    const activeUsage = activeUsageRef.current;
+    activeUsageRef.current = null;
+
+    if (activeUsage !== null) {
+      reportScribeAudioUsage(
+        activeUsage.usageId,
+        (Date.now() - activeUsage.startedAt) / 1000,
+      );
+    }
+
     if (flushQuietTimerRef.current !== null) {
       clearTimeout(flushQuietTimerRef.current);
       flushQuietTimerRef.current = null;
@@ -427,6 +443,13 @@ export function useScribeDictation(
         vadSilenceThresholdSecs: vadSilenceRef.current,
       });
 
+      const usageId = pendingUsageIdRef.current;
+      pendingUsageIdRef.current = null;
+      activeUsageRef.current =
+        usageId === null
+          ? null
+          : { usageId, startedAt: Date.now() };
+
       const connection = currentScribe.getConnection();
 
       if (connection === null) {
@@ -571,7 +594,12 @@ export function useScribeDictation(
 
     if (controller === null) {
       controller = new MicrophoneSessionController({
-        requestToken: () => requestScribeToken(),
+        requestToken: async () => {
+          const credential = await requestScribeToken();
+          pendingUsageIdRef.current = credential.usageId;
+
+          return credential.token;
+        },
         startSession,
         stopSession,
         onStateChange: setSession,

@@ -13,6 +13,15 @@ export function formatUsdAmount(value: string): string {
   }).format(amount)} USD`;
 }
 
+export function hasAudioDurationCharge(providerUsage: unknown): boolean {
+  return (
+    typeof providerUsage === "object" &&
+    providerUsage !== null &&
+    (providerUsage as { chargeBasis?: unknown }).chargeBasis ===
+      "audio_duration"
+  );
+}
+
 export function formatUsageCost(
   operation: Pick<
     UsageOperationDto,

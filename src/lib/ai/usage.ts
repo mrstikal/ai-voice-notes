@@ -1,5 +1,5 @@
 import type { ExtractTablesWithRelations } from "drizzle-orm";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { NodePgQueryResultHKT } from "drizzle-orm/node-postgres";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 
@@ -65,6 +65,16 @@ export interface SettlementInput {
   readonly providerUsage?: unknown;
 }
 
+export interface SettlementOptions {
+  /**
+   * Allows a later, bounded correction of an `unknown` row, for example when
+   * the provider reports the billed audio duration only after the request.
+   */
+  readonly allowUnknown?: boolean;
+  readonly expectedOperation?: string;
+  readonly expectedProvider?: string;
+}
+
 export interface UsageServiceOptions {
   readonly db: AppDatabase;
   readonly budgetUsd: number;
@@ -72,7 +82,11 @@ export interface UsageServiceOptions {
 
 export interface UsageService {
   reserve(input: ReservationInput): Promise<UsageOperationDto>;
-  settle(id: string, input: SettlementInput): Promise<UsageOperationDto>;
+  settle(
+    id: string,
+    input: SettlementInput,
+    options?: SettlementOptions,
+  ): Promise<UsageOperationDto>;
   markUnknown(id: string, providerUsage?: unknown): Promise<UsageOperationDto>;
   getSummary(): Promise<UsageSummaryDto>;
   resetUsage(): Promise<{ readonly reset: true }>;
@@ -457,11 +471,27 @@ export function createUsageService(options: UsageServiceOptions): UsageService {
     status: "settled" | "unknown",
     reportedCostUsd: string | null,
     providerUsage: unknown,
+    options: SettlementOptions = {},
   ): Promise<UsageOperationDto> {
     assertUsageId(id);
 
     return db.transaction(async (tx) => {
       await lockBudget(tx, null);
+      const conditions = [
+        eq(aiUsage.id, id),
+        options.allowUnknown
+          ? inArray(aiUsage.status, ["started", "unknown"])
+          : eq(aiUsage.status, "started"),
+      ];
+
+      if (options.expectedOperation) {
+        conditions.push(eq(aiUsage.operation, options.expectedOperation));
+      }
+
+      if (options.expectedProvider) {
+        conditions.push(eq(aiUsage.provider, options.expectedProvider));
+      }
+
       const rows = await tx
         .update(aiUsage)
         .set({
@@ -470,7 +500,7 @@ export function createUsageService(options: UsageServiceOptions): UsageService {
           providerUsage,
           settledAt: sql`now()`,
         })
-        .where(and(eq(aiUsage.id, id), eq(aiUsage.status, "started")))
+        .where(and(...conditions))
         .returning();
       const updated = rows[0];
 
@@ -485,7 +515,13 @@ export function createUsageService(options: UsageServiceOptions): UsageService {
         .limit(1);
       const row = existing[0];
 
-      if (!row) {
+      if (
+        !row ||
+        (options.expectedOperation &&
+          row.operation !== options.expectedOperation) ||
+        (options.expectedProvider &&
+          row.provider !== options.expectedProvider)
+      ) {
         throw new UsageNotFoundError();
       }
 
@@ -542,13 +578,14 @@ export function createUsageService(options: UsageServiceOptions): UsageService {
       });
     },
 
-    async settle(id, input) {
+    async settle(id, input, options) {
       if (input.reportedCostUsd === null) {
         return finishOperation(
           id,
           "unknown",
           null,
           normalizeProviderUsage(input.providerUsage),
+          options,
         );
       }
 
@@ -561,6 +598,7 @@ export function createUsageService(options: UsageServiceOptions): UsageService {
         "settled",
         reported,
         normalizeProviderUsage(input.providerUsage),
+        options,
       );
     },
 

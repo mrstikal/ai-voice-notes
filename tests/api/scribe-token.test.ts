@@ -186,6 +186,7 @@ describe("POST /api/elevenlabs/scribe-token", () => {
     const firstBody = (await firstResponse.json()) as Record<string, unknown>;
     expect(firstBody).toEqual({
       token: "sutkn_first_token",
+      usageId: RESERVATION_ID,
       expiresInSeconds: SCRIBE_TOKEN_TTL_SECONDS,
       expiresAt: "2026-10-26T12:15:00.000Z",
       modelId: SCRIBE_REALTIME_MODEL_ID,

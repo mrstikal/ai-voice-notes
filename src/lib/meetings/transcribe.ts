@@ -626,14 +626,39 @@ export function createMeetingTranscriptionService(
         throw error;
       }
 
+      const durationSeconds = transcription.audioDurationSeconds;
+      const providerUsage = {
+        model: SCRIBE_BATCH_MODEL_ID,
+        languageCode: transcription.languageCode,
+        audioDurationSecs: durationSeconds,
+        diarize: true,
+        usdPerHour: SCRIBE_BATCH_USD_PER_HOUR,
+        chargeBasis: "audio_duration",
+      };
+
       try {
-        await options.usage.markUnknown(reservation.id, {
-          model: SCRIBE_BATCH_MODEL_ID,
-          languageCode: transcription.languageCode,
-          audioDurationSecs: transcription.audioDurationSeconds,
-          diarize: true,
-          chargeReason: "batch_transcript_usage_unknown",
-        });
+        if (durationSeconds !== null && durationSeconds > 0) {
+          await options.usage.settle(
+            reservation.id,
+            {
+              reportedCostUsd:
+                (durationSeconds * SCRIBE_BATCH_USD_PER_HOUR) / 3600,
+              providerUsage: {
+                ...providerUsage,
+                chargeReason: "batch_transcript_audio_duration_price",
+              },
+            },
+            {
+              expectedOperation: SCRIBE_BATCH_OPERATION,
+              expectedProvider: SCRIBE_BATCH_PROVIDER,
+            },
+          );
+        } else {
+          await options.usage.markUnknown(reservation.id, {
+            ...providerUsage,
+            chargeReason: "batch_transcript_usage_unknown",
+          });
+        }
       } catch {
         throw new MeetingTranscriptionError(
           503,

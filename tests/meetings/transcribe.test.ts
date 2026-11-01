@@ -38,11 +38,18 @@ function configWith(options: { readonly apiKey?: string | null } = {}): AppConfi
 interface FakeUsage {
   readonly usage: UsageService;
   readonly reservations: Parameters<UsageService["reserve"]>[0][];
+  readonly settlements: {
+    id: string;
+    reportedCostUsd: number | null;
+    providerUsage: unknown;
+    options: unknown;
+  }[];
   readonly unknowns: { id: string; providerUsage: unknown }[];
 }
 
 function fakeUsage(): FakeUsage {
   const reservations: Parameters<UsageService["reserve"]>[0][] = [];
+  const settlements: FakeUsage["settlements"] = [];
   const unknowns: { id: string; providerUsage: unknown }[] = [];
   let counter = 0;
 
@@ -68,8 +75,24 @@ function fakeUsage(): FakeUsage {
       reservations.push(input);
       return toDto(input);
     },
-    async settle() {
-      throw new Error("settle must not be called for batch transcription");
+    async settle(id, input, options) {
+      settlements.push({
+        id,
+        reportedCostUsd: input.reportedCostUsd,
+        providerUsage: input.providerUsage,
+        options,
+      });
+
+      return {
+        ...toDto(reservations[0]!),
+        id,
+        status: "settled",
+        reportedCostUsd:
+          input.reportedCostUsd === null
+            ? null
+            : input.reportedCostUsd.toFixed(6),
+        providerUsage: input.providerUsage ?? null,
+      };
     },
     async markUnknown(id, providerUsage) {
       unknowns.push({ id, providerUsage });
@@ -83,7 +106,7 @@ function fakeUsage(): FakeUsage {
     },
   };
 
-  return { usage, reservations, unknowns };
+  return { usage, reservations, settlements, unknowns };
 }
 
 function transportReturning(
@@ -268,7 +291,7 @@ describe("P42 batch transcription contract", () => {
 });
 
 describe("P42 transcription service", () => {
-  it("reserves the bounded estimate, calls the transport once and marks usage unknown", async () => {
+  it("reserves the bounded estimate, calls the transport once and settles from audio duration", async () => {
     const ledger = fakeUsage();
     let seen: unknown;
     const service = createMeetingTranscriptionService({
@@ -299,17 +322,49 @@ describe("P42 transcription service", () => {
         estimatedMaxCostUsd: 0.055,
       },
     ]);
-    expect(ledger.unknowns).toHaveLength(1);
-    expect(ledger.unknowns[0]!.providerUsage).toMatchObject({
+    expect(ledger.unknowns).toEqual([]);
+    expect(ledger.settlements).toHaveLength(1);
+    expect(ledger.settlements[0]!.reportedCostUsd).toBeCloseTo(
+      (12.5 * 0.22) / 3600,
+      12,
+    );
+    expect(ledger.settlements[0]!.providerUsage).toMatchObject({
       model: "scribe_v2",
       languageCode: "cs",
       audioDurationSecs: 12.5,
       diarize: true,
-      chargeReason: "batch_transcript_usage_unknown",
+      usdPerHour: 0.22,
+      chargeBasis: "audio_duration",
+      chargeReason: "batch_transcript_audio_duration_price",
     });
-    expect(JSON.stringify(ledger.unknowns[0]!.providerUsage)).not.toContain(
+    expect(JSON.stringify(ledger.settlements[0]!.providerUsage)).not.toContain(
       "Dobrý den",
     );
+  });
+
+  it("keeps usage unknown when the provider omits the audio duration", async () => {
+    const ledger = fakeUsage();
+    const payload = providerPayload() as Record<string, unknown>;
+    delete payload.audio_duration_secs;
+
+    const service = createMeetingTranscriptionService({
+      config: configWith(),
+      usage: ledger.usage,
+      transport: transportReturning(payload),
+    });
+
+    await service.transcribe({
+      filePath: "/tmp/meeting-upload.webm",
+      fileName: "meeting-upload.webm",
+    });
+
+    expect(ledger.settlements).toEqual([]);
+    expect(ledger.unknowns).toHaveLength(1);
+    expect(ledger.unknowns[0]!.providerUsage).toMatchObject({
+      model: "scribe_v2",
+      audioDurationSecs: null,
+      chargeReason: "batch_transcript_usage_unknown",
+    });
   });
 
   it("fails before reserving anything when the key is missing", async () => {
@@ -547,7 +602,8 @@ describe("P42 transcribe route", () => {
         testMode: false,
       });
       expect(ledger.reservations).toHaveLength(1);
-      expect(ledger.unknowns).toHaveLength(1);
+      expect(ledger.settlements).toHaveLength(1);
+      expect(ledger.unknowns).toEqual([]);
       expect(await tempFiles()).toEqual([]);
     } finally {
       await cleanupMedia(media.directory);
