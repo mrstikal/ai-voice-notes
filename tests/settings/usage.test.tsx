@@ -4,6 +4,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { UsageBudget } from "../../src/components/settings/UsageBudget";
 import { UsageSettings } from "../../src/components/settings/UsageSettings";
 import type { UsageSummaryDto } from "../../src/lib/ai/usage";
 
@@ -44,21 +45,27 @@ describe("UsageSettings", () => {
     vi.unstubAllGlobals();
   });
 
-  it("shows cost uncertainty, privacy notice and provider-side limit caveat", () => {
-    render(<UsageSettings initialError={null} initialSummary={summary} />);
+  it("shows the privacy notice and provider-side limit caveat", () => {
+    render(<UsageSettings />);
 
-    expect(screen.getAllByText("Neznámá cena").length).toBeGreaterThan(0);
     expect(
       screen.getByText(/Není to limit na straně poskytovatele/),
     ).toBeDefined();
     expect(screen.getByText(/Bez API klíčů/)).toBeDefined();
+    expect(screen.getByText(/Neznámá cena/)).toBeDefined();
+  });
+
+  it("shows cost uncertainty and budget values", () => {
+    render(<UsageBudget initialError={null} initialSummary={summary} />);
+
+    expect(screen.getAllByText("Neznámá cena").length).toBeGreaterThan(0);
     expect(screen.getByText("2,00 USD")).toBeDefined();
     expect(screen.getByText("1,75 USD")).toBeDefined();
   });
 
   it("marks a settled ElevenLabs row as priced from audio duration", () => {
     render(
-      <UsageSettings
+      <UsageBudget
         initialError={null}
         initialSummary={{
           ...summary,
@@ -97,7 +104,7 @@ describe("UsageSettings", () => {
       }),
     );
 
-    render(<UsageSettings initialError={null} initialSummary={summary} />);
+    render(<UsageBudget initialError={null} initialSummary={summary} />);
 
     await user.click(
       screen.getByRole("button", { name: "Resetovat evidenci" }),
@@ -123,7 +130,7 @@ describe("UsageSettings", () => {
 
   it("disables reset while a reservation is active", () => {
     render(
-      <UsageSettings
+      <UsageBudget
         initialError={null}
         initialSummary={{ ...summary, activeCount: 1 }}
       />,

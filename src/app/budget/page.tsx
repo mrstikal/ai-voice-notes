@@ -1,0 +1,36 @@
+import type { Metadata } from "next";
+
+import { UsageBudget } from "@/components/settings/UsageBudget";
+import { getUsageService, type UsageSummaryDto } from "@/lib/ai/usage";
+
+export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = {
+  title: "Rozpočet",
+};
+
+export default async function BudgetPage() {
+  let summary: UsageSummaryDto | null = null;
+  let error: string | null = null;
+
+  try {
+    summary = await getUsageService().getSummary();
+  } catch {
+    error =
+      "Evidenci využití se nepodařilo načíst. Zkontrolujte, zda běží databáze a jsou spuštěné migrace.";
+  }
+
+  return (
+    <div className="mx-auto max-w-5xl px-6 py-12">
+      <p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-800">
+        Soukromí a náklady
+      </p>
+      <h1 className="mt-3 text-3xl font-semibold tracking-tight text-stone-950">
+        Rozpočet
+      </h1>
+      <div className="mt-8">
+        <UsageBudget initialError={error} initialSummary={summary} />
+      </div>
+    </div>
+  );
+}

@@ -10,7 +10,6 @@ import {
   getLlmProviderStatus,
   type LlmProviderStatus,
 } from "@/lib/ai/structured";
-import { getUsageService, type UsageSummaryDto } from "@/lib/ai/usage";
 import {
   getTtsProviderStatus,
   type TtsProviderStatus,
@@ -23,19 +22,10 @@ export const metadata: Metadata = {
 };
 
 export default async function SettingsPage() {
-  let summary: UsageSummaryDto | null = null;
-  let error: string | null = null;
   let ttsStatus: TtsProviderStatus | null = null;
   let ttsError: string | null = null;
   let llmStatus: LlmProviderStatus | null = null;
   let llmError: string | null = null;
-
-  try {
-    summary = await getUsageService().getSummary();
-  } catch {
-    error =
-      "Evidenci využití se nepodařilo načíst. Zkontrolujte, zda běží databáze a jsou spuštěné migrace.";
-  }
 
   try {
     ttsStatus = getTtsProviderStatus();
@@ -59,7 +49,7 @@ export default async function SettingsPage() {
       <h1 className="mt-3 text-3xl font-semibold tracking-tight text-stone-950">
         Nastavení
       </h1>
-      <UsageSettings initialError={error} initialSummary={summary} />
+      <UsageSettings />
       <div className="mt-6">
         <VoiceSettings />
       </div>
