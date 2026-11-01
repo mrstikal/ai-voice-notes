@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import {
   DEFAULT_OPENROUTER_LLM_MODEL,
   loadConfig,
@@ -67,6 +69,18 @@ const DEFAULT_SYSTEM_PROMPT =
   "Vracíš pouze platný JSON podle poskytnutého striktního schématu. " +
   "Nepřidávej vysvětlení, markdown ani další klíče. " +
   "Když je požadavek nejasný nebo nebezpečný, vrať kind=unclear.";
+
+const chatCompletionSettlementSchema = z.object({
+  usage: z
+    .object({
+      prompt_tokens: z.number().int().nonnegative().optional(),
+      completion_tokens: z.number().int().nonnegative().optional(),
+      total_tokens: z.number().int().nonnegative().optional(),
+      cost: z.number().finite().nonnegative().optional(),
+    })
+    .loose()
+    .optional(),
+}).loose();
 
 export interface LlmModelProfile {
   readonly id: string;
@@ -346,6 +360,47 @@ function ensureSupportedModel(modelId: string): void {
       "Zvolený model není ověřený pro striktní strukturovaný výstup. AI úprava byla zablokována.",
     );
   }
+}
+
+export function readChatCompletionSettlement(
+  bytes: Uint8Array,
+  requestKind: string,
+): { reportedCostUsd: number | null; providerUsage: Record<string, unknown> } | null {
+  let parsed: unknown;
+
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    parsed = JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+
+  const response = chatCompletionSettlementSchema.safeParse(parsed);
+
+  if (!response.success) {
+    return null;
+  }
+
+  const usage = response.data.usage;
+  const promptTokens = usage?.prompt_tokens ?? null;
+  const completionTokens = usage?.completion_tokens ?? null;
+  const totalTokens =
+    usage?.total_tokens ??
+    (promptTokens === null && completionTokens === null
+      ? null
+      : (promptTokens ?? 0) + (completionTokens ?? 0));
+  const reportedCostUsd = usage?.cost ?? null;
+
+  return {
+    reportedCostUsd,
+    providerUsage: {
+      requestKind,
+      promptTokens,
+      completionTokens,
+      totalTokens,
+      reportedCostUsd,
+    },
+  };
 }
 
 function parseJsonBytes(
@@ -665,6 +720,8 @@ export function createStructuredLlmService(
         expectedContentType: "application/json",
         maxResponseBytes: LLM_RESPONSE_MAX_BYTES,
         timeoutMs,
+        successSettlement: (bytes) =>
+          readChatCompletionSettlement(bytes, config.requestKind),
         providerUsage: {
           requestKind: config.requestKind,
           schemaName: config.schemaName,

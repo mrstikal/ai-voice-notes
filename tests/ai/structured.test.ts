@@ -87,6 +87,7 @@ function chatResponse(
     readonly refusal?: string;
     readonly error?: unknown;
     readonly status?: number;
+    readonly usage?: Record<string, unknown>;
   } = {},
 ): Response {
   const body = {
@@ -101,6 +102,7 @@ function chatResponse(
       },
     ],
     ...(options.error === undefined ? {} : { error: options.error }),
+    ...(options.usage === undefined ? {} : { usage: options.usage }),
   };
 
   return json(body, options.status ?? 200);
@@ -239,6 +241,64 @@ describe("P21 structured OpenRouter client", () => {
     expect(usagePayload).not.toContain(PROMPT);
     expect(usagePayload).not.toContain("Nový odstavec");
     expect(usagePayload).toContain(LLM_SCHEMA_NAME);
+  });
+
+  it("settles the provider-reported usage cost instead of leaving it unknown", async () => {
+    const transport = createMockOpenRouterTransport({
+      responses: [
+        chatResponse(providerOperation(), {
+          usage: {
+            prompt_tokens: 120,
+            completion_tokens: 30,
+            total_tokens: 150,
+            cost: 0.000123,
+          },
+        }),
+      ],
+    });
+    const { service, settle, markUnknown } = createService({ transport });
+
+    await service.request({ prompt: PROMPT });
+
+    expect(markUnknown).not.toHaveBeenCalled();
+    expect(settle).toHaveBeenCalledTimes(1);
+    expect(settle.mock.calls[0]?.[0]).toBe(RESERVATION_ID);
+    expect(settle.mock.calls[0]?.[1]).toMatchObject({
+      reportedCostUsd: 0.000123,
+      providerUsage: {
+        requestKind: "structured_edit",
+        promptTokens: 120,
+        completionTokens: 30,
+        totalTokens: 150,
+        reportedCostUsd: 0.000123,
+      },
+    });
+
+    const usagePayload = JSON.stringify(settle.mock.calls[0]?.[1]);
+    expect(usagePayload).not.toContain(PROMPT);
+    expect(usagePayload).not.toContain("Nový odstavec");
+  });
+
+  it("keeps the charge unknown when the chat response has no usage.cost", async () => {
+    const transport = createMockOpenRouterTransport({
+      responses: [
+        chatResponse(providerOperation(), {
+          usage: { prompt_tokens: 120, completion_tokens: 30 },
+        }),
+      ],
+    });
+    const { service, settle, markUnknown } = createService({ transport });
+
+    await service.request({ prompt: PROMPT });
+
+    expect(settle).not.toHaveBeenCalled();
+    expect(markUnknown).toHaveBeenCalledTimes(1);
+    expect(markUnknown.mock.calls[0]?.[1]).toMatchObject({
+      requestKind: "structured_edit",
+      promptTokens: 120,
+      completionTokens: 30,
+      reportedCostUsd: null,
+    });
   });
 
   it("requests and validates the dedicated summary JSON schema", async () => {
