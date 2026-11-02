@@ -369,6 +369,31 @@ describe.skipIf(!hasTestDatabase)("note service", () => {
     expect(page.items.some((item) => item.id === active.id)).toBe(false);
   });
 
+  it("permanently empties the trash and keeps active notes", async () => {
+    const active = await createNote("Aktivní", "A");
+    const first = await createNote("Smazaná 1", "1");
+    const second = await createNote("Smazaná 2", "2");
+
+    await service.deleteNote(first.id, 1);
+    await service.deleteNote(second.id, 1);
+
+    const result = await service.emptyTrash();
+
+    expect(result.purgedCount).toBe(2);
+    expect((await service.listDeletedNotes(1)).items).toEqual([]);
+    expect(
+      (await service.listActiveNotes(1)).items.map((item) => item.id),
+    ).toEqual([active.id]);
+    await expect(service.getNote(first.id)).rejects.toBeInstanceOf(
+      NoteNotFoundError,
+    );
+    await expect(service.getNote(second.id)).rejects.toBeInstanceOf(
+      NoteNotFoundError,
+    );
+    expect(await getRevisions(first.id)).toEqual([]);
+    expect(await getRevisions(second.id)).toEqual([]);
+  });
+
   it("lets exactly one of two concurrent writers win the CAS race", async () => {
     const note = await createNote("Souběh", "Původní");
 

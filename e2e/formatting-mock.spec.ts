@@ -208,6 +208,10 @@ test("Script A saves Markdown and tasks, keeps an embedded stop word, and uses t
 }) => {
   const title = `Formátování E2E ${Date.now()}`;
   const noteId = await createNote(page, title, "Ruční text.");
+  await expect(page.getByTestId("body-dictation")).toHaveAttribute(
+    "data-hydrated",
+    "true",
+  );
   const source = page.getByLabel("Obsah (Markdown)");
   await page.getByTestId("vad-silence-select").selectOption("1.5");
   await page.getByRole("checkbox", { name: "Vložit na konec" }).check();

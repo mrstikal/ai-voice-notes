@@ -7,6 +7,7 @@ import { useState } from "react";
 import {
   NoteApiError,
   createNote,
+  emptyTrash,
   formatCzechDateTime,
   restoreNote,
   type NoteSummary,
@@ -24,10 +25,24 @@ function pageHref(mode: NoteListProps["mode"], page: number): string {
   return page === 1 ? basePath : `${basePath}?page=${page}`;
 }
 
+function formatNoteCount(count: number): string {
+  if (count === 1) {
+    return "1 poznámka";
+  }
+
+  if (count >= 2 && count <= 4) {
+    return `${count} poznámky`;
+  }
+
+  return `${count} poznámek`;
+}
+
 export function NoteList({ mode, items, page, hasNext }: NoteListProps) {
   const router = useRouter();
   const [isCreating, setIsCreating] = useState(false);
   const [restoringId, setRestoringId] = useState<string | null>(null);
+  const [isEmptyingTrash, setIsEmptyingTrash] = useState(false);
+  const [confirmingEmptyTrash, setConfirmingEmptyTrash] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
 
@@ -69,6 +84,29 @@ export function NoteList({ mode, items, page, hasNext }: NoteListProps) {
     }
   }
 
+  async function handleEmptyTrash() {
+    setError(null);
+    setStatus(null);
+    setIsEmptyingTrash(true);
+
+    try {
+      const result = await emptyTrash();
+      setStatus(
+        `Koš byl vysypán. Smazáno ${formatNoteCount(result.purgedCount)}.`,
+      );
+      setConfirmingEmptyTrash(false);
+      router.refresh();
+    } catch (emptyError) {
+      setError(
+        emptyError instanceof NoteApiError
+          ? emptyError.message
+          : "Koš se nepodařilo vysypat.",
+      );
+    } finally {
+      setIsEmptyingTrash(false);
+    }
+  }
+
   const listLabel = mode === "trash" ? "Smazané poznámky" : "Poznámky";
   const isLaterPage = page > 1;
   const emptyTitle = isLaterPage
@@ -95,6 +133,45 @@ export function NoteList({ mode, items, page, hasNext }: NoteListProps) {
         >
           {isCreating ? "Vytvářím…" : "Nová poznámka"}
         </button>
+      ) : null}
+
+      {mode === "trash" && items.length > 0 ? (
+        <div className="flex flex-col gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="font-semibold text-red-950">Vysypat koš</p>
+            <p className="mt-1 text-sm leading-6 text-red-900">
+              Trvale smaže všechny poznámky v koši. Tuto akci nelze vrátit.
+            </p>
+          </div>
+          {confirmingEmptyTrash ? (
+            <div className="flex flex-wrap gap-2">
+              <button
+                className="rounded-lg bg-red-800 px-4 py-2 text-sm font-semibold text-white hover:bg-red-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={isEmptyingTrash}
+                onClick={() => void handleEmptyTrash()}
+                type="button"
+              >
+                {isEmptyingTrash ? "Vysypávám…" : "Potvrdit vysypání"}
+              </button>
+              <button
+                className="rounded-lg border border-stone-300 px-4 py-2 text-sm font-semibold text-stone-800 hover:bg-stone-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={isEmptyingTrash}
+                onClick={() => setConfirmingEmptyTrash(false)}
+                type="button"
+              >
+                Zrušit
+              </button>
+            </div>
+          ) : (
+            <button
+              className="self-start rounded-lg border border-red-700 px-4 py-2 text-sm font-semibold text-red-800 hover:bg-red-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700 sm:self-auto"
+              onClick={() => setConfirmingEmptyTrash(true)}
+              type="button"
+            >
+              Vysypat koš
+            </button>
+          )}
+        </div>
       ) : null}
 
       {error ? (

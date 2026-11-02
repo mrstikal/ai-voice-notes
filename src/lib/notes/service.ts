@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 
-import { eq } from "drizzle-orm";
+import { arrayOverlaps, eq, inArray, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { loadConfig } from "../config.ts";
 import { getDb, type AppDatabase } from "../db/client.ts";
-import { meetingSaves, type NoteSnapshot } from "../db/schema.ts";
+import { meetingSaves, notes, type NoteSnapshot } from "../db/schema.ts";
 import {
   NOTE_EDIT_MAX_BYTES,
   jsonError,
@@ -146,6 +146,10 @@ export interface NotePageDto {
   readonly hasNext: boolean;
 }
 
+export interface EmptyTrashResult {
+  readonly purgedCount: number;
+}
+
 export interface NoteServiceOptions {
   readonly db: AppDatabase;
   readonly limits?: NoteGraphemeLimits;
@@ -191,6 +195,7 @@ export interface NoteService {
   ): Promise<NoteDetailDto>;
   deleteNote(id: string, expectedVersion: number): Promise<NoteDetailDto>;
   restoreNote(id: string, expectedVersion: number): Promise<NoteDetailDto>;
+  emptyTrash(): Promise<EmptyTrashResult>;
   saveMeeting(input: SaveMeetingInput): Promise<SaveMeetingResult>;
 }
 
@@ -1091,6 +1096,38 @@ export function createNoteService(options: NoteServiceOptions): NoteService {
         return toDetail(updated, tags);
       });
     },
+
+    async emptyTrash() {
+      const purgedIds = await db.transaction(async (tx) => {
+        const rows = await tx
+          .select({ id: notes.id })
+          .from(notes)
+          .where(isNotNull(notes.deletedAt))
+          .for("update");
+
+        if (rows.length === 0) {
+          return [];
+        }
+
+        const ids = rows.map((row) => row.id);
+
+        await tx.delete(notes).where(inArray(notes.id, ids));
+        await tx
+          .delete(meetingSaves)
+          .where(arrayOverlaps(meetingSaves.noteIds, ids));
+
+        return ids;
+      });
+
+      await Promise.all(
+        purgedIds.map((id) =>
+          purgeNoteTtsCacheBestEffort(options.ttsCache, id),
+        ),
+      );
+
+      return { purgedCount: purgedIds.length };
+    },
+
     async saveMeeting(input) {
       const plan = planMeetingSave(input, limits);
 

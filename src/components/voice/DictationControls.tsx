@@ -493,6 +493,11 @@ export function BodyDictationControls({
     (options?: { flush?: boolean }) => Promise<void>
   >(() => Promise.resolve());
   const previousStatusRef = useRef<MicrophoneSessionStatus>("idle");
+  const hydrated = useSyncExternalStore(
+    () => () => undefined,
+    () => true,
+    () => false,
+  );
   const vadSilence = useSyncExternalStore(
     subscribeVadSilencePreference,
     getVadSilencePreferenceSnapshot,
@@ -671,6 +676,8 @@ export function BodyDictationControls({
     <section
       aria-labelledby="body-dictation-title"
       className="mt-4 rounded-xl border border-stone-200 bg-stone-50 p-4"
+      data-hydrated={hydrated ? "true" : "false"}
+      data-testid="body-dictation"
     >
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>

@@ -172,6 +172,17 @@ export async function restoreNote(
   });
 }
 
+export interface EmptyTrashResult {
+  readonly purgedCount: number;
+}
+
+export async function emptyTrash(): Promise<EmptyTrashResult> {
+  return requestJson<EmptyTrashResult>("/api/notes/trash", {
+    method: "DELETE",
+    body: JSON.stringify({}),
+  });
+}
+
 const czechDateTimeFormatter = new Intl.DateTimeFormat("cs-CZ", {
   dateStyle: "medium",
   timeStyle: "short",

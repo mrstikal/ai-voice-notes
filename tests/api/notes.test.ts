@@ -8,6 +8,7 @@ import {
 } from "@/app/api/notes/[id]/route";
 import { PATCH as updateTitle } from "@/app/api/notes/[id]/title/route";
 import { POST as restoreNote } from "@/app/api/notes/[id]/restore/route";
+import { DELETE as emptyTrash } from "@/app/api/notes/trash/route";
 import {
   NoteConflictError,
   NoteNotFoundError,
@@ -24,6 +25,7 @@ const service = vi.hoisted(() => ({
   updateNoteTitle: vi.fn(),
   deleteNote: vi.fn(),
   restoreNote: vi.fn(),
+  emptyTrash: vi.fn(),
 }));
 
 vi.mock("@/lib/notes/service", async (importOriginal) => {
@@ -517,5 +519,20 @@ describe("notes API", () => {
     expect(await errorCode(missingVersion)).toBe("invalid_shape");
 
     expect(service.restoreNote).not.toHaveBeenCalled();
+  });
+
+  it("empties the trash and returns the purged count", async () => {
+    service.emptyTrash.mockResolvedValue({ purgedCount: 3 });
+
+    const response = await emptyTrash(
+      request("/api/notes/trash", {
+        method: "DELETE",
+        body: {},
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ purgedCount: 3 });
+    expect(service.emptyTrash).toHaveBeenCalledTimes(1);
   });
 });
