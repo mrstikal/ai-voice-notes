@@ -153,7 +153,7 @@ export function AgentStatus() {
       </p>
 
       <p className="mt-2 text-xs font-medium text-amber-800">
-        Live srovnání je neověřené: tato tabulka je offline instrumentace, ne
+        Živé srovnání je neověřené: tato tabulka je offline instrumentace, ne
         benchmark latence ani kvality češtiny.
       </p>
 

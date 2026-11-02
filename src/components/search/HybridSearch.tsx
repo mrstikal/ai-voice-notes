@@ -182,7 +182,7 @@ export function HybridSearch({
                 {provider.model} · {provider.dimensions} dimenzí ·{" "}
                 {provider.liveStatus === "verified"
                   ? "ověřeno živým voláním"
-                  : "live neověřeno"}
+                  : "neověřeno v provozu"}
               </span>
             </div>
           </form>

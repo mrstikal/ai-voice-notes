@@ -83,7 +83,7 @@ export function LlmSettings({ status, error }: LlmSettingsProps) {
             Kompatibilita poskytovatele je{" "}
             <strong>
               {status.liveStatus === "live_unverified"
-                ? "live unverified"
+                ? "neověřená v provozu"
                 : "ověřená"}
             </strong>
             . Metadata kandidáta byla ověřena {status.checkedAt}; živý

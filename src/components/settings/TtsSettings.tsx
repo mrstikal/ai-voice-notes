@@ -5,8 +5,8 @@ const availabilityLabels: Record<
   TtsProviderStatus["voices"][number]["availability"],
   string
 > = {
-  available: "ověřený pro účet",
-  live_unverified: "live unverified",
+  available: "ověřený",
+  live_unverified: "neověřený v provozu",
   unavailable: "nedostupný pro účet",
 };
 
@@ -16,6 +16,12 @@ interface TtsSettingsProps {
 }
 
 export function TtsSettings({ status, error }: TtsSettingsProps) {
+  const verifiedLabels =
+    status?.voices
+      .filter((voice) => voice.availability === "available")
+      .map((voice) => voice.label)
+      .join(", ") ?? "";
+
   return (
     <section
       aria-labelledby="tts-settings-heading"
@@ -100,14 +106,12 @@ export function TtsSettings({ status, error }: TtsSettingsProps) {
             {status.configured
               ? "OpenRouter API klíč je nastavený pouze na serveru."
               : "OpenRouter API klíč není nastavený; čtení nahlas zůstává vypnuté."}{" "}
-            Dvouhlasové ověření je{" "}
-            <strong>
-              {status.liveStatus === "verified"
-                ? "ověřené"
-                : "live unverified"}
-            </strong>
-            . Živý výběr hlasu se nezapíná před samostatně povoleným poslechem
-            české věty v Sarah a George. Klíč se nikdy neposílá do prohlížeče.
+            {status.liveStatus === "verified"
+              ? "Všechny hlasy jsou ověřené."
+              : verifiedLabels
+                ? `Ověřené hlasy: ${verifiedLabels}; ostatní hlasy jsou neověřené v provozu. Před spolehnutím na výstup je potřeba samostatně povolený poslech české věty.`
+                : "Hlasy jsou neověřené v provozu. Před spolehnutím na výstup je potřeba samostatně povolený poslech české věty."}{" "}
+            Klíč se nikdy neposílá do prohlížeče.
           </p>
           <p className="mt-2 text-xs leading-5 text-stone-500">
             Cena je odhad pro místní rozpočet, ne limit poskytovatele. Neznámá

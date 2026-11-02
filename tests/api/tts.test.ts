@@ -281,7 +281,7 @@ describe("POST /api/tts", () => {
     await expect(response.json()).resolves.toMatchObject({
       error: {
         code: "tts_invalid_voice",
-        allowedVoices: ["sarah", "george"],
+        allowedVoices: TTS_VOICES.map((voice) => voice.id),
       },
     });
     expect(reserve).not.toHaveBeenCalled();
@@ -768,7 +768,7 @@ describe("POST /api/tts", () => {
 });
 
 describe("TTS provider status", () => {
-  it("keeps both documented voices visible but live unverified when verification is not claimed", () => {
+  it("keeps all documented voices visible but unverified when verification is not claimed", () => {
     const status = getTtsProviderStatus({
       configured: true,
       disabledVoices: [],
@@ -778,6 +778,25 @@ describe("TTS provider status", () => {
     expect(TTS_VOICES.map((voice) => voice.id)).toEqual([
       "sarah",
       "george",
+      "adam",
+      "alice",
+      "bella",
+      "bill",
+      "brian",
+      "callum",
+      "charlie",
+      "chris",
+      "daniel",
+      "eric",
+      "harry",
+      "jessica",
+      "laura",
+      "liam",
+      "lily",
+      "matilda",
+      "river",
+      "roger",
+      "will",
     ]);
     expect(status.model).toBe(TTS_MODEL_ID);
     expect(status.responseFormat).toBe("mp3");
@@ -785,17 +804,15 @@ describe("TTS provider status", () => {
     expect(status.estimatedMaxCostUsd).toBe(TTS_ESTIMATED_MAX_COST_USD);
     expect(status.configured).toBe(true);
     expect(status.liveStatus).toBe("live_unverified");
-    expect(status.voices).toEqual([
-      { id: "sarah", label: "Sarah", availability: "live_unverified" },
-      { id: "george", label: "George", availability: "live_unverified" },
-    ]);
-    expect(status.voices.map((voice) => voice.id)).toEqual([
-      "sarah",
-      "george",
-    ]);
+    expect(status.voices).toHaveLength(TTS_VOICES.length);
+    expect(
+      status.voices.every(
+        (voice) => voice.availability === "live_unverified",
+      ),
+    ).toBe(true);
   });
 
-  it("marks a disabled voice unavailable and keeps two-voice acceptance unverified", () => {
+  it("marks a disabled voice unavailable and keeps the remaining voices visible", () => {
     const status = getTtsProviderStatus({
       configured: true,
       disabledVoices: ["george"],
@@ -803,31 +820,49 @@ describe("TTS provider status", () => {
     });
 
     expect(status.liveStatus).toBe("live_unverified");
-    expect(status.voices).toEqual([
-      { id: "sarah", label: "Sarah", availability: "available" },
-      { id: "george", label: "George", availability: "unavailable" },
-    ]);
+    expect(status.voices).toHaveLength(TTS_VOICES.length);
+    expect(
+      status.voices.find((voice) => voice.id === "sarah")?.availability,
+    ).toBe("available");
+    expect(
+      status.voices.find((voice) => voice.id === "george")?.availability,
+    ).toBe("unavailable");
+    expect(
+      status.voices.filter(
+        (voice) => voice.availability === "live_unverified",
+      ),
+    ).toHaveLength(TTS_VOICES.length - 2);
   });
 
-  it("marks both voices verified by default after the completed live check", () => {
+  it("marks only the verified voices available by default", () => {
     const status = getTtsProviderStatus({ configured: true });
 
-    expect(status.liveStatus).toBe("verified");
+    expect(status.liveStatus).toBe("live_unverified");
     expect(
-      status.voices.every((voice) => voice.availability === "available"),
-    ).toBe(true);
+      status.voices
+        .filter((voice) => voice.availability === "available")
+        .map((voice) => voice.id),
+    ).toEqual(["sarah", "george"]);
+    expect(
+      status.voices.filter(
+        (voice) => voice.availability === "live_unverified",
+      ),
+    ).toHaveLength(TTS_VOICES.length - 2);
   });
 
-  it("only marks both voices verified after an explicit live verification", () => {
+  it("marks only the verified voices available after an explicit live verification", () => {
     const status = getTtsProviderStatus({
       configured: true,
       disabledVoices: [],
       liveVerified: true,
     });
 
-    expect(status.liveStatus).toBe("verified");
-    expect(status.voices.every((voice) => voice.availability === "available"))
-      .toBe(true);
+    expect(status.liveStatus).toBe("live_unverified");
+    expect(
+      status.voices
+        .filter((voice) => voice.availability === "available")
+        .map((voice) => voice.id),
+    ).toEqual(["sarah", "george"]);
   });
 
   it("does not claim a configured key when OpenRouter is not configured", () => {

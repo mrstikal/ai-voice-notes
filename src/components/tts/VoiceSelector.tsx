@@ -6,8 +6,8 @@ const availabilityLabels: Record<
   TtsProviderStatus["voices"][number]["availability"],
   string
 > = {
-  available: "ověřený pro účet",
-  live_unverified: "live unverified",
+  available: "ověřený",
+  live_unverified: "neověřený v provozu",
   unavailable: "nedostupný pro účet",
 };
 
@@ -29,6 +29,11 @@ export function VoiceSelector({
   const availableVoices =
     status?.voices.filter((voice) => voice.availability !== "unavailable") ??
     [];
+  const verifiedLabels =
+    status?.voices
+      .filter((voice) => voice.availability === "available")
+      .map((voice) => voice.label)
+      .join(", ") ?? "";
   const unavailable = status === null || !status.configured;
 
   return (
@@ -69,13 +74,16 @@ export function VoiceSelector({
         </p>
       ) : status.liveStatus === "live_unverified" ? (
         <p className="mt-2 text-xs leading-5 text-amber-900">
-          Hlasy jsou live unverified. Před spolehnutím na výstup je potřeba
-          samostatně povolený poslech české věty.
+          Nabízejí se všechny hlasy modelu.{" "}
+          {verifiedLabels
+            ? `Ověřené hlasy: ${verifiedLabels}; ostatní jsou neověřené v provozu.`
+            : "Hlasy jsou neověřené v provozu."}{" "}
+          Před spolehnutím na výstup je potřeba samostatně povolený poslech
+          české věty.
         </p>
       ) : (
         <p className="mt-2 text-xs leading-5 text-stone-500">
-          Nabízejí se jen hlasy ověřené pro nakonfigurovaný účet. Nedostupný
-          hlas nelze vybrat.
+          Nabízejí se všechny hlasy modelu.
         </p>
       )}
     </div>

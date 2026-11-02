@@ -45,12 +45,32 @@ export const TTS_ESTIMATED_MAX_COST_USD = Number(
 export const TTS_VOICES = [
   { id: "sarah", label: "Sarah" },
   { id: "george", label: "George" },
+  { id: "adam", label: "Adam" },
+  { id: "alice", label: "Alice" },
+  { id: "bella", label: "Bella" },
+  { id: "bill", label: "Bill" },
+  { id: "brian", label: "Brian" },
+  { id: "callum", label: "Callum" },
+  { id: "charlie", label: "Charlie" },
+  { id: "chris", label: "Chris" },
+  { id: "daniel", label: "Daniel" },
+  { id: "eric", label: "Eric" },
+  { id: "harry", label: "Harry" },
+  { id: "jessica", label: "Jessica" },
+  { id: "laura", label: "Laura" },
+  { id: "liam", label: "Liam" },
+  { id: "lily", label: "Lily" },
+  { id: "matilda", label: "Matilda" },
+  { id: "river", label: "River" },
+  { id: "roger", label: "Roger" },
+  { id: "will", label: "Will" },
 ] as const;
 
 export type TtsVoice = (typeof TTS_VOICES)[number]["id"];
 
+export const TTS_VERIFIED_VOICES: readonly TtsVoice[] = ["sarah", "george"];
 export const TTS_UNAVAILABLE_VOICES: readonly TtsVoice[] = [];
-export const TTS_LIVE_VERIFIED = true;
+export const TTS_VERIFIED_VOICES_ACTIVE = true;
 
 export const ttsRequestSchema = z
   .object({
@@ -135,7 +155,7 @@ export function createTtsService(options: TtsServiceOptions): TtsService {
         throw new TtsProviderError(
           400,
           "tts_invalid_voice",
-          "Zvolený hlas není podporovaný. Použijte Sarah nebo George.",
+          "Zvolený hlas není podporovaný. Použijte některý z podporovaných hlasů.",
           { allowedVoices: TTS_VOICES.map((item) => item.id) },
         );
       }
@@ -144,7 +164,7 @@ export function createTtsService(options: TtsServiceOptions): TtsService {
         throw new TtsProviderError(
           400,
           "tts_voice_unavailable",
-          "Zvolený hlas není pro tento účet dostupný. Vyberte jiný ověřený hlas.",
+          "Zvolený hlas není pro tento účet dostupný. Vyberte jiný hlas.",
           { voice },
         );
       }
@@ -328,17 +348,21 @@ export function getTtsProviderStatus(
   const disabled = new Set(
     (options.disabledVoices ?? TTS_UNAVAILABLE_VOICES).filter(isTtsVoice),
   );
-  const liveVerified = options.liveVerified ?? TTS_LIVE_VERIFIED;
+  const liveVerified = options.liveVerified ?? TTS_VERIFIED_VOICES_ACTIVE;
+  const verified = new Set(liveVerified ? TTS_VERIFIED_VOICES : []);
   const configured =
     options.configured ?? loadConfig().openRouterApiKey !== null;
   const voices = TTS_VOICES.map((voice) => ({
     ...voice,
     availability: disabled.has(voice.id)
       ? ("unavailable" as const)
-      : liveVerified
+      : verified.has(voice.id)
         ? ("available" as const)
         : ("live_unverified" as const),
   }));
+  const allVoicesVerified = TTS_VOICES.every((voice) =>
+    verified.has(voice.id),
+  );
 
   return {
     model: TTS_MODEL_ID,
@@ -347,7 +371,9 @@ export function getTtsProviderStatus(
     estimatedMaxCostUsd: TTS_ESTIMATED_MAX_COST_USD,
     configured,
     liveStatus:
-      liveVerified && disabled.size === 0 ? "verified" : "live_unverified",
+      allVoicesVerified && disabled.size === 0
+        ? "verified"
+        : "live_unverified",
     voices,
   };
 }

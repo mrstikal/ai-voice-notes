@@ -578,6 +578,7 @@ export function NoteEditor({ note, onSaved, onDirtyChange }: NoteEditorProps) {
   const visualVoiceEndModeRef = useRef(false);
   const visualPendingParagraphRef = useRef(false);
   const controllerRef = useRef<DraftAutosaveController | null>(null);
+  const editorRootRef = useRef<HTMLElement>(null);
   const taskSaveChainRef = useRef<Promise<void>>(Promise.resolve());
   const taskSavePendingRef = useRef(0);
   const bodyVoiceBaselineRef = useRef<string | null>(null);
@@ -853,6 +854,7 @@ export function NoteEditor({ note, onSaved, onDirtyChange }: NoteEditorProps) {
   );
 
   useEffect(() => {
+    const root = editorRootRef.current;
     const controller = new DraftAutosaveController({
       debounceMs: DRAFT_AUTOSAVE_DEBOUNCE_MS,
       getContent: getAutosaveContent,
@@ -861,10 +863,12 @@ export function NoteEditor({ note, onSaved, onDirtyChange }: NoteEditorProps) {
     });
 
     controllerRef.current = controller;
+    root?.setAttribute("data-autosave-ready", "true");
 
     return () => {
       controller.dispose();
       controllerRef.current = null;
+      root?.setAttribute("data-autosave-ready", "false");
     };
   }, [getAutosaveContent, handleAutosaveStatus, saveDraft]);
 
@@ -1634,7 +1638,12 @@ export function NoteEditor({ note, onSaved, onDirtyChange }: NoteEditorProps) {
             : null;
 
   return (
-    <section aria-labelledby="note-editor-heading" className="mt-8">
+    <section
+      aria-labelledby="note-editor-heading"
+      className="mt-8"
+      data-testid="note-editor"
+      ref={editorRootRef}
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2
           className="text-lg font-semibold tracking-tight text-stone-950"

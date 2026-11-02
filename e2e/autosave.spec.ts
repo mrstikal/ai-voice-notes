@@ -84,6 +84,10 @@ test("deboncované ukládání konceptu, historie bez řádku na každý znak a 
 }) => {
   const title = `Autosave E2E ${Date.now()}`;
   const noteId = await createNote(page, title, "Výchozí text");
+  await expect(page.getByTestId("note-editor")).toHaveAttribute(
+    "data-autosave-ready",
+    "true",
+  );
 
   const source = page.getByLabel("Obsah (Markdown)");
   await source.fill("");
@@ -124,9 +128,17 @@ test("zastaralá karta dostane konflikt, její text zůstane k dispozici a serve
 }) => {
   const title = `Konflikt E2E ${Date.now()}`;
   const noteId = await createNote(page, title, "Sdílený text");
+  await expect(page.getByTestId("note-editor")).toHaveAttribute(
+    "data-autosave-ready",
+    "true",
+  );
 
   const second = await context.newPage();
   await second.goto(`/notes/${noteId}`);
+  await expect(second.getByTestId("note-editor")).toHaveAttribute(
+    "data-autosave-ready",
+    "true",
+  );
   await expect(second.getByLabel("Obsah (Markdown)")).toHaveValue("Sdílený text");
 
   await page.getByLabel("Obsah (Markdown)").fill("Text první karty");
@@ -167,6 +179,10 @@ test("neuložený koncept se po selhání uložení nabídne po znovu načtení"
 }) => {
   const title = `Obnova E2E ${Date.now()}`;
   await createNote(page, title, "Výchozí text");
+  await expect(page.getByTestId("note-editor")).toHaveAttribute(
+    "data-autosave-ready",
+    "true",
+  );
 
   page.on("dialog", (dialog) => {
     void dialog.accept();
@@ -188,7 +204,10 @@ test("neuložený koncept se po selhání uložení nabídne po znovu načtení"
     await route.continue();
   });
 
-  await page.getByLabel("Obsah (Markdown)").fill("Rozpracovaný text");
+  const source = page.getByLabel("Obsah (Markdown)");
+  await source.fill("");
+  await source.click();
+  await source.pressSequentially("Rozpracovaný text", { delay: 10 });
 
   await expect(page.locator('p[role="alert"]')).toContainText(
     "Ukládání konceptu se nezdařilo",

@@ -271,7 +271,7 @@ export function IndexControls() {
           OpenRouter · {provider.model} · {provider.dimensions} dimenzí ·{" "}
           {provider.liveStatus === "verified"
             ? "ověřeno živým voláním"
-            : "live neověřeno"}{" "}
+            : "neověřeno v provozu"}{" "}
           · max {provider.maxBatchTexts} chunků na dávku. Ověřeno{" "}
           {provider.checkedAt}.
         </p>
