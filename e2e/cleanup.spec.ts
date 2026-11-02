@@ -8,6 +8,7 @@ import {
   loadTestEnvironment,
 } from "../scripts/test-db-guard";
 import { createNoteViaApi } from "./helpers/create-note";
+import { openNoteTab } from "./helpers/tabs";
 
 test.setTimeout(120_000);
 
@@ -150,6 +151,7 @@ test("cleanup rejection, approval, original transcript and Undo work end to end"
 }) => {
   const title = `Čištění E2E ${Date.now()}`;
   const noteId = await createNote(page, title, original);
+  await openNoteTab(page, "Vyčistit diktát");
 
   expect(await revisionCount(noteId)).toBe(1);
   await mockCleanupSuggestion(page);
@@ -183,6 +185,7 @@ test("cleanup rejection, approval, original transcript and Undo work end to end"
   );
 
   await page.reload();
+  await openNoteTab(page, "Historie");
   const history = page.getByTestId("revision-history");
   await history.getByTestId("revision-before-toggle-2").click();
   const before = history.getByTestId("revision-before-2");
@@ -206,6 +209,7 @@ test("cleanup provider failure creates no proposal, note change or revision", as
 }) => {
   const title = `Čištění selhání E2E ${Date.now()}`;
   const noteId = await createNote(page, title, original);
+  await openNoteTab(page, "Vyčistit diktát");
 
   await page.route("**/api/notes/*/ai-suggest", async (route) => {
     await route.fulfill({
@@ -238,6 +242,7 @@ test("the preserved original transcript is restorable after a later named revisi
 }) => {
   const title = `Čištění obnova E2E ${Date.now()}`;
   const noteId = await createNote(page, title, original);
+  await openNoteTab(page, "Vyčistit diktát");
   await mockCleanupSuggestion(page);
 
   await page.getByTestId("cleanup-paragraph").selectOption("0");
@@ -251,16 +256,19 @@ test("the preserved original transcript is restorable after a later named revisi
     .toBe(2);
 
   const laterContent = `${cleaned} Pozdější změna.`;
+  await openNoteTab(page, "Obsah poznámky");
   await page.getByLabel("Obsah (Markdown)").fill(laterContent);
   await page.getByRole("button", { name: "Uložit", exact: true }).click();
   await expect
     .poll(async () => revisionCount(noteId), { timeout: 15_000 })
     .toBe(3);
+  await openNoteTab(page, "Historie");
   await expect(
     page.getByTestId("revision-history").getByText("Ruční úprava"),
   ).toBeVisible();
 
   await page.reload();
+  await openNoteTab(page, "Historie");
   const history = page.getByTestId("revision-history");
   await history.getByTestId("revision-before-toggle-2").click();
   await expect(history.getByTestId("revision-before-2")).toContainText(

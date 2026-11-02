@@ -6,6 +6,7 @@ import {
   loadTestEnvironment,
 } from "../scripts/test-db-guard";
 import { createNoteViaApi } from "./helpers/create-note";
+import { openNoteTab } from "./helpers/tabs";
 
 test.setTimeout(120_000);
 
@@ -131,6 +132,7 @@ test("task suggestions show duplicates, stay inert until approval and append one
 }) => {
   const title = `Úkoly AI E2E ${Date.now()}`;
   const noteId = await createNote(page, title, content);
+  await openNoteTab(page, "Získat úkoly z pasáže");
   await mockTaskSuggestions(page, [
     { duplicate: true, text: "Koupit mléko" },
     { duplicate: false, text: "Zavolat lékaře" },
@@ -193,12 +195,14 @@ test("stale task suggestion is refused after the note version moves", async ({
 }) => {
   const title = `Úkoly stale E2E ${Date.now()}`;
   const noteId = await createNote(page, title, content);
+  await openNoteTab(page, "Získat úkoly z pasáže");
   await mockTaskSuggestions(page, [{ duplicate: false, text: "Napsat testy" }]);
 
   await page.getByTestId("task-select-all").click();
   await page.getByTestId("task-suggest").click();
   await expect(page.getByTestId("task-suggestion")).toBeVisible();
 
+  await openNoteTab(page, "Obsah poznámky");
   await page.getByLabel("Obsah (Markdown)").fill(`${content}\n\nPozději.`);
   await expect
     .poll(async () => (await currentNote(request, noteId)).version, {
@@ -206,6 +210,7 @@ test("stale task suggestion is refused after the note version moves", async ({
     })
     .toBe(2);
 
+  await openNoteTab(page, "Získat úkoly z pasáže");
   await page.getByTestId("task-suggestion-apply").click();
   await expect(page.getByTestId("task-suggestion-error")).toContainText(
     "změnila",

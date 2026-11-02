@@ -8,6 +8,7 @@ import {
   loadTestEnvironment,
 } from "../scripts/test-db-guard";
 import { createNoteViaApi } from "./helpers/create-note";
+import { openNoteTab } from "./helpers/tabs";
 
 test.setTimeout(120_000);
 
@@ -254,6 +255,7 @@ test("four stages work offline across typed, dictated, AI-edited and searched no
   // Stage 3: mocked summary -> visible proposal -> explicit confirmation.
   await mockSummary(page, noteId, afterDictation.version);
   const revisionsBeforeSummary = await revisionCount(noteId);
+  await openNoteTab(page, "Shrnutí poznámky");
   await page.getByTestId("summary-generate").click();
   await expect(page.getByTestId("summary-artifact")).toContainText(
     "Shrnutí čtyřfázového testu",
@@ -382,6 +384,7 @@ test("four stages work offline across typed, dictated, AI-edited and searched no
   );
 
   await page.goto(`/notes/${noteId}`);
+  await openNoteTab(page, "Shrnutí poznámky");
   const beforeOutage = await currentNote(request, noteId);
   const revisionsBeforeOutage = await revisionCount(noteId);
   await page.getByTestId("summary-generate").click();

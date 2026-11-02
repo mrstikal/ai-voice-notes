@@ -13,6 +13,7 @@ import {
 } from "../tests/helpers/webrtc-double";
 import { GEMINI_LIVE_SESSION_MAX_SECONDS } from "../src/lib/voice-agent/gemini-session-shared";
 import { createNoteViaApi } from "./helpers/create-note";
+import { openNoteTab } from "./helpers/tabs";
 
 test.setTimeout(180_000);
 
@@ -228,6 +229,7 @@ test("mock voice agent: connect, select, reject, approve, undo and stop without 
 
   const notePage = await context.newPage();
   await notePage.goto(`/notes/${noteId}`);
+  await openNoteTab(notePage, "Historie");
   const history = notePage.getByTestId("revision-history");
   await expect(history).toBeVisible();
   await history

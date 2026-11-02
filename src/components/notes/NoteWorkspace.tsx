@@ -19,6 +19,7 @@ import type { SummaryArtifact } from "@/lib/ai/summary-types";
 
 import { NoteEditor } from "./NoteEditor";
 import { NoteHeader } from "./NoteHeader";
+import { NoteTabs } from "./NoteTabs";
 import { NoteTags } from "./NoteTags";
 import { TaskVoiceControls } from "./TaskVoiceControls";
 
@@ -63,124 +64,196 @@ export function NoteWorkspace({
   return (
     <>
       <NoteHeader note={note} />
-      <DictationControls
-        note={note}
-        onNoteUpdated={handleNoteUpdated}
-        disabled={editorDirty}
-      />
-      <NoteEditor
-        key={`${note.id}:${externalEditRevision}`}
-        note={note}
-        onSaved={handleNoteUpdated}
-        onDirtyChange={setEditorDirty}
-      />
-      <NoteTags
-        disabled={editorDirty}
-        key={`tags:${note.id}:${note.category ?? ""}:${JSON.stringify(note.tags)}`}
-        llmError={llmError}
-        llmStatus={llmStatus}
-        note={note}
-        onApplied={setMetadataNotice}
-        onNoteUpdated={handleNoteUpdated}
-      />
-      {metadataNotice ? (
-        <p
-          aria-live="polite"
-          className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-medium text-emerald-950"
-          data-testid="metadata-applied"
-        >
-          {metadataNotice}
-        </p>
-      ) : null}
-      <SummaryAction
-        disabled={editorDirty}
-        key={`summary:${note.version}`}
-        llmError={llmError}
-        llmStatus={llmStatus}
-        note={note}
-        onNoteUpdated={handleExternalNoteUpdate}
-        onReadSummary={setSummaryPlayback}
-        onSummaryChange={setSummaryArtifact}
-      />
-      <TaskSuggestions
-        disabled={editorDirty}
-        llmError={llmError}
-        llmStatus={llmStatus}
-        note={note}
-        onNoteUpdated={handleExternalNoteUpdate}
-      />
-      <AudioPlayer
-        disabled={editorDirty}
-        note={note}
-        providerError={providerError}
-        providerStatus={providerStatus}
-        summary={
-          summaryPlayback?.noteId === note.id &&
-          summaryPlayback.noteVersion === note.version
-            ? summaryPlayback
-            : null
-        }
-        summaryArtifact={
-          summaryArtifact?.noteId === note.id ? summaryArtifact : null
-        }
-        onVoiceSummary={setSummaryPlayback}
-      />
-      <TaskVoiceControls
-        disabled={editorDirty}
-        key={`tasks:${externalEditRevision}`}
-        note={note}
-        onApplied={setTaskVoiceNotice}
-        onNoteUpdated={handleExternalNoteUpdate}
-      />
-      {taskVoiceNotice ? (
-        <p
-          aria-live="polite"
-          className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-medium text-emerald-950"
-          data-testid="task-voice-applied"
-        >
-          {taskVoiceNotice}
-        </p>
-      ) : null}
-      <CleanupAction
-        disabled={editorDirty}
-        key={`cleanup:${note.version}`}
-        llmError={llmError}
-        llmStatus={llmStatus}
-        note={note}
-        onApplied={setCleanupNotice}
-        onNoteUpdated={handleExternalNoteUpdate}
-      />
-      {cleanupNotice ? (
-        <p
-          aria-live="polite"
-          className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-medium text-emerald-950"
-          data-testid="cleanup-applied"
-        >
-          {cleanupNotice}
-        </p>
-      ) : null}
-      <AiEditControls
-        disabled={editorDirty}
-        key={`ai:${note.version}`}
-        llmError={llmError}
-        llmStatus={llmStatus}
-        note={note}
-        onNoteUpdated={handleExternalNoteUpdate}
-      />
-      <ManualProposalPanel
-        disabled={editorDirty}
-        key={note.version}
-        noteId={note.id}
-        noteTitle={note.title}
-        noteVersion={note.version}
-        onNoteUpdated={handleExternalNoteUpdate}
-      />
-      <RevisionHistory
-        disabled={editorDirty}
-        key={`history:${note.version}`}
-        noteId={note.id}
-        noteVersion={note.version}
-        onNoteUpdated={handleExternalNoteUpdate}
+      <NoteTabs
+        tabs={[
+          {
+            id: "content",
+            label: "Obsah poznámky",
+            content: (
+              <>
+                <DictationControls
+                  note={note}
+                  onNoteUpdated={handleNoteUpdated}
+                  disabled={editorDirty}
+                />
+                <NoteEditor
+                  key={`${note.id}:${externalEditRevision}`}
+                  note={note}
+                  onSaved={handleNoteUpdated}
+                  onDirtyChange={setEditorDirty}
+                />
+              </>
+            ),
+          },
+          {
+            id: "metadata",
+            label: "Kategorie a tagy",
+            content: (
+              <>
+                <NoteTags
+                  disabled={editorDirty}
+                  key={`tags:${note.id}:${note.category ?? ""}:${JSON.stringify(note.tags)}`}
+                  llmError={llmError}
+                  llmStatus={llmStatus}
+                  note={note}
+                  onApplied={setMetadataNotice}
+                  onNoteUpdated={handleNoteUpdated}
+                />
+                {metadataNotice ? (
+                  <p
+                    aria-live="polite"
+                    className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-medium text-emerald-950"
+                    data-testid="metadata-applied"
+                  >
+                    {metadataNotice}
+                  </p>
+                ) : null}
+              </>
+            ),
+          },
+          {
+            id: "summary",
+            label: "Shrnutí poznámky",
+            content: (
+              <SummaryAction
+                disabled={editorDirty}
+                key={`summary:${note.version}`}
+                llmError={llmError}
+                llmStatus={llmStatus}
+                note={note}
+                onNoteUpdated={handleExternalNoteUpdate}
+                onReadSummary={setSummaryPlayback}
+                onSummaryChange={setSummaryArtifact}
+              />
+            ),
+          },
+          {
+            id: "tasks",
+            label: "Získat úkoly z pasáže",
+            content: (
+              <TaskSuggestions
+                disabled={editorDirty}
+                llmError={llmError}
+                llmStatus={llmStatus}
+                note={note}
+                onNoteUpdated={handleExternalNoteUpdate}
+              />
+            ),
+          },
+          {
+            id: "read-aloud",
+            label: "Čtení nahlas",
+            content: (
+              <AudioPlayer
+                disabled={editorDirty}
+                note={note}
+                providerError={providerError}
+                providerStatus={providerStatus}
+                summary={
+                  summaryPlayback?.noteId === note.id &&
+                  summaryPlayback.noteVersion === note.version
+                    ? summaryPlayback
+                    : null
+                }
+                summaryArtifact={
+                  summaryArtifact?.noteId === note.id ? summaryArtifact : null
+                }
+                onVoiceSummary={setSummaryPlayback}
+              />
+            ),
+          },
+          {
+            id: "task-voice",
+            label: "Stav úkolů hlasem",
+            content: (
+              <>
+                <TaskVoiceControls
+                  disabled={editorDirty}
+                  key={`tasks:${externalEditRevision}`}
+                  note={note}
+                  onApplied={setTaskVoiceNotice}
+                  onNoteUpdated={handleExternalNoteUpdate}
+                />
+                {taskVoiceNotice ? (
+                  <p
+                    aria-live="polite"
+                    className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-medium text-emerald-950"
+                    data-testid="task-voice-applied"
+                  >
+                    {taskVoiceNotice}
+                  </p>
+                ) : null}
+              </>
+            ),
+          },
+          {
+            id: "cleanup",
+            label: "Vyčistit diktát",
+            content: (
+              <>
+                <CleanupAction
+                  disabled={editorDirty}
+                  key={`cleanup:${note.version}`}
+                  llmError={llmError}
+                  llmStatus={llmStatus}
+                  note={note}
+                  onApplied={setCleanupNotice}
+                  onNoteUpdated={handleExternalNoteUpdate}
+                />
+                {cleanupNotice ? (
+                  <p
+                    aria-live="polite"
+                    className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-medium text-emerald-950"
+                    data-testid="cleanup-applied"
+                  >
+                    {cleanupNotice}
+                  </p>
+                ) : null}
+              </>
+            ),
+          },
+          {
+            id: "ai-edit",
+            label: "AI úprava",
+            content: (
+              <AiEditControls
+                disabled={editorDirty}
+                key={`ai:${note.version}`}
+                llmError={llmError}
+                llmStatus={llmStatus}
+                note={note}
+                onNoteUpdated={handleExternalNoteUpdate}
+              />
+            ),
+          },
+          {
+            id: "manual-proposal",
+            label: "Ruční strukturovaný návrh úpravy",
+            content: (
+              <ManualProposalPanel
+                disabled={editorDirty}
+                key={note.version}
+                noteId={note.id}
+                noteTitle={note.title}
+                noteVersion={note.version}
+                onNoteUpdated={handleExternalNoteUpdate}
+              />
+            ),
+          },
+          {
+            id: "history",
+            label: "Historie",
+            content: (
+              <RevisionHistory
+                disabled={editorDirty}
+                key={`history:${note.version}`}
+                noteId={note.id}
+                noteVersion={note.version}
+                onNoteUpdated={handleExternalNoteUpdate}
+              />
+            ),
+          },
+        ]}
       />
     </>
   );

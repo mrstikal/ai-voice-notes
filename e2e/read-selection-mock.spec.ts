@@ -6,6 +6,7 @@ import {
   loadTestEnvironment,
 } from "../scripts/test-db-guard";
 import { createNoteViaApi } from "./helpers/create-note";
+import { openNoteTab } from "./helpers/tabs";
 
 test.setTimeout(120_000);
 
@@ -241,6 +242,7 @@ test("voice read commands select exact last-two-paragraph and task ranges withou
 }) => {
   const title = `Čtení hlasem E2E ${Date.now()}`;
   const noteId = await createNote(page, title);
+  await openNoteTab(page, "Čtení nahlas");
   const tts = await installTtsMock(page, noteId);
   const scribe = await installScribeMock(page);
 
@@ -284,6 +286,7 @@ test("voice summary without a P29 artifact asks for the explicit action instead 
 }) => {
   const title = `Shrnutí hlasem E2E ${Date.now()}`;
   await createNote(page, title);
+  await openNoteTab(page, "Čtení nahlas");
   const scribe = await installScribeMock(page);
 
   await page.getByTestId("tts-voice-command").click();
@@ -292,6 +295,7 @@ test("voice summary without a P29 artifact asks for the explicit action instead 
   sendCommitted(socket, "Přečíst shrnutí.", "read-summary-missing");
 
   await expect(page.getByText(/Shrnutí ještě není vytvořené/)).toBeVisible();
+  await openNoteTab(page, "Shrnutí poznámky");
   await expect(page.getByTestId("summary-artifact")).toHaveCount(0);
   await expect(page.getByTestId("summary-generate")).toBeVisible();
 });

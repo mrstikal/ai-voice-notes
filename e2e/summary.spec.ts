@@ -6,6 +6,7 @@ import {
   loadTestEnvironment,
 } from "../scripts/test-db-guard";
 import { createNoteViaApi } from "./helpers/create-note";
+import { openNoteTab } from "./helpers/tabs";
 
 test.setTimeout(120_000);
 
@@ -141,6 +142,7 @@ test("summary generation and reading create no note change; explicit insertion c
 }) => {
   const title = `Shrnutí E2E ${Date.now()}`;
   const noteId = await createNote(page, title, content);
+  await openNoteTab(page, "Shrnutí poznámky");
   const mock = await mockSummary(page);
   let ttsRequests = 0;
 
@@ -160,11 +162,13 @@ test("summary generation and reading create no note change; explicit insertion c
   expect(await proposalCount(noteId)).toBe(0);
 
   await page.getByRole("button", { name: "Přečíst shrnutí" }).click();
+  await openNoteTab(page, "Čtení nahlas");
   await expect(page.getByTestId("summary-playback")).toContainText(summaryText);
   expect(ttsRequests).toBe(0);
   expect((await currentNote(request, noteId)).version).toBe(1);
   expect(await revisionCount(noteId)).toBe(1);
 
+  await openNoteTab(page, "Shrnutí poznámky");
   await page.getByRole("button", { name: "Vložit shrnutí" }).click();
   await expect(page.getByTestId("proposal-preview")).toBeVisible();
   expect((await currentNote(request, noteId)).version).toBe(1);
@@ -186,6 +190,7 @@ test("summary generation and reading create no note change; explicit insertion c
   await expect(page.getByTestId("summary-artifact")).toHaveCount(0);
 
   await page.reload();
+  await openNoteTab(page, "Shrnutí poznámky");
   await expect(page.getByTestId("summary-artifact")).toHaveCount(0);
   expect((await currentNote(request, noteId)).contentMd).toBe(
     inserted.contentMd,
@@ -199,6 +204,7 @@ test("an oversized full note asks for a passage before any provider request", as
   const title = `Dlouhé shrnutí E2E ${Date.now()}`;
   const longContent = "a".repeat(8_001);
   const noteId = await createNote(page, title, longContent);
+  await openNoteTab(page, "Shrnutí poznámky");
   let requests = 0;
 
   page.on("request", (event) => {

@@ -6,6 +6,7 @@ import {
   loadTestEnvironment,
 } from "../scripts/test-db-guard";
 import { createNoteViaApi } from "./helpers/create-note";
+import { openNoteTab } from "./helpers/tabs";
 
 test.setTimeout(120_000);
 
@@ -238,6 +239,7 @@ test("sekvenční přehrávání po sekcích, pozastavení, přeskočení, Stop 
 }) => {
   const title = `Čtení E2E ${Date.now()}`;
   const noteId = await createNote(page, title);
+  await openNoteTab(page, "Čtení nahlas");
   const { requests } = await installTtsMock(page, { noteId });
 
   await page.getByRole("button", { name: "Zjistit rozsah a cenu" }).click();
@@ -328,6 +330,7 @@ test("429 u další sekce zastaví přehrávání a nevytvoří další požadav
 }) => {
   const title = `Čtení 429 E2E ${Date.now()}`;
   const noteId = await createNote(page, title);
+  await openNoteTab(page, "Čtení nahlas");
   const { requests } = await installTtsMock(page, {
     noteId,
     onSection: (_body, sectionNumber) =>

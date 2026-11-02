@@ -6,6 +6,7 @@ import {
   loadTestEnvironment,
 } from "../scripts/test-db-guard";
 import { createNoteViaApi } from "./helpers/create-note";
+import { openNoteTab } from "./helpers/tabs";
 
 test.setTimeout(120_000);
 
@@ -78,6 +79,7 @@ test("manual proposal shows an escaped diff, rejects without changing the note a
   const title = `Návrh E2E ${Date.now()}`;
   const content = "První věta. Druhá věta.";
   await createNote(page, title, content);
+  await openNoteTab(page, "Ruční strukturovaný návrh úpravy");
 
   await fillReplaceSentence(page, "První", "věta", "Nová věta.");
   await page.getByRole("button", {
@@ -103,6 +105,7 @@ test("confirming a proposal writes the persisted result exactly once and updates
   const title = `Confirm E2E ${Date.now()}`;
   const content = "První věta. Druhá věta.";
   await createNote(page, title, content);
+  await openNoteTab(page, "Ruční strukturovaný návrh úpravy");
 
   await fillReplaceSentence(page, "První", "věta", "Nová věta.");
   await page.getByRole("button", {
@@ -127,6 +130,7 @@ test("ambiguous manual target offers numbered candidates and applies neither to 
   const title = `Ambiguous E2E ${Date.now()}`;
   const content = "Stejná věta. Jiná věta. Stejná věta.";
   await createNote(page, title, content);
+  await openNoteTab(page, "Ruční strukturovaný návrh úpravy");
 
   await fillReplaceSentence(page, "Stejná", "věta", "Upravená věta.");
   await page.getByRole("button", {

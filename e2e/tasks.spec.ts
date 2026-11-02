@@ -6,6 +6,7 @@ import {
   loadTestEnvironment,
 } from "../scripts/test-db-guard";
 import { createNoteViaApi } from "./helpers/create-note";
+import { openNoteTab } from "./helpers/tabs";
 
 test.setTimeout(120_000);
 
@@ -209,6 +210,7 @@ test("checkbox toggle saves exactly one task, survives export/reload and Undo re
   await expect(reloadedCheckboxes.nth(0)).toBeChecked();
   await expect(reloadedCheckboxes.nth(1)).toBeChecked();
 
+  await openNoteTab(page, "Historie");
   const history = page.getByTestId("revision-history");
   await expect(history.getByText("Ruční úprava")).toHaveCount(1);
   await history
@@ -234,6 +236,7 @@ test("voice task command confirms exactly one matching task and blocks duplicate
     "- [ ] Napsat testy",
   ].join("\n");
   const noteId = await createNote(page, title, original);
+  await openNoteTab(page, "Stav úkolů hlasem");
 
   await installTokenMock(page);
   const mock = await installScribeMock(page);
@@ -336,6 +339,7 @@ test("voice task command ignores fenced code and leaves the note unchanged", asy
   const title = `Kódový úkol E2E ${Date.now()}`;
   const original = ["```", "- [ ] Kódový úkol", "```"].join("\n");
   const noteId = await createNote(page, title, original);
+  await openNoteTab(page, "Stav úkolů hlasem");
 
   await installTokenMock(page);
   const mock = await installScribeMock(page);

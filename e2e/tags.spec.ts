@@ -6,6 +6,7 @@ import {
   loadTestEnvironment,
 } from "../scripts/test-db-guard";
 import { createNoteViaApi } from "./helpers/create-note";
+import { openNoteTab } from "./helpers/tabs";
 
 test.setTimeout(120_000);
 
@@ -108,6 +109,7 @@ test("manual metadata normalizes tags, writes one metadata revision and survives
 }) => {
   const title = `Tagy E2E ${Date.now()}`;
   const noteId = await createNote(page, title, "Text pro metadata.");
+  await openNoteTab(page, "Kategorie a tagy");
 
   await page.getByTestId("tag-category").selectOption("Práce");
   await addTag(page, "Práce");
@@ -132,14 +134,17 @@ test("manual metadata normalizes tags, writes one metadata revision and survives
 
   const rows = await revisionRows(noteId);
   expect(rows.map((row) => row.reason)).toEqual(["initial", "metadata"]);
+  await openNoteTab(page, "Historie");
   await expect(
     page.getByTestId("revision-history").getByText("Změna metadat"),
   ).toBeVisible();
+  await openNoteTab(page, "Kategorie a tagy");
   await expect(page.getByTestId("metadata-applied")).toContainText(
     "jedna revize",
   );
 
   await page.reload();
+  await openNoteTab(page, "Kategorie a tagy");
   await expect(page.getByTestId("tag-category")).toHaveValue("Práce");
   await expect(page.getByTestId("tag-list")).toContainText("Práce");
   await expect(page.getByTestId("tag-list")).toContainText("škola");
@@ -155,6 +160,7 @@ test("P25 restore returns the exact earlier category and tags", async ({
 }) => {
   const title = `Obnova metadat E2E ${Date.now()}`;
   const noteId = await createNote(page, title, "Původní obsah.");
+  await openNoteTab(page, "Kategorie a tagy");
 
   await page.getByTestId("tag-category").selectOption("Osobní");
   await addTag(page, "práce");
@@ -166,6 +172,7 @@ test("P25 restore returns the exact earlier category and tags", async ({
     })
     .toBe(2);
 
+  await openNoteTab(page, "Obsah poznámky");
   await page.getByLabel("Obsah (Markdown)").fill("Novější obsah.");
   await page.getByRole("button", { name: "Uložit", exact: true }).click();
   await expect
@@ -178,6 +185,7 @@ test("P25 restore returns the exact earlier category and tags", async ({
     .toBe(3);
 
   await page.reload();
+  await openNoteTab(page, "Historie");
   const metadataRevision = page.getByTestId("revision-2");
   await metadataRevision
     .getByRole("button", { name: "Obnovit tuto verzi" })
@@ -194,6 +202,7 @@ test("P25 restore returns the exact earlier category and tags", async ({
   expect(restored.category).toBe("Osobní");
   expect(restored.tags).toEqual(["práce", "škola"]);
   expect(restored.version).toBeGreaterThanOrEqual(4);
+  await openNoteTab(page, "Kategorie a tagy");
   await expect(page.getByTestId("tag-category")).toHaveValue("Osobní");
   await expect(page.getByTestId("tag-list")).toContainText("práce");
 });
@@ -208,7 +217,9 @@ test("stale metadata save returns a conflict and never overwrites a newer versio
 
   try {
     const noteId = await createNote(pageA, title, "Stale test.");
+    await openNoteTab(pageA, "Kategorie a tagy");
     await pageB.goto(`/notes/${noteId}`);
+    await openNoteTab(pageB, "Kategorie a tagy");
 
     await pageB.getByTestId("tag-category").selectOption("Studium");
     await addTag(pageB, "novy");
@@ -242,6 +253,7 @@ test("pending tag edits survive an editor autosave version bump", async ({
 }) => {
   const title = `Koncept tagů E2E ${Date.now()}`;
   const noteId = await createNote(page, title, "Počáteční obsah.");
+  await openNoteTab(page, "Kategorie a tagy");
 
   await addTag(page, "škola");
   await addTag(page, "zebra");
@@ -255,6 +267,7 @@ test("pending tag edits survive an editor autosave version bump", async ({
 
   await addTag(page, "pending");
   await expect(page.getByTestId("tag-pending")).toBeVisible();
+  await openNoteTab(page, "Obsah poznámky");
   await page.getByLabel("Obsah (Markdown)").fill("Počáteční obsah. Upraveno.");
   await expect
     .poll(async () => (await currentNote(request, noteId)).version, {
@@ -262,6 +275,7 @@ test("pending tag edits survive an editor autosave version bump", async ({
     })
     .toBe(3);
 
+  await openNoteTab(page, "Kategorie a tagy");
   await expect(page.getByTestId("tag-pending")).toBeVisible();
   await expect(page.getByTestId("tag-save")).toBeEnabled();
   await page.getByTestId("tag-save").click();
@@ -310,6 +324,7 @@ test("AI suggestion applies only the selected subset and keeps category unless e
 }) => {
   const title = `AI tagy E2E ${Date.now()}`;
   const noteId = await createNote(page, title, "Projekt Atlas a migrace databáze.");
+  await openNoteTab(page, "Kategorie a tagy");
 
   await page.getByTestId("tag-category").selectOption("Osobní");
   await addTag(page, "manual");
@@ -370,6 +385,7 @@ test("expired and failed AI suggestions never change the note", async ({
 }) => {
   const title = `AI tagy selhani E2E ${Date.now()}`;
   const noteId = await createNote(page, title, "Text pro AI metadata.");
+  await openNoteTab(page, "Kategorie a tagy");
 
   await mockTagSuggestions(page, {
     version: 1,
@@ -411,6 +427,7 @@ test("AI apply refuses pending manual edits, edits suggested text and reports a 
 }) => {
   const title = `AI tagy hrany E2E ${Date.now()}`;
   const noteId = await createNote(page, title, "Projekt Atlas.");
+  await openNoteTab(page, "Kategorie a tagy");
 
   await page.getByTestId("tag-category").selectOption("Osobní");
   await addTag(page, "manual");

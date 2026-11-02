@@ -6,6 +6,7 @@ import {
   loadTestEnvironment,
 } from "../scripts/test-db-guard";
 import { createNoteViaApi } from "./helpers/create-note";
+import { openNoteTab } from "./helpers/tabs";
 
 test.setTimeout(120_000);
 
@@ -54,22 +55,42 @@ async function createNote(page: Page, title: string): Promise<void> {
   createdNoteId = await createNoteViaApi(page, title, "První verze.");
 }
 
-async function saveSource(page: Page, markdown: string): Promise<void> {
+async function revisionCount(
+  request: Page["request"],
+  noteId: string,
+): Promise<number> {
+  const response = await request.get(`/api/notes/${noteId}/revisions`);
+  expect(response.ok()).toBe(true);
+  const body = (await response.json()) as { revisions: unknown[] };
+  return body.revisions.length;
+}
+
+async function saveSource(
+  page: Page,
+  request: Page["request"],
+  noteId: string,
+  markdown: string,
+  expectedRevisionCount: number,
+): Promise<void> {
   const source = page.getByLabel("Obsah (Markdown)");
   await source.fill(markdown);
   await page.getByRole("button", { name: "Uložit", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("Uloženo");
+  await expect
+    .poll(() => revisionCount(request, noteId), { timeout: 15_000 })
+    .toBe(expectedRevisionCount);
 }
 
 test("history shows named revisions, exact Undo and explicit older restore", async ({
   page,
+  request,
 }) => {
   const title = `Historie E2E ${Date.now()}`;
   await createNote(page, title);
 
-  await saveSource(page, "Druhá verze.");
-  await saveSource(page, "Třetí verze.");
+  await saveSource(page, request, createdNoteId!, "Druhá verze.", 2);
+  await saveSource(page, request, createdNoteId!, "Třetí verze.", 3);
 
+  await openNoteTab(page, "Historie");
   const history = page.getByTestId("revision-history");
   await expect(history).toBeVisible();
   await expect(history.getByText("Počáteční verze")).toBeVisible();
@@ -92,10 +113,10 @@ test("history shows named revisions, exact Undo and explicit older restore", asy
   await page.getByRole("button", { name: "Potvrdit obnovení" }).click();
 
   await expect(source).toHaveValue("První verze.");
-  await expect(page.getByText(/Verze 5/)).toBeVisible();
   await expect(history.getByText("Obnovení verze")).toBeVisible();
 
   await page.reload();
+  await openNoteTab(page, "Historie");
   await expect(page.getByTestId("revision-history")).toBeVisible();
   await expect(
     page.getByTestId("revision-history").getByText("Obnovení verze"),
