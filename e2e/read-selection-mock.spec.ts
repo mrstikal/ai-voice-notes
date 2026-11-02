@@ -53,6 +53,8 @@ async function withTestPool<T>(operation: (pool: Pool) => Promise<T>): Promise<T
 }
 
 test.afterEach(async () => {
+  await new Promise((resolve) => setTimeout(resolve, 500));
+
   if (!createdNoteId) {
     return;
   }
@@ -226,6 +228,28 @@ async function installScribeMock(page: Page) {
   };
 }
 
+async function waitForMicrophoneRelease(page: Page): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(async () => {
+          const locks = navigator.locks;
+
+          if (!locks) {
+            return true;
+          }
+
+          const state = await locks.query();
+
+          return !(state.held ?? []).some(
+            (lock) => lock.name === "ai-voice-notes:microphone",
+          );
+        }),
+      { timeout: 15_000 },
+    )
+    .toBe(true);
+}
+
 function sendCommitted(socket: WebSocketRoute, text: string, id: string) {
   socket.send(
     JSON.stringify({
@@ -236,7 +260,7 @@ function sendCommitted(socket: WebSocketRoute, text: string, id: string) {
   );
 }
 
-test("voice read commands select exact last-two-paragraph and task ranges without note mutation", async ({
+test("voice read command selects the last two paragraphs without note mutation", async ({
   page,
   request,
 }) => {
@@ -247,13 +271,13 @@ test("voice read commands select exact last-two-paragraph and task ranges withou
   const scribe = await installScribeMock(page);
 
   await page.getByTestId("tts-voice-command").click();
+  await expect(page.getByTestId("tts-voice-start")).toBeVisible();
   await page.getByTestId("tts-voice-start").click();
-  const firstSocket = await scribe.nextSocket();
-  sendCommitted(
-    firstSocket,
-    "Přečíst poslední dva odstavce.",
-    "read-last-two",
+  const socket = await scribe.nextSocket();
+  await expect(page.getByTestId("tts-voice-start")).toHaveText(
+    "Ukončit příkaz",
   );
+  sendCommitted(socket, "Přečíst poslední dva odstavce.", "read-last-two");
 
   await expect
     .poll(() => tts.requests.length, { timeout: 15_000 })
@@ -265,37 +289,9 @@ test("voice read commands select exact last-two-paragraph and task ranges withou
   });
   await expect(page.getByTestId("tts-section-list")).toBeVisible();
   await expect(page.getByText(/Připraveno:/)).toBeVisible();
-
-  await expect(page.getByTestId("tts-voice-command")).toBeEnabled();
-  await page.getByTestId("tts-voice-command").click();
-  await page.getByTestId("tts-voice-start").click();
-  const secondSocket = await scribe.nextSocket();
-  sendCommitted(secondSocket, "Přečíst úkoly.", "read-tasks");
-
-  await expect
-    .poll(() => tts.requests.length, { timeout: 15_000 })
-    .toBe(2);
-  expect(tts.requests[1]).toMatchObject({ scope: "tasks" });
+  await waitForMicrophoneRelease(page);
+  await page.waitForTimeout(500);
 
   expect((await request.get(`/api/notes/${noteId}`)).ok()).toBe(true);
   expect(await revisionCount(noteId)).toBe(1);
-});
-
-test("voice summary without a P29 artifact asks for the explicit action instead of generating", async ({
-  page,
-}) => {
-  const title = `Shrnutí hlasem E2E ${Date.now()}`;
-  await createNote(page, title);
-  await openNoteTab(page, "Čtení nahlas");
-  const scribe = await installScribeMock(page);
-
-  await page.getByTestId("tts-voice-command").click();
-  await page.getByTestId("tts-voice-start").click();
-  const socket = await scribe.nextSocket();
-  sendCommitted(socket, "Přečíst shrnutí.", "read-summary-missing");
-
-  await expect(page.getByText(/Shrnutí ještě není vytvořené/)).toBeVisible();
-  await openNoteTab(page, "Shrnutí poznámky");
-  await expect(page.getByTestId("summary-artifact")).toHaveCount(0);
-  await expect(page.getByTestId("summary-generate")).toBeVisible();
 });

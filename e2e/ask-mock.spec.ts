@@ -123,7 +123,7 @@ test("asks a PostgreSQL question, renders a cited claim and opens the current no
     });
   });
 
-  await page.goto("/search");
+  await page.goto("/search?mode=hybrid");
   await expect(page.getByTestId("ask-notes")).toBeVisible();
   await expect(page.getByTestId("ask-submit")).toBeDisabled();
 
@@ -192,7 +192,7 @@ test("shows the exact insufficient-evidence state without source links", async (
     });
   });
 
-  await page.goto("/search");
+  await page.goto("/search?mode=hybrid");
   await page.getByTestId("ask-question").fill("nesouvisející otázka");
   await page.getByTestId("ask-confirm").check();
   await page.getByTestId("ask-submit").click();
@@ -246,7 +246,7 @@ test("refuses an invented citation link even if the answer payload is malformed"
     });
   });
 
-  await page.goto("/search");
+  await page.goto("/search?mode=hybrid");
   await page.getByTestId("ask-question").fill("otázka");
   await page.getByTestId("ask-confirm").check();
   await page.getByTestId("ask-submit").click();
@@ -277,7 +277,7 @@ test("submitting no question makes zero paid requests", async ({ page }) => {
     });
   });
 
-  await page.goto("/search");
+  await page.goto("/search?mode=hybrid");
   const submit = page.getByTestId("ask-submit");
 
   await page.getByTestId("ask-confirm").check();
@@ -308,7 +308,7 @@ test("refuses a deleted/stale citation response and renders no note links", asyn
     });
   });
 
-  await page.goto("/search");
+  await page.goto("/search?mode=hybrid");
   await page.getByTestId("ask-question").fill("otázka na smazanou poznámku");
   await page.getByTestId("ask-confirm").check();
   await page.getByTestId("ask-submit").click();

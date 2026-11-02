@@ -1,6 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import { useScribeDictation } from "@/components/voice/useScribeDictation";
 import {
@@ -12,6 +17,11 @@ import { formatUsdAmount } from "@/lib/ai/usage-format";
 import {
   tryAcquirePlaybackLease,
 } from "@/lib/tts/playback-lease";
+import {
+  getTtsVoicePreferenceServerSnapshot,
+  getTtsVoicePreferenceSnapshot,
+  subscribeTtsVoicePreference,
+} from "@/lib/tts/voice-preference";
 import type { MicrophoneLease } from "@/lib/voice/microphone";
 import { voiceMetrics } from "@/lib/voice-agent/metrics";
 import {
@@ -92,7 +102,27 @@ export function ChainedComparison({
     readonly noteId: string;
     readonly version: number;
   } | null>(null);
-  const [ttsVoice, setTtsVoice] = useState(defaultTtsVoice);
+  const storedTtsVoice = useSyncExternalStore(
+    subscribeTtsVoicePreference,
+    getTtsVoicePreferenceSnapshot,
+    getTtsVoicePreferenceServerSnapshot,
+  );
+  const [selectedTtsVoice, setSelectedTtsVoice] = useState<string | null>(null);
+  const ttsVoice =
+    selectedTtsVoice !== null &&
+    ttsVoices.some(
+      (voice) =>
+        voice.id === selectedTtsVoice && voice.availability !== "unavailable",
+    )
+      ? selectedTtsVoice
+      : storedTtsVoice !== null &&
+          ttsVoices.some(
+            (voice) =>
+              voice.id === storedTtsVoice &&
+              voice.availability !== "unavailable",
+          )
+        ? storedTtsVoice
+        : defaultTtsVoice;
   const [busy, setBusy] = useState(false);
   const [summaryBusy, setSummaryBusy] = useState(false);
   const [proposalBusy, setProposalBusy] = useState(false);
@@ -958,7 +988,7 @@ export function ChainedComparison({
             className="mt-1 block rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm"
             disabled={availableVoices.length === 0}
             onChange={(event) => {
-              setTtsVoice(event.target.value);
+              setSelectedTtsVoice(event.target.value);
             }}
             value={ttsVoice}
           >

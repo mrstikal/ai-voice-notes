@@ -24,9 +24,9 @@ import {
 const ROOT = process.cwd();
 const VOICE_AGENT_COMPONENTS = path.join(ROOT, "src", "components", "voice-agent");
 const VOICE_AGENT_LIB = path.join(ROOT, "src", "lib", "voice-agent");
-const GEMINI_CONVERSATION = path.join(
-  VOICE_AGENT_COMPONENTS,
-  "GeminiConversation.tsx",
+const GEMINI_ENDPOINTS = path.join(
+  VOICE_AGENT_LIB,
+  "gemini-endpoints.ts",
 );
 const BROWSER_STORAGE_OR_BEACON =
   /\b(?:localStorage|sessionStorage|indexedDB|sendBeacon)\b/u;
@@ -158,7 +158,7 @@ describe("P54 Stage 5 deployment boundary", () => {
       "http://127.0.0.1:4010/v1beta/auth_tokens",
     );
 
-    const source = await readFile(GEMINI_CONVERSATION, "utf8");
+    const source = await readFile(GEMINI_ENDPOINTS, "utf8");
     const socketMatch =
       /export const GEMINI_WEBSOCKET_URL\s*=\s*"([^"]+)"/u.exec(source);
 

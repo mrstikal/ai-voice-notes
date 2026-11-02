@@ -8,6 +8,7 @@ export default defineConfig({
   reporter: "list",
   use: {
     baseURL: "http://127.0.0.1:3100",
+    permissions: ["microphone"],
     trace: "retain-on-failure",
   },
   webServer: {

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { DefaultVoiceSettings } from "@/components/settings/DefaultVoiceSettings";
 import { LlmSettings } from "@/components/settings/LlmSettings";
 import { SpokenStopSettings } from "@/components/settings/SpokenStopSettings";
 import { TtsCacheSettings } from "@/components/settings/TtsCacheSettings";
@@ -11,6 +12,7 @@ import {
   type LlmProviderStatus,
 } from "@/lib/ai/structured";
 import {
+  TTS_ESTIMATED_MAX_COST_USD,
   getTtsProviderStatus,
   type TtsProviderStatus,
 } from "@/lib/tts/provider";
@@ -56,6 +58,11 @@ export default async function SettingsPage() {
       <div className="mt-6">
         <TtsSettings error={ttsError} status={ttsStatus} />
       </div>
+      <DefaultVoiceSettings
+        ttsMaxCostUsd={TTS_ESTIMATED_MAX_COST_USD}
+        ttsStatus={ttsStatus}
+        ttsStatusError={ttsError}
+      />
       <div className="mt-6">
         <LlmSettings error={llmError} status={llmStatus} />
       </div>

@@ -158,20 +158,20 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
         </Link>
       </nav>
 
-      <AskNotes
-        provider={{
-          configured: llmStatus.configured,
-          model: llmStatus.model,
-          blockedReason: llmStatus.blockedReason,
-          llmMaxUsd: GROUNDING_LLM_MAX_COST_USD,
-          approvalUsd: askApprovalUsd,
-          semanticAvailable: askSemanticAvailable,
-          embeddingModel: embeddingStatus.model,
-          readyChunks: askIndexStatus.chunks.ready,
-        }}
-      />
-
-      <IndexControls />
+      {semanticMode || hybridMode ? (
+        <AskNotes
+          provider={{
+            configured: llmStatus.configured,
+            model: llmStatus.model,
+            blockedReason: llmStatus.blockedReason,
+            llmMaxUsd: GROUNDING_LLM_MAX_COST_USD,
+            approvalUsd: askApprovalUsd,
+            semanticAvailable: askSemanticAvailable,
+            embeddingModel: embeddingStatus.model,
+            readyChunks: askIndexStatus.chunks.ready,
+          }}
+        />
+      ) : null}
 
       {semanticMode ? (
         <SemanticSearch
@@ -243,6 +243,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
         </>
       )}
 
+      <IndexControls />
     </div>
   );
 }

@@ -86,6 +86,10 @@ test("history shows named revisions, exact Undo and explicit older restore", asy
 }) => {
   const title = `Historie E2E ${Date.now()}`;
   await createNote(page, title);
+  await expect(page.getByTestId("note-editor")).toHaveAttribute(
+    "data-autosave-ready",
+    "true",
+  );
 
   await saveSource(page, request, createdNoteId!, "Druhá verze.", 2);
   await saveSource(page, request, createdNoteId!, "Třetí verze.", 3);

@@ -1,8 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import { formatUsdAmount } from "@/lib/ai/usage-format";
+import {
+  GEMINI_TOKEN_ENDPOINT,
+  GEMINI_TOOL_ENDPOINT,
+  GEMINI_WEBSOCKET_URL,
+} from "@/lib/voice-agent/gemini-endpoints";
 import { voiceMetrics } from "@/lib/voice-agent/metrics";
 import { describeProposalResult } from "@/lib/voice-agent/proposal-result";
 import { PendingEdit, type PendingEditResult } from "./PendingEdit";
@@ -17,6 +28,11 @@ import {
   isGeminiVoice,
   type GeminiVoice,
 } from "@/lib/voice-agent/gemini-voices";
+import {
+  getGeminiVoicePreferenceServerSnapshot,
+  getGeminiVoicePreferenceSnapshot,
+  subscribeGeminiVoicePreference,
+} from "@/lib/voice/gemini-voice-preference";
 import {
   GEMINI_INPUT_SAMPLE_RATE,
   GEMINI_OUTPUT_SAMPLE_RATE,
@@ -40,11 +56,7 @@ import {
   type VoiceAgentConversationState,
 } from "./ConnectionStatus";
 
-export const GEMINI_TOKEN_ENDPOINT = "/api/voice-agent/gemini-token";
-export const GEMINI_TOOL_ENDPOINT = "/api/voice-agent/tool";
 export const LOCAL_BARGE_IN_RMS = 0.02;
-export const GEMINI_WEBSOCKET_URL =
-  "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained";
 const MICROPHONE_CONSTRAINTS: MediaTrackConstraints = {
   echoCancellation: true,
   noiseSuppression: true,
@@ -541,7 +553,17 @@ export function GeminiConversation() {
   const [detail, setDetail] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [microphoneActive, setMicrophoneActive] = useState(false);
-  const [voice, setVoice] = useState<GeminiVoice>(DEFAULT_GEMINI_VOICE);
+  const storedGeminiVoice = useSyncExternalStore(
+    subscribeGeminiVoicePreference,
+    getGeminiVoicePreferenceSnapshot,
+    getGeminiVoicePreferenceServerSnapshot,
+  );
+  const [selectedVoice, setSelectedVoice] = useState<GeminiVoice | null>(null);
+  const voice: GeminiVoice =
+    selectedVoice ??
+    (isGeminiVoice(storedGeminiVoice)
+      ? storedGeminiVoice
+      : DEFAULT_GEMINI_VOICE);
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<Transcript>({
     user: "",
@@ -2201,7 +2223,7 @@ export function GeminiConversation() {
           disabled={connecting || status === "connected"}
           onChange={(event) => {
             if (isGeminiVoice(event.target.value)) {
-              setVoice(event.target.value);
+              setSelectedVoice(event.target.value);
             }
           }}
           value={voice}

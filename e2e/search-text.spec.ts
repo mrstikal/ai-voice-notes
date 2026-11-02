@@ -79,6 +79,18 @@ test("fulltext search finds accent variants, a quoted phrase and opens the exact
 
   await page.goto("/search");
   await expect(page.getByTestId("search-empty")).toBeVisible();
+  await expect(page.getByTestId("ask-notes")).toHaveCount(0);
+
+  const searchInput = page.getByLabel("Hledaný výraz");
+  const indexHeading = page.getByRole("heading", {
+    name: "Indexace pro vyhledávání",
+  });
+  await expect(indexHeading).toBeVisible();
+  const searchBox = await searchInput.boundingBox();
+  const indexBox = await indexHeading.boundingBox();
+  expect(searchBox).not.toBeNull();
+  expect(indexBox).not.toBeNull();
+  expect(searchBox!.y).toBeLessThan(indexBox!.y);
 
   await page.getByLabel("Hledaný výraz").fill("databaze");
   await page.getByRole("button", { name: "Hledat" }).click();
