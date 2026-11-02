@@ -32,6 +32,7 @@ export interface OpenRouterTransport {
 export interface OpenRouterSuccessSettlement {
   readonly reportedCostUsd: number | null;
   readonly providerUsage?: Readonly<Record<string, unknown>>;
+  readonly chargeReason?: string;
 }
 
 export interface OpenRouterRequestOptions {
@@ -598,7 +599,8 @@ export class OpenRouterClient {
             contentType,
             byteLength: bytes.byteLength,
             generationId,
-            chargeReason: "provider_cost_reported",
+            chargeReason:
+              settlement?.chargeReason ?? "provider_cost_reported",
           },
         });
       } catch {

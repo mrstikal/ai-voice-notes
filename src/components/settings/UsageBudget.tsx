@@ -7,6 +7,7 @@ import {
   formatUsageCost,
   formatUsdAmount,
   hasAudioDurationCharge,
+  hasInputCharacterCharge,
 } from "@/lib/ai/usage-format";
 
 const dateFormatter = new Intl.DateTimeFormat("cs-CZ", {
@@ -246,6 +247,9 @@ export function UsageBudget({
                     const audioDurationCharge =
                       operation.status === "settled" &&
                       hasAudioDurationCharge(operation.providerUsage);
+                    const inputCharacterCharge =
+                      operation.status === "settled" &&
+                      hasInputCharacterCharge(operation.providerUsage);
 
                     return (
                       <tr
@@ -288,6 +292,11 @@ export function UsageBudget({
                           {audioDurationCharge ? (
                             <span className="mt-1 block text-xs font-normal text-stone-600">
                               Cena z délky audia
+                            </span>
+                          ) : null}
+                          {inputCharacterCharge ? (
+                            <span className="mt-1 block text-xs font-normal text-stone-600">
+                              Cena z délky textu
                             </span>
                           ) : null}
                         </td>

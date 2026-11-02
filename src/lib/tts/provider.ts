@@ -204,6 +204,15 @@ export function createTtsService(options: TtsServiceOptions): TtsService {
         expectedContentType: "audio/mpeg",
         maxResponseBytes,
         timeoutMs,
+        successSettlement: () => ({
+          reportedCostUsd: text.length * TTS_USD_PER_INPUT_UNIT,
+          chargeReason: "estimated_from_input_length",
+          providerUsage: {
+            chargeBasis: "input_characters",
+            inputCodeUnits: text.length,
+            usdPerInputUnit: TTS_USD_PER_INPUT_UNIT,
+          },
+        }),
         providerUsage: {
           model: TTS_MODEL_ID,
           voice,

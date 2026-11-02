@@ -22,6 +22,15 @@ export function hasAudioDurationCharge(providerUsage: unknown): boolean {
   );
 }
 
+export function hasInputCharacterCharge(providerUsage: unknown): boolean {
+  return (
+    typeof providerUsage === "object" &&
+    providerUsage !== null &&
+    (providerUsage as { chargeBasis?: unknown }).chargeBasis ===
+      "input_characters"
+  );
+}
+
 export function formatUsageCost(
   operation: Pick<
     UsageOperationDto,

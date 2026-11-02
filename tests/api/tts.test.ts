@@ -25,6 +25,7 @@ import {
   TTS_MAX_INPUT_CODE_UNITS,
   TTS_MODEL_ID,
   TTS_OPERATION,
+  TTS_USD_PER_INPUT_UNIT,
   TTS_VOICES,
   createTtsRouteHandler,
   createTtsService,
@@ -201,7 +202,9 @@ describe("POST /api/tts", () => {
     const transport = createMockOpenRouterTransport({
       responses: [audioResponse(), audioResponse()],
     });
-    const { service, reserve, markUnknown } = createService({ transport });
+    const { service, reserve, settle, markUnknown } = createService({
+      transport,
+    });
     const route = createRoute(() => service);
     const text = "Dobrý den, toto je česká zkouška čtení.";
 
@@ -244,24 +247,30 @@ describe("POST /api/tts", () => {
       model: TTS_MODEL_ID,
       estimatedMaxCostUsd: TTS_ESTIMATED_MAX_COST_USD,
     });
-    expect(markUnknown).toHaveBeenCalledTimes(2);
-    expect(markUnknown).toHaveBeenNthCalledWith(
+    expect(settle).toHaveBeenCalledTimes(2);
+    expect(settle).toHaveBeenNthCalledWith(
       1,
       RESERVATION_ID,
-      expect.objectContaining({
-        model: TTS_MODEL_ID,
-        voice: "sarah",
-        inputCodeUnits: text.length,
-        responseFormat: "mp3",
-        httpStatus: 200,
-        contentType: "audio/mpeg",
-        byteLength: mp3Bytes().byteLength,
-        generationId: "gen-tts-123",
-        chargeReason: "openrouter_cost_not_reported",
-      }),
+      {
+        reportedCostUsd: text.length * TTS_USD_PER_INPUT_UNIT,
+        providerUsage: expect.objectContaining({
+          model: TTS_MODEL_ID,
+          voice: "sarah",
+          inputCodeUnits: text.length,
+          responseFormat: "mp3",
+          httpStatus: 200,
+          contentType: "audio/mpeg",
+          byteLength: mp3Bytes().byteLength,
+          generationId: "gen-tts-123",
+          chargeBasis: "input_characters",
+          usdPerInputUnit: TTS_USD_PER_INPUT_UNIT,
+          chargeReason: "estimated_from_input_length",
+        }),
+      },
     );
-    expect(JSON.stringify(markUnknown.mock.calls)).not.toContain(text);
-    expect(JSON.stringify(markUnknown.mock.calls)).not.toContain(
+    expect(markUnknown).not.toHaveBeenCalled();
+    expect(JSON.stringify(settle.mock.calls)).not.toContain(text);
+    expect(JSON.stringify(settle.mock.calls)).not.toContain(
       "test-only-openrouter",
     );
   });
