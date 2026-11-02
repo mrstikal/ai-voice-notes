@@ -83,12 +83,12 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
                   </Link>
                 </li>
                 <li>
-                  <a
+                  <Link
                     className="rounded-sm text-stone-700 hover:text-emerald-800 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-700"
-                    href="/api/health"
+                    href="/status"
                   >
                     Stav aplikace
-                  </a>
+                  </Link>
                 </li>
               </ul>
             </nav>
