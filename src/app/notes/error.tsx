@@ -26,9 +26,9 @@ export default function NotesError({
         </button>
         <Link
           className="rounded-lg border border-stone-300 px-4 py-2 text-sm font-semibold text-stone-800 hover:bg-stone-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
-          href="/"
+          href="/notes"
         >
-          Domů
+          Zpět na poznámky
         </Link>
       </div>
     </div>

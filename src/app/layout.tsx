@@ -20,20 +20,12 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
           <div className="mx-auto flex max-w-5xl flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
             <Link
               className="text-lg font-semibold tracking-tight text-stone-950 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-700"
-              href="/"
+              href="/notes"
             >
               AI hlasové poznámky
             </Link>
             <nav aria-label="Hlavní navigace">
               <ul className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm font-medium">
-                <li>
-                  <Link
-                    className="rounded-sm text-stone-700 hover:text-emerald-800 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-700"
-                    href="/"
-                  >
-                    Domů
-                  </Link>
-                </li>
                 <li>
                   <Link
                     className="rounded-sm text-stone-700 hover:text-emerald-800 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-700"
