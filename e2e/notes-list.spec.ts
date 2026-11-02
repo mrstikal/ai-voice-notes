@@ -1,8 +1,26 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 test.setTimeout(60_000);
 
-test("paginated notes, rename, delete, restore, and safe title", async ({ page }) => {
+async function createNoteViaRequest(
+  page: Page,
+  title: string,
+  contentMd: string,
+): Promise<string> {
+  const origin = new URL(page.url()).origin;
+  const response = await page.request.post("/api/notes", {
+    data: { title, contentMd },
+    headers: { origin },
+  });
+  expect(response.ok()).toBe(true);
+
+  const created = (await response.json()) as { id: string };
+  return created.id;
+}
+
+test("paginated notes, new note flow, rename, delete, restore, and safe title", async ({
+  page,
+}) => {
   await page.goto("/notes");
   await expect(
     page.getByRole("heading", { level: 1, name: "Poznámky" }),
@@ -14,14 +32,30 @@ test("paginated notes, rename, delete, restore, and safe title", async ({ page }
   );
   titles[9] = "<script>window.__xss=1</script>";
 
-  for (const title of titles) {
-    await page.getByLabel("Název").fill(title);
-    await page.getByLabel("Obsah").fill(`Obsah pro ${title}`);
-    await page.getByRole("button", { name: "Vytvořit poznámku" }).click();
-    await expect(
-      page.getByRole("link", { name: title, exact: true }),
-    ).toBeVisible();
+  for (const title of titles.slice(0, 10)) {
+    await createNoteViaRequest(page, title, `Obsah pro ${title}`);
   }
+
+  await page.goto("/notes");
+  await page.getByRole("button", { name: "Nová poznámka" }).click();
+  await expect(page).toHaveURL(/\/notes\/[0-9a-f-]+$/);
+
+  const newNoteId = page.url().split("/").pop();
+  expect(newNoteId).toBeTruthy();
+
+  await page
+    .getByRole("textbox", { name: "Název poznámky" })
+    .fill("Poznámka 11");
+  await page.getByRole("button", { name: "Uložit název" }).click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Poznámka 11" }),
+  ).toBeVisible();
+
+  await page.getByLabel("Obsah (Markdown)").fill("Obsah pro Poznámka 11");
+  await page.getByRole("button", { name: "Uložit", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Uloženo");
+
+  await page.goto("/notes");
 
   const noteList = page.getByRole("list", { name: "Poznámky" });
   await expect(noteList.getByRole("listitem")).toHaveCount(10);
@@ -53,8 +87,9 @@ test("paginated notes, rename, delete, restore, and safe title", async ({ page }
   await expect(page.getByText("Vytvořeno")).toBeVisible();
   await expect(page.getByText("Upraveno")).toBeVisible();
 
-  await page.getByRole("button", { name: "Přejmenovat" }).click();
-  await page.getByLabel("Nový název").fill("Poznámka 11 přejmenovaná");
+  await page
+    .getByRole("textbox", { name: "Název poznámky" })
+    .fill("Poznámka 11 přejmenovaná");
   await page.getByRole("button", { name: "Uložit název" }).click();
   await expect(
     page.getByRole("heading", {

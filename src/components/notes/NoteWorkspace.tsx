@@ -62,7 +62,7 @@ export function NoteWorkspace({
 
   return (
     <>
-      <NoteHeader note={note} onNoteUpdated={handleNoteUpdated} />
+      <NoteHeader note={note} />
       <DictationControls
         note={note}
         onNoteUpdated={handleNoteUpdated}

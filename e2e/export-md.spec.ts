@@ -7,6 +7,7 @@ import {
   assertTestDatabaseTargets,
   loadTestEnvironment,
 } from "../scripts/test-db-guard";
+import { createNoteViaApi } from "./helpers/create-note";
 
 test.setTimeout(120_000);
 
@@ -72,17 +73,7 @@ test("exports the exact saved Markdown bytes and Czech filename", async ({
 }) => {
   const title = `Export E2E ${Date.now()} – poznámka`;
 
-  await page.goto("/notes");
-  await page.getByLabel("Název").fill(title);
-  await page.getByLabel("Obsah").fill("");
-  await page.getByRole("button", { name: "Vytvořit poznámku" }).click();
-  await page.getByRole("link", { name: title, exact: true }).click();
-  await expect(page).toHaveURL(/\/notes\/[0-9a-f-]+$/);
-
-  const noteId = page.url().split("/").pop();
-  if (!noteId) {
-    throw new Error("ID vytvořené poznámky se nepodařilo zjistit.");
-  }
+  const noteId = await createNoteViaApi(page, title, "");
   createdNoteId = noteId;
 
   await page.getByLabel("Obsah (Markdown)").fill(markdown);

@@ -11,6 +11,8 @@ import {
 
 import {
   NoteApiError,
+  fetchNote,
+  updateNote,
   updateVoiceTitle,
   type NoteDetail,
 } from "@/lib/notes/client";
@@ -69,11 +71,6 @@ export interface DictationControlsProps {
   readonly disabled?: boolean;
 }
 
-interface TitleProposal {
-  readonly text: string;
-  readonly baseVersion: number;
-}
-
 function conflictMessage(error: NoteApiError): string {
   if (error.latestVersion === undefined) {
     return error.message;
@@ -87,16 +84,20 @@ export function DictationControls({
   onNoteUpdated,
   disabled = false,
 }: DictationControlsProps) {
-  const [proposal, setProposal] = useState<TitleProposal | null>(null);
+  const [titleInput, setTitleInput] = useState(note.title);
+  const [lastDictatedText, setLastDictatedText] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const savingRef = useRef(false);
-  const noteRef = useRef(note);
+  const lastSyncedTitleRef = useRef(note.title);
 
   useEffect(() => {
-    noteRef.current = note;
-  }, [note]);
+    setTitleInput((current) =>
+      current === lastSyncedTitleRef.current ? note.title : current,
+    );
+    lastSyncedTitleRef.current = note.title;
+  }, [note.title]);
 
   const vadSilence = useSyncExternalStore(
     subscribeVadSilencePreference,
@@ -123,7 +124,6 @@ export function DictationControls({
       const graphemes = countGraphemes(text);
 
       if (graphemes > TITLE_MAX_GRAPHEMES) {
-        setProposal(null);
         setError(
           `Nadiktovaný název má ${graphemes} znaků; maximum je ${TITLE_MAX_GRAPHEMES}. Zkuste kratší.`,
         );
@@ -131,20 +131,20 @@ export function DictationControls({
         return;
       }
 
-      setProposal({
-        text,
-        baseVersion: noteRef.current.version,
-      });
+      setTitleInput(text);
+      setLastDictatedText(text);
       setError(null);
-      setStatus("Název je připravený. Zkontrolujte jej a použijte.");
+      setStatus("Název je připravený. Zkontrolujte jej a uložte.");
     },
   });
 
   const { session, partialTranscript, webLocksSupported, isStopping } =
     dictation;
-  const proposalStale =
-    proposal !== null && note.version !== proposal.baseVersion;
   const busy = session.status !== "idle" && session.status !== "error";
+  const trimmedTitle = titleInput.trim();
+  const titleGraphemes = countGraphemes(trimmedTitle);
+  const titleOverLimit = titleGraphemes > TITLE_MAX_GRAPHEMES;
+  const titleUnchanged = trimmedTitle === note.title;
   const startDisabled =
     disabled ||
     media.playbackActive ||
@@ -154,8 +154,8 @@ export function DictationControls({
     isSaving;
   const stopDisabled =
     !busy || session.status === "stopping" || isStopping || isSaving;
-  const useDisabled =
-    proposal === null || isSaving || disabled || proposalStale;
+  const saveDisabled =
+    disabled || isSaving || titleUnchanged || titleOverLimit;
   const errorMessage = error ?? session.error;
   const statusMessage = status ?? session.notice;
 
@@ -164,7 +164,6 @@ export function DictationControls({
       return;
     }
 
-    setProposal(null);
     setError(null);
     setStatus(null);
     dictation.clearTranscripts();
@@ -172,36 +171,34 @@ export function DictationControls({
   }
 
   function handleStop() {
-    setProposal(null);
     setError(null);
-    setStatus("Diktování názvu bylo zrušeno.");
+    setStatus("Diktování názvu bylo ukončeno.");
     dictation.clearTranscripts();
     void dictation.stop({ flush: false });
   }
 
-  function handleCancel() {
-    setProposal(null);
+  function handleTitleChange(value: string) {
+    setTitleInput(value);
+    setLastDictatedText(null);
     setError(null);
-    setStatus("Návrh názvu byl zrušen.");
-    dictation.clearTranscripts();
-    void dictation.stop({ flush: false });
+    setStatus(null);
   }
 
-  async function handleUse() {
-    if (proposal === null || useDisabled || savingRef.current) {
+  async function handleSave() {
+    if (saveDisabled || savingRef.current) {
       return;
     }
 
-    const currentNote = noteRef.current;
+    const nextTitle = titleInput.trim();
 
-    if (currentNote.version !== proposal.baseVersion) {
-      setProposal(null);
-      setError("Poznámka se mezitím změnila. Nadiktujte název znovu.");
+    if (countGraphemes(nextTitle) > TITLE_MAX_GRAPHEMES) {
+      setError(
+        `Název může mít nejvýše ${TITLE_MAX_GRAPHEMES} viditelných znaků.`,
+      );
       return;
     }
 
-    if (proposal.text === currentNote.title) {
-      setProposal(null);
+    if (nextTitle === note.title) {
       setStatus("Název se nezměnil.");
       return;
     }
@@ -212,19 +209,35 @@ export function DictationControls({
     setStatus(null);
 
     try {
-      const updated = await updateVoiceTitle(currentNote.id, {
-        title: proposal.text,
-        expectedVersion: proposal.baseVersion,
-      });
+      const updated =
+        lastDictatedText !== null && nextTitle === lastDictatedText
+          ? await updateVoiceTitle(note.id, {
+              title: nextTitle,
+              expectedVersion: note.version,
+            })
+          : await updateNote(note.id, {
+              title: nextTitle,
+              contentMd: note.contentMd,
+              expectedVersion: note.version,
+            });
 
-      setProposal(null);
+      setTitleInput(updated.title);
+      setLastDictatedText(null);
       dictation.clearTranscripts();
       setStatus("Název byl uložen.");
       onNoteUpdated?.(updated);
     } catch (saveError) {
       if (saveError instanceof NoteApiError && saveError.status === 409) {
-        setProposal(null);
         setError(conflictMessage(saveError));
+
+        try {
+          const latest = await fetchNote(note.id);
+          onNoteUpdated?.(latest);
+          setTitleInput(latest.title);
+          setLastDictatedText(null);
+        } catch {
+          // Keep the local input; the user can retry after the note refreshes.
+        }
       } else {
         setError(
           saveError instanceof NoteApiError
@@ -240,20 +253,19 @@ export function DictationControls({
 
   return (
     <section
-      aria-labelledby="title-dictation-title"
+      aria-labelledby="note-title-heading"
       className="mt-6 rounded-2xl border border-stone-200 bg-white p-5"
     >
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2
-            id="title-dictation-title"
+            id="note-title-heading"
             className="text-lg font-semibold text-stone-950"
           >
-            Diktování názvu
+            Název poznámky
           </h2>
           <p className="mt-1 text-sm leading-6 text-stone-600">
-            Nadiktujte jednu krátkou větu. Přepis se zobrazí jako návrh a do
-            názvu se zapíše až po potvrzení.
+            Název můžete zadat ručně nebo nadiktovat. Uloží se až po potvrzení.
           </p>
         </div>
         <p className="text-xs leading-5 text-stone-500 sm:max-w-xs sm:text-right">
@@ -281,8 +293,8 @@ export function DictationControls({
 
       {disabled ? (
         <p className="mt-4 text-sm leading-6 text-stone-600">
-          Nejprve uložte nebo zrušte neuložené změny textu, aby diktování
-          názvu nepřepsalo obsah poznámky.
+          Nejprve uložte nebo zrušte neuložené změny textu, aby uložení názvu
+          nepřepsalo obsah poznámky.
         </p>
       ) : null}
 
@@ -300,6 +312,32 @@ export function DictationControls({
         </p>
       ) : null}
 
+      <div className="mt-4 space-y-2">
+        <label
+          className="block text-sm font-medium text-stone-800"
+          htmlFor="note-title-input"
+        >
+          Název poznámky
+        </label>
+        <input
+          className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-stone-950 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 disabled:cursor-not-allowed disabled:bg-stone-100"
+          disabled={isSaving}
+          id="note-title-input"
+          onChange={(event) => handleTitleChange(event.target.value)}
+          type="text"
+          value={titleInput}
+        />
+        <p
+          className={
+            titleOverLimit
+              ? "text-xs font-medium text-red-800"
+              : "text-xs text-stone-500"
+          }
+        >
+          {titleGraphemes} / {TITLE_MAX_GRAPHEMES} viditelných znaků.
+        </p>
+      </div>
+
       <div className="mt-4 flex flex-wrap gap-2">
         <button
           className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900 disabled:cursor-not-allowed disabled:bg-stone-300 disabled:text-stone-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
@@ -307,7 +345,11 @@ export function DictationControls({
           onClick={handleStart}
           disabled={startDisabled}
         >
-          {proposal === null ? "Nadiktovat název" : "Nadiktovat znovu"}
+          {busy
+            ? "Diktování běží…"
+            : lastDictatedText !== null
+              ? "Nadiktovat znovu"
+              : "Nadiktovat název"}
         </button>
         {busy ? (
           <button
@@ -319,26 +361,14 @@ export function DictationControls({
             {isStopping ? "Ukončuji…" : "Stop"}
           </button>
         ) : null}
-        {proposal !== null ? (
-          <>
-            <button
-              className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900 disabled:cursor-not-allowed disabled:bg-stone-300 disabled:text-stone-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
-              type="button"
-              onClick={() => void handleUse()}
-              disabled={useDisabled}
-            >
-              {isSaving ? "Ukládám…" : "Použít název"}
-            </button>
-            <button
-              className="rounded-lg border border-stone-300 px-4 py-2 text-sm font-semibold text-stone-800 hover:bg-stone-100 disabled:cursor-not-allowed disabled:text-stone-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
-              type="button"
-              onClick={handleCancel}
-              disabled={isSaving}
-            >
-              Zrušit
-            </button>
-          </>
-        ) : null}
+        <button
+          className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900 disabled:cursor-not-allowed disabled:bg-stone-300 disabled:text-stone-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+          type="button"
+          onClick={() => void handleSave()}
+          disabled={saveDisabled}
+        >
+          {isSaving ? "Ukládám…" : "Uložit název"}
+        </button>
       </div>
 
       <dl className="mt-4 grid gap-2 text-sm text-stone-700">
@@ -363,24 +393,6 @@ export function DictationControls({
             {partialTranscript || "Čekám na řeč…"}
           </p>
         </div>
-      ) : null}
-
-      {proposal !== null ? (
-        <div className="mt-4" data-testid="title-proposal">
-          <p className="text-sm font-medium text-stone-700">Navržený název:</p>
-          <p className="mt-1 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-lg font-semibold text-emerald-950">
-            {proposal.text}
-          </p>
-        </div>
-      ) : null}
-
-      {proposalStale ? (
-        <p
-          className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-950"
-          role="alert"
-        >
-          Poznámka se mezitím změnila. Nadiktujte název znovu.
-        </p>
       ) : null}
 
       {errorMessage ? (

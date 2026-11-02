@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useState } from "react";
 
 import {
   NoteApiError,
@@ -11,10 +11,6 @@ import {
   restoreNote,
   type NoteSummary,
 } from "@/lib/notes/client";
-import {
-  TITLE_MAX_GRAPHEMES,
-  countGraphemes,
-} from "@/lib/notes/limits";
 
 interface NoteListProps {
   readonly mode: "active" | "trash";
@@ -30,51 +26,25 @@ function pageHref(mode: NoteListProps["mode"], page: number): string {
 
 export function NoteList({ mode, items, page, hasNext }: NoteListProps) {
   const router = useRouter();
-  const [title, setTitle] = useState("");
-  const [contentMd, setContentMd] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
 
-  async function handleCreate(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function handleCreate() {
     setError(null);
     setStatus(null);
-
-    const trimmedTitle = title.trim();
-    if (!trimmedTitle) {
-      setError("Zadejte název poznámky.");
-      return;
-    }
-
-    if (countGraphemes(trimmedTitle) > TITLE_MAX_GRAPHEMES) {
-      setError(
-        `Název může mít nejvýše ${TITLE_MAX_GRAPHEMES} viditelných znaků.`,
-      );
-      return;
-    }
-
     setIsCreating(true);
 
     try {
-      await createNote({ title: trimmedTitle, contentMd });
-      setTitle("");
-      setContentMd("");
-      setStatus("Poznámka byla vytvořena.");
-
-      if (page > 1) {
-        router.push("/notes");
-      } else {
-        router.refresh();
-      }
+      const created = await createNote({ title: "", contentMd: "" });
+      router.push(`/notes/${created.id}`);
     } catch (createError) {
       setError(
         createError instanceof NoteApiError
           ? createError.message
           : "Poznámku se nepodařilo vytvořit.",
       );
-    } finally {
       setIsCreating(false);
     }
   }
@@ -112,67 +82,19 @@ export function NoteList({ mode, items, page, hasNext }: NoteListProps) {
     ? "Zkuste předchozí stránku."
     : mode === "trash"
       ? "Smazané poznámky se zde objeví a můžete je obnovit."
-      : "Vytvořte první poznámku pomocí formuláře výše.";
+      : "Vytvořte první poznámku tlačítkem Nová poznámka.";
 
   return (
     <div className="space-y-8">
       {mode === "active" ? (
-        <form
-          className="space-y-4 rounded-2xl border border-stone-200 bg-white p-6"
-          onSubmit={handleCreate}
+        <button
+          className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={isCreating}
+          onClick={() => void handleCreate()}
+          type="button"
         >
-          <h2 className="text-xl font-semibold text-stone-950">Nová poznámka</h2>
-
-          <div className="space-y-2">
-            <label
-              className="block text-sm font-medium text-stone-800"
-              htmlFor="new-note-title"
-            >
-              Název
-            </label>
-            <input
-              className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-stone-950 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
-              disabled={isCreating}
-              id="new-note-title"
-              onChange={(event) => setTitle(event.target.value)}
-              required
-              type="text"
-              value={title}
-            />
-            <p className="text-xs text-stone-500">
-              Nejvýše {TITLE_MAX_GRAPHEMES} viditelných znaků.
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <label
-              className="block text-sm font-medium text-stone-800"
-              htmlFor="new-note-content"
-            >
-              Obsah
-            </label>
-            <textarea
-              aria-describedby="new-note-content-hint"
-              className="min-h-32 w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-stone-950 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
-              disabled={isCreating}
-              id="new-note-content"
-              onChange={(event) => setContentMd(event.target.value)}
-              rows={5}
-              value={contentMd}
-            />
-            <p className="text-xs text-stone-500" id="new-note-content-hint">
-              Obsah je Markdown. Prázdný obsah je povolený.
-            </p>
-          </div>
-
-          <button
-            className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={isCreating}
-            type="submit"
-          >
-            {isCreating ? "Vytvářím…" : "Vytvořit poznámku"}
-          </button>
-        </form>
+          {isCreating ? "Vytvářím…" : "Nová poznámka"}
+        </button>
       ) : null}
 
       {error ? (

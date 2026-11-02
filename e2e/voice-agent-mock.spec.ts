@@ -12,6 +12,7 @@ import {
   GeminiLiveSocketDouble,
 } from "../tests/helpers/webrtc-double";
 import { GEMINI_LIVE_SESSION_MAX_SECONDS } from "../src/lib/voice-agent/gemini-session-shared";
+import { createNoteViaApi } from "./helpers/create-note";
 
 test.setTimeout(180_000);
 
@@ -104,20 +105,7 @@ async function revisionReasons(noteId: string): Promise<string[]> {
 async function createNote(page: Page, title: string): Promise<string> {
   const marker = `zvonek${randomUUID().replace(/-/gu, "").slice(0, 10)}`;
 
-  await page.goto("/notes");
-  await page.getByLabel("Název").fill(`${title} ${marker}`);
-  await page
-    .getByLabel("Obsah")
-    .fill(`Migrační poznámka pro hlasového asistenta.\n\nMarker ${marker}.`);
-  await page.getByRole("button", { name: "Vytvořit poznámku" }).click();
-  await page.getByRole("link", { name: `${title} ${marker}`, exact: true }).click();
-  await expect(page).toHaveURL(/\/notes\/[0-9a-f-]+$/u);
-
-  const noteId = page.url().split("/").pop();
-
-  if (!noteId) {
-    throw new Error("ID vytvořené poznámky se nepodařilo zjistit.");
-  }
+  const noteId = await createNoteViaApi(page, `${title} ${marker}`, `Migrační poznámka pro hlasového asistenta.\n\nMarker ${marker}.`);
 
   createdNoteId = noteId;
   return noteId;

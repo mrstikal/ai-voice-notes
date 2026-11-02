@@ -2,25 +2,19 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useState } from "react";
 
 import {
   NoteApiError,
   deleteNote,
   formatCzechDateTime,
-  updateNote,
   type NoteDetail,
 } from "@/lib/notes/client";
-import {
-  TITLE_MAX_GRAPHEMES,
-  countGraphemes,
-} from "@/lib/notes/limits";
 
 import { ExportMenu } from "./ExportMenu";
 
 interface NoteHeaderProps {
   readonly note: NoteDetail;
-  readonly onNoteUpdated?: (note: NoteDetail) => void;
 }
 
 function conflictMessage(error: NoteApiError): string {
@@ -31,74 +25,14 @@ function conflictMessage(error: NoteApiError): string {
   return `${error.message} Aktuální verze: ${error.latestVersion}.`;
 }
 
-export function NoteHeader({ note, onNoteUpdated }: NoteHeaderProps) {
+export function NoteHeader({ note }: NoteHeaderProps) {
   const router = useRouter();
-  const [isRenaming, setIsRenaming] = useState(false);
-  const [newTitle, setNewTitle] = useState(note.title);
-  const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
-
-  function openRename() {
-    setNewTitle(note.title);
-    setError(null);
-    setStatus(null);
-    setIsRenaming(true);
-  }
-
-  async function handleRename(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-    setStatus(null);
-
-    const trimmedTitle = newTitle.trim();
-    if (!trimmedTitle) {
-      setError("Zadejte název poznámky.");
-      return;
-    }
-
-    if (countGraphemes(trimmedTitle) > TITLE_MAX_GRAPHEMES) {
-      setError(
-        `Název může mít nejvýše ${TITLE_MAX_GRAPHEMES} viditelných znaků.`,
-      );
-      return;
-    }
-
-    if (trimmedTitle === note.title) {
-      setIsRenaming(false);
-      return;
-    }
-
-    setIsSaving(true);
-
-    try {
-      const updated = await updateNote(note.id, {
-        title: trimmedTitle,
-        contentMd: note.contentMd,
-        expectedVersion: note.version,
-      });
-
-      setNewTitle(updated.title);
-      setIsRenaming(false);
-      setStatus("Název byl uložen.");
-      onNoteUpdated?.(updated);
-      router.refresh();
-    } catch (renameError) {
-      setError(
-        renameError instanceof NoteApiError
-          ? conflictMessage(renameError)
-          : "Název se nepodařilo uložit.",
-      );
-    } finally {
-      setIsSaving(false);
-    }
-  }
 
   async function handleDelete() {
     setError(null);
-    setStatus(null);
     setIsDeleting(true);
 
     try {
@@ -145,21 +79,11 @@ export function NoteHeader({ note, onNoteUpdated }: NoteHeaderProps) {
 
         <div className="flex flex-wrap gap-2">
           <ExportMenu noteId={note.id} />
-          {!isRenaming ? (
-            <button
-              className="rounded-lg border border-stone-300 px-3 py-2 text-sm font-semibold text-stone-800 hover:bg-stone-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
-              onClick={openRename}
-              type="button"
-            >
-              Přejmenovat
-            </button>
-          ) : null}
           {!confirmingDelete ? (
             <button
               className="rounded-lg border border-red-300 px-3 py-2 text-sm font-semibold text-red-800 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700"
               onClick={() => {
                 setError(null);
-                setStatus(null);
                 setConfirmingDelete(true);
               }}
               type="button"
@@ -169,51 +93,6 @@ export function NoteHeader({ note, onNoteUpdated }: NoteHeaderProps) {
           ) : null}
         </div>
       </div>
-
-      {isRenaming ? (
-        <form
-          className="mt-5 flex flex-col gap-3 rounded-xl border border-stone-200 bg-white p-4 sm:flex-row sm:items-end"
-          onSubmit={handleRename}
-        >
-          <div className="flex-1 space-y-2">
-            <label
-              className="block text-sm font-medium text-stone-800"
-              htmlFor="rename-note-title"
-            >
-              Nový název
-            </label>
-            <input
-              autoFocus
-              className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-stone-950 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
-              id="rename-note-title"
-              onChange={(event) => setNewTitle(event.target.value)}
-              required
-              type="text"
-              value={newTitle}
-            />
-            <p className="text-xs text-stone-500">
-              Nejvýše {TITLE_MAX_GRAPHEMES} viditelných znaků.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <button
-              className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={isSaving}
-              type="submit"
-            >
-              {isSaving ? "Ukládám…" : "Uložit název"}
-            </button>
-            <button
-              className="rounded-lg border border-stone-300 px-4 py-2 text-sm font-semibold text-stone-800 hover:bg-stone-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={isSaving}
-              onClick={() => setIsRenaming(false)}
-              type="button"
-            >
-              Zrušit
-            </button>
-          </div>
-        </form>
-      ) : null}
 
       {confirmingDelete ? (
         <div className="mt-5 rounded-xl border border-red-200 bg-red-50 p-4">
@@ -250,16 +129,6 @@ export function NoteHeader({ note, onNoteUpdated }: NoteHeaderProps) {
           role="alert"
         >
           {error}
-        </p>
-      ) : null}
-
-      {status ? (
-        <p
-          aria-live="polite"
-          className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900"
-          role="status"
-        >
-          {status}
         </p>
       ) : null}
 

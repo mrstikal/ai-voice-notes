@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { createNoteViaApi } from "./helpers/create-note";
+
 test.setTimeout(120_000);
 
 let createdNoteId: string | undefined;
@@ -61,13 +63,7 @@ test("visual and source editor, explicit save, reload, and source-only safety", 
 }) => {
   const title = `Editor E2E ${Date.now()}`;
 
-  await page.goto("/notes");
-  await page.getByLabel("Název").fill(title);
-  await page.getByLabel("Obsah").fill("");
-  await page.getByRole("button", { name: "Vytvořit poznámku" }).click();
-  await page.getByRole("link", { name: title, exact: true }).click();
-  await expect(page).toHaveURL(/\/notes\/[0-9a-f-]+$/);
-  createdNoteId = page.url().split("/").pop();
+  createdNoteId = await createNoteViaApi(page, title, "");
 
   const source = page.getByLabel("Obsah (Markdown)");
   await expect(source).toBeVisible();

@@ -300,6 +300,23 @@ beforeEach(() => {
         });
       }
 
+      if (url === `/api/notes/${NOTE_ID}` && init?.method === "PATCH") {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        patchCalls.push({ url, body });
+
+        return jsonResponse({
+          ...baseNote,
+          contentMd: String(body.contentMd ?? baseNote.contentMd),
+          title: String(body.title),
+          updatedAt: "2026-10-26T12:00:00.000Z",
+          version: Number(body.expectedVersion) + 1,
+        });
+      }
+
+      if (url === `/api/notes/${NOTE_ID}` && init?.method === "GET") {
+        return jsonResponse(baseNote);
+      }
+
       return jsonResponse(
         { error: { code: "not_found", message: "Nenalezeno." } },
         404,
@@ -385,6 +402,10 @@ describe("DictationControls title capture", () => {
     await waitFor(() =>
       expect(scribeInstances[0]?.disconnect).toHaveBeenCalledTimes(1),
     );
+    expect(
+      (within(container).getByRole("textbox", { name: "Název poznámky" }) as HTMLInputElement)
+        .value,
+    ).toBe("Původní název");
     expect(patchCalls).toHaveLength(0);
     expect(onNoteUpdated).not.toHaveBeenCalled();
     expect(sessionStorage.length).toBe(0);
@@ -416,7 +437,10 @@ describe("DictationControls title capture", () => {
       );
     });
 
-    expect(within(container).queryByTestId("title-proposal")).toBeNull();
+    expect(
+      (within(container).getByRole("textbox", { name: "Název poznámky" }) as HTMLInputElement)
+        .value,
+    ).toBe("Původní název");
     expect(patchCalls).toHaveLength(0);
     expect(
       within(container).getByRole("button", { name: "Stop" }),
@@ -427,13 +451,14 @@ describe("DictationControls title capture", () => {
     });
 
     await waitFor(() =>
-      expect(within(container).getByTestId("title-proposal").textContent).toContain(
-        "Nový název",
-      ),
+      expect(
+        (within(container).getByRole("textbox", { name: "Název poznámky" }) as HTMLInputElement)
+          .value,
+      ).toBe("Nový název"),
     );
   });
 
-  it("persists a confirmed title once with a voice revision", async () => {
+  it("persists a dictated title once with a voice revision", async () => {
     const { container } = renderControls();
     await startDictation(container);
 
@@ -442,16 +467,17 @@ describe("DictationControls title capture", () => {
     });
 
     await waitFor(() =>
-      expect(within(container).getByTestId("title-proposal").textContent).toContain(
-        "Nadiktovaný název",
-      ),
+      expect(
+        (within(container).getByRole("textbox", { name: "Název poznámky" }) as HTMLInputElement)
+          .value,
+      ).toBe("Nadiktovaný název"),
     );
 
-    const useButton = within(container).getByRole("button", {
-      name: "Použít název",
+    const saveButton = within(container).getByRole("button", {
+      name: "Uložit název",
     });
-    fireEvent.click(useButton);
-    fireEvent.click(useButton);
+    fireEvent.click(saveButton);
+    fireEvent.click(saveButton);
 
     await waitFor(() => expect(patchCalls).toHaveLength(1));
     expect(patchCalls[0]?.url).toBe(`/api/notes/${NOTE_ID}/title`);
@@ -463,32 +489,29 @@ describe("DictationControls title capture", () => {
     await waitFor(() =>
       expect(within(container).getByText("Název byl uložen.")).toBeTruthy(),
     );
-    expect(
-      within(container).queryByRole("button", { name: "Použít název" }),
-    ).toBeNull();
   });
 
-  it("leaves the title unchanged on Cancel", async () => {
+  it("saves a manually typed title with a manual revision", async () => {
     const { container } = renderControls();
-    await startDictation(container);
+    const input = within(container).getByRole("textbox", {
+      name: "Název poznámky",
+    }) as HTMLInputElement;
 
-    act(() => {
-      scribeInstances[0]?.emitCommitted("Nadiktovaný název");
-    });
-    await waitFor(() =>
-      expect(within(container).getByTestId("title-proposal")).toBeTruthy(),
-    );
+    fireEvent.change(input, { target: { value: "Ruční název" } });
+    expect(patchCalls).toHaveLength(0);
 
     fireEvent.click(
-      within(container).getByRole("button", { name: "Zrušit" }),
+      within(container).getByRole("button", { name: "Uložit název" }),
     );
 
-    expect(patchCalls).toHaveLength(0);
-    expect(onNoteUpdated).not.toHaveBeenCalled();
-    expect(within(container).queryByTestId("title-proposal")).toBeNull();
-    expect(
-      within(container).getByText("Návrh názvu byl zrušen."),
-    ).toBeTruthy();
+    await waitFor(() => expect(patchCalls).toHaveLength(1));
+    expect(patchCalls[0]?.url).toBe(`/api/notes/${NOTE_ID}`);
+    expect(patchCalls[0]?.body).toEqual({
+      title: "Ruční název",
+      contentMd: "Text poznámky",
+      expectedVersion: 1,
+    });
+    expect(onNoteUpdated).toHaveBeenCalledTimes(1);
   });
 
   it("shows Czech permission guidance for the SDK's normalized error", async () => {
@@ -603,16 +626,8 @@ describe("DictationControls title capture", () => {
     expect(locks.heldNames.size).toBe(0);
   });
 
-  it("refuses a stale proposal after the note changes", async () => {
+  it("updates an untouched title input when the note title changes", async () => {
     const { container, rerender } = renderControls();
-    await startDictation(container);
-
-    act(() => {
-      scribeInstances[0]?.emitCommitted("Nadiktovaný název");
-    });
-    await waitFor(() =>
-      expect(within(container).getByTestId("title-proposal")).toBeTruthy(),
-    );
 
     rerender(
       <DictationControls
@@ -623,13 +638,29 @@ describe("DictationControls title capture", () => {
 
     await waitFor(() =>
       expect(
-        within(container).getByText(/Poznámka se mezitím změnila/u),
-      ).toBeTruthy(),
+        (within(container).getByRole("textbox", { name: "Název poznámky" }) as HTMLInputElement)
+          .value,
+      ).toBe("Jiný název"),
     );
-    const useButton = within(container).getByRole("button", {
-      name: "Použít název",
-    }) as HTMLButtonElement;
-    expect(useButton.disabled).toBe(true);
+    expect(patchCalls).toHaveLength(0);
+  });
+
+  it("keeps a dirty title input when the note changes externally", async () => {
+    const { container, rerender } = renderControls();
+    const input = within(container).getByRole("textbox", {
+      name: "Název poznámky",
+    }) as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: "Rozpracovaný název" } });
+
+    rerender(
+      <DictationControls
+        note={{ ...baseNote, title: "Jiný název", version: 2 }}
+        onNoteUpdated={onNoteUpdated}
+      />,
+    );
+
+    expect(input.value).toBe("Rozpracovaný název");
     expect(patchCalls).toHaveLength(0);
   });
 
@@ -646,7 +677,10 @@ describe("DictationControls title capture", () => {
         within(container).getByText(/maximum je/u),
       ).toBeTruthy(),
     );
-    expect(within(container).queryByTestId("title-proposal")).toBeNull();
+    expect(
+      (within(container).getByRole("textbox", { name: "Název poznámky" }) as HTMLInputElement)
+        .value,
+    ).toBe("Původní název");
     expect(patchCalls).toHaveLength(0);
     expect(onNoteUpdated).not.toHaveBeenCalled();
   });

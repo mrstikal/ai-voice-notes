@@ -5,6 +5,7 @@ import {
   assertTestDatabaseTargets,
   loadTestEnvironment,
 } from "../scripts/test-db-guard";
+import { createNoteViaApi } from "./helpers/create-note";
 
 test.setTimeout(120_000);
 
@@ -54,18 +55,7 @@ async function createNote(
   title: string,
   content: string,
 ): Promise<string> {
-  await page.goto("/notes");
-  await page.getByLabel("Název").fill(title);
-  await page.getByLabel("Obsah").fill(content);
-  await page.getByRole("button", { name: "Vytvořit poznámku" }).click();
-  await page.getByRole("link", { name: title, exact: true }).click();
-  await expect(page).toHaveURL(/\/notes\/[0-9a-f-]+$/);
-
-  const noteId = page.url().split("/").pop();
-
-  if (!noteId) {
-    throw new Error("ID poznámky se nepodařilo zjistit.");
-  }
+  const noteId = await createNoteViaApi(page, title, content);
 
   createdNoteId = noteId;
   return noteId;
