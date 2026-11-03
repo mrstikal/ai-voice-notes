@@ -1,109 +1,324 @@
 # AI Voice Notes
 
-Local, single-user Czech voice-notes proof of concept. The UI, voice commands,
-and user-facing errors are Czech; code and documentation are English.
+Voice models have taken a major leap forward recently, and that let me fulfill
+an old dream. When my assistant used to painstakingly transcribe my notes from
+a voice recorder, I wished there were something that could handle the entire
+process in one package. Today, that really is possible!
 
-This repository implements **P01-P54**, with P46 delivered as the approved Gemini Live replacement (P55/P55B implementation lineage), P47-P50 adding read/preview tools, P51-P52 the bounded voice controls and chained comparison, P53 honest in-memory metrics and P54 the five-stage regression/release gate, in five stages:
+**TODO:** Turn this demo into a real application. At the very least, it will be
+useful to me.
 
-1. **Typed notes:** Czech CRUD, versioning/history, Markdown source/visual
-   editor, autosave/conflict recovery, Trash, DOCX/Markdown export and an
-   optional transaction-safe demo seed.
-2. **Voice:** ElevenLabs Scribe v2 realtime dictation with an exclusive
-   microphone lease, ElevenLabs/OpenRouter TTS with a validated local cache,
-   read-aloud and the experimental spoken Stop.
-3. **Approved AI:** bounded edits/proposals through P22-P24, cleanup,
-   summaries, tasks/tags, voice command interpretation, grounded Ask, and
-   P12 cost/usage admission. Every note mutation needs a visible diff and an
-   explicit confirmation.
-4. **Search and meetings:** offline Czech full-text search, optional semantic
-   and hybrid search, direct batch Scribe v2 meeting transcription, reviewed
-   meeting-note save and reviewed summary/decisions/tasks.
-5. **Voice agent:** a separate `/voice-agent` mode that uses Google Gemini Live
-   `gemini-3.8-live` over a direct browser WebSocket with a server-minted
-   one-use ephemeral token. It provides two-way Czech audio, selectable Gemini
-   voices, an exclusive microphone, transient subtitles and seven tools:
-   bounded full-text search, reading one explicitly selected note or section,
-   a paid-after-click summary, and preview-only task/edit proposals with a
-   confirmation check. It cannot access a note without that selection. A
-   proposal changes nothing until the user clicks Potvrdit in the panel; that
-   click delegates once to the P24 transaction and writes at most one `ai`
-   revision, undoable from note history. The model never applies or confirms a
-   proposal, and rejecting one leaves the note untouched. Barge-in clears the
-   scheduled reply on speech, the microphone can be muted or opened only while
-   a push-to-talk button is held, captions can be hidden, and the session is
-   capped at 9 minutes with a visible cost warning. Czech output is
-   pinned through Czech-only `systemInstruction` plus a Czech ASR hint, not the
-   `languageCode` parameter. After a previously observed Spanish switch, the
-   user re-tested with a real microphone, confirmed Czech replies and accepted
-   P46; live Gemini tool-call and P50 approval paths remain unverified.
-   Latency and formal multi-turn quality remain unmeasured.
-   An explicit `Řetězený režim` comparison path uses ElevenLabs Scribe for one
-   push-to-talk turn, OpenRouter for the bounded intent and summary, and
-   ElevenLabs TTS for the reply. It never needs an OpenAI key or a
-   Gemini/tool session; edits still require the same P23/P24 click and Undo.
-   Its 10-minute session, provider split, exclusive microphone, and unknown
-   uncapped cost are disclosed on the page.
+I also used this project to experiment with more detailed planning and manually
+approved steps. The goal is to help developers understand the application better
+and avoid mistakes along the way.
 
-P44 adds the four-stage offline integration, privacy/recovery audit and this
-quality report. P45 added the OpenAI realtime bootstrap, which was retired; P46
-is delivered as the Gemini Live replacement (9-minute sessions, selectable
-voice, transient Czech audio/subtitles), P47 adds session-bound search and
-selected-note fetch, P48 adds bounded sections and approved summaries, P49-P50
-add preview-only proposals plus an explicit on-screen confirmation that applies
-at most one undoable `ai` revision, P51 adds barge-in/mute/push-to-talk/cost
-controls, P52 adds the chained STT -> LLM -> TTS comparison, P53 adds honest
-in-memory metrics and P54 adds the five-stage offline regression gate and the
-reproducible release instructions below.
-Typed notes, search and exports work with **no AI keys** and no provider
-request; provider features are visibly disabled until a separately authorized
-live check. `AI_TEST_MODE=1` is test-only and refuses real credentials.
+## What this demo demonstrates
 
-## Prerequisites
+AI Voice Notes connects **spoken ideas, editable notes, and useful knowledge**
+in one local, single-user application. It demonstrates how speech recognition,
+structured AI assistance, search, speech synthesis, and a conversational voice
+agent can work together while keeping the user in control of saved changes.
 
-- Linux or WSL with Docker Engine and Docker Compose v2
-- [nvm](https://github.com/nvm-sh/nvm) and the Node.js version from `.nvmrc`
-  (Node.js >= 22.19 is required)
-- pnpm 10.33.0 (the pinned `packageManager` in `package.json`)
+The main journey is simple: dictate a Czech note, review the transcript, turn
+it into a clearer note with summaries and tasks, find it again, and listen to
+it or discuss it with the assistant. A separate meeting workflow turns an
+audio recording into a reviewed transcript and suggested meeting notes.
+
+This is also a demo of the engineering around AI: explicit cost consent,
+bounded inputs, validated model output, visible change previews, versioned
+saves, and Undo. A model suggesting a change is not permission to apply it.
+
+The **interface, voice commands, and user-facing errors are Czech**. Code and
+documentation are English. Notes live in a local PostgreSQL database; optional
+AI features send the relevant audio or text to external providers. Local does
+not mean that the AI models run on your computer.
+
+**No AI keys are needed** to write and organize notes, use full-text search,
+restore history, or export Markdown and DOCX. The app has no authentication and
+must stay on loopback, not be exposed as a public or shared service.
+
+## Contents
+
+- [Explore the application](#explore-the-application)
+- [Technologies and AI models](#technologies-and-ai-models)
+- [Run locally](#run-locally)
+- [Configuration](#configuration)
+- [Privacy and costs](#privacy-and-costs)
+- [Data, limits, and backups](#data-limits-and-backups)
+- [Development and testing](#development-and-testing)
+- [Troubleshooting](#troubleshooting)
+
+## Explore the application
+
+### 1. Capture and edit a note
+
+Open **Poznámky** (`/notes`), create a note, and use the **Obsah poznámky** tab
+to write in the visual editor or edit the Markdown source. Both views use the
+same content; Markdown is the stored source of truth, not a generated export.
+This makes notes portable and lets you inspect what the editor actually saves.
+
+Typing is autosaved after about 800 ms of inactivity. **Uložit** creates a named
+history checkpoint instead of adding a revision for every keystroke. An
+unacknowledged draft is also kept in the current tab's `sessionStorage` and can
+be recovered after a reload. If another tab changes the same note, saving stops
+and shows both versions rather than silently overwriting either one.
+
+With an ElevenLabs key, you can dictate the title or body. Interim recognition
+appears as a temporary preview; committed body text enters the editor's draft
+and autosave flow. Title dictation prepares a title for explicit application.
+Choose insertion at the cursor or at the end, and use Stop when finished.
+Dictation sessions default to a three-minute limit.
+
+Czech formatting commands such as `nový odstavec`, `nový řádek`, `nadpis`,
+`tučně`, `konec tučně`, `začni úkoly`, `další úkol`, and `konec úkolů` turn
+recognized speech into document structure. These commands are parsed locally,
+not sent to a second language model for interpretation.
+
+**What this demonstrates:** streaming speech recognition can feed an ordinary,
+recoverable editor without making transient recognition results permanent.
+
+### 2. Turn raw notes into something useful
+
+The note's tabs separate focused actions instead of hiding them in one large
+AI prompt:
+
+| Tab | What it does | Why it is useful |
+|---|---|---|
+| **Vyčistit diktát** | Suggests cleanup of one selected plain-text paragraph, with checks that preserve numbers and supplied proper names | Removes verbal clutter while keeping the original available in history |
+| **Shrnutí poznámky** | Generates an unsaved Czech summary of the note or a selected passage | Lets you review or listen to the gist before deciding whether to insert it |
+| **Získat úkoly z pasáže** | Suggests editable tasks, flags existing duplicates, and lets you choose which to insert | Converts prose into a practical checklist without accepting every suggestion |
+| **Kategorie a tagy** | Edits metadata manually or offers AI suggestions for review | Organizes notes without requiring AI for ordinary tagging |
+| **AI úprava** | Interprets a typed or dictated instruction as a bounded editing operation | Demonstrates natural-language commands without granting unrestricted document access |
+| **Stav úkolů hlasem** | Parses Czech task-state commands and prepares a change | Lets you manage a checklist by voice while retaining confirmation |
+| **Ruční strukturovaný návrh úpravy** | Prepares the same kind of bounded change without an LLM | Makes the preview and approval mechanism usable independently of a model |
+| **Historie** | Shows named revisions, diffs, Undo, and restoration previews | Makes reviewed changes traceable and recoverable |
+
+AI content edits follow **request -> validate -> preview -> confirm -> save**.
+If a target is ambiguous, choose the intended occurrence. A proposal is tied to
+the saved note version and expires; a stale proposal cannot overwrite newer
+text. Clicking **Potvrdit** applies it once and creates a revision. Rejecting
+it leaves the note untouched. AI tag/category suggestions use a separate,
+explicit metadata-save action rather than a body-text diff.
+
+Generating a summary or task suggestion does not insert it automatically.
+Save outstanding editor changes before using actions that depend on the saved
+version. AI output can still be wrong: review meaning, names, numbers, and
+tasks, not just the formatting of the diff.
+
+**What this demonstrates:** the model proposes; deterministic application code
+validates scope and version; the user authorizes the final write.
+
+### 3. Listen, find, and ask
+
+**Čtení nahlas** reads a saved note, selected passage, paragraph, tasks, or a
+generated summary. Choose a voice, review the cost notice, and start playback.
+Long text is divided into sections and synthesized one section at a time.
+Pause/resume, previous/next, and Stop keep playback under your control. A local
+audio cache avoids another synthesis request for an unchanged cached section.
+
+An optional **spoken Stop** listens for a standalone Czech `stop` during
+playback. It is off by default, uses a separate paid Scribe microphone session,
+and is experimental. Use headphones and keep the on-screen Stop available.
+
+Open **Vyhledávání** (`/search`) to compare three retrieval approaches:
+
+| Mode | How it works | When to use it |
+|---|---|---|
+| **Textově** | Local PostgreSQL full-text search across titles, visible text, and tags; ignores case and diacritics | You remember the words, want a quoted phrase, or want provider-free search |
+| **Významově** | Embeds the query and compares it with indexed note passages using vector similarity | You remember the idea but not the exact wording |
+| **Kombinovaně** | Fuses keyword and semantic rankings using reciprocal rank fusion | You want to compare results that balance wording and meaning |
+
+Full-text search uses word matching, not Czech stemming; related inflections
+are not necessarily the same term. For phrase matching with a fixed word order,
+enclose the whole query in quotation marks. Empty queries do not list every
+note, and Trash is excluded.
+
+For semantic or hybrid search, first use the index panel to estimate and
+explicitly approve an embedding batch. Saving a note updates local search data
+but **never sends it for embedding automatically**. Edited notes need fresh
+vectors. Each paid search also requires confirmation; simply opening the page,
+typing, or refreshing does not trigger a paid query.
+
+The question-answering panel in **Významově** and **Kombinovaně** builds an
+answer from retrieved note passages and links claims to their sources. It
+requires a local textual anchor before calling a provider; without sufficient
+evidence it refuses to answer. Ready embeddings can enrich retrieval, but
+semantic-only matches do not bypass that textual gate. Citations help you check
+an answer; they are not a guarantee that the claims are true.
+
+**What this demonstrates:** speech output, keyword retrieval, embeddings,
+hybrid ranking, and retrieval-augmented answers solve different parts of the
+same knowledge workflow.
+
+### 4. Convert a meeting into reviewed notes
+
+Open **Zápis ze schůzky** (`/meetings`). The workflow deliberately separates
+local preparation, paid transcription, and persistence:
+
+1. **Record or choose audio.** Capture microphone audio in the browser or select
+   an MP3, PCM WAV, or WebM-Opus file. Default limits are 15 minutes and 25 MiB.
+2. **Inspect locally.** The server checks the actual container, codec, and
+   duration with `ffprobe`. A filename or MIME label alone is not trusted. This
+   step makes no AI request and creates no note.
+3. **Approve transcription cost.** The file is revalidated and sent to direct
+   ElevenLabs batch Scribe v2. Recording or inspecting alone never starts a
+   paid transcription.
+4. **Review the transcript.** Correct the editable preview and speaker labels.
+   Labels appear only when the provider returns speaker information; they are
+   not verified real-world identities. You can download the transcript as `.txt`.
+5. **Save explicitly.** Reviewed text becomes one note or, when needed, up to
+   three numbered notes split at paragraph boundaries. Oversized input is
+   refused, not silently truncated. Repeated submission of the same save does
+   not create duplicate notes.
+6. **Request useful follow-ups.** For a saved meeting note, select the source
+   passage and request a summary/decisions or tasks. Summary and decisions use
+   two model requests; task extraction uses one. Each inserted section has its
+   own diff and confirmation. Work with each part separately for split meetings.
+
+**What this demonstrates:** batch transcription and speaker segmentation are
+only the beginning; review, safe storage, and selective extraction turn a
+recording into usable meeting notes without treating model output as fact.
+
+### 5. Compare two ways to build a voice assistant
+
+Open **Konverzační asistent** (`/voice-agent`) and choose the interaction mode.
+Neither mode starts on page load, and neither lets a model approve its own
+changes.
+
+| | Gemini Live | **Řetězený režim** (chained mode) |
+|---|---|---|
+| Audio path | Browser microphone -> Gemini Live -> spoken response | ElevenLabs Scribe -> OpenRouter LLM -> ElevenLabs speech synthesis via OpenRouter |
+| Interaction | Two-way Czech audio, selectable Gemini voices, transient captions, mute, push-to-talk, and barge-in | Typed commands or push-to-talk, one turn at a time, bounded intent interpretation, and a spoken reply |
+| Note access | Local full-text search, then explicit selection of one result before deeper reading or editing | Bounded search and one selected note per turn |
+| Changes | Preview-only task/edit tools; an on-screen click applies a proposal | The same reviewed proposal and history mechanism |
+| Default session limit | 9 minutes | 10 minutes |
+| Required keys | Gemini; OpenRouter additionally for an approved summary | ElevenLabs and OpenRouter; no Gemini key |
+
+In Live mode, the server creates a short-lived, single-use token. The browser
+then streams audio directly to Google over a constrained WebSocket; the
+long-lived Gemini API key never reaches the browser. The seven tools are
+`search_notes`, `get_note`, `read_note_section`, `summarize_note`, `add_todo`,
+`propose_edit`, and `confirm_edit`. Search results include short previews, but
+reading note content or preparing an edit requires your explicit note
+selection. Initial note reads are bounded excerpts, not an unrestricted
+library dump; section reads cover tasks, the last paragraph, or a marked passage.
+
+`summarize_note` asks for an additional cost-confirmation click before using
+OpenRouter. The generated summary is then sent to Gemini as conversation
+context. Despite its name, `confirm_edit` only checks a pending proposal;
+it cannot apply it. Only your **Potvrdit** click can save the change, and
+**Historie** can undo it. Speaking over the assistant clears queued reply audio;
+it does not grant approval to a pending change.
+
+Chained mode exposes the separate speech-to-text (STT), language-model (LLM),
+and text-to-speech (TTS) steps. Within a session, submit a typed command or hold
+the push-to-talk button for a voice turn, then review the reply and any proposed
+note change before continuing. This makes it easier to inspect intermediate
+text and compare a modular pipeline with direct live audio. Session statistics
+are in-memory observations and timing proxies, not a provider billing report
+or a claim that one architecture is always faster.
+
+**What this demonstrates:** conversational convenience can coexist with bounded
+tools, explicit data selection, and a human approval boundary.
+
+## Technologies and AI models
+
+### Application stack
+
+| Technology | Role and benefit in this demo |
+|---|---|
+| **Next.js 16, React 19, TypeScript 5.9** | Browser UI and server routes in one typed application; provider credentials and database writes stay behind server boundaries |
+| **Tailwind CSS 4** | Shared styling for the Czech interface and its editor, playback, preview, and settings controls |
+| **Tiptap 3, Markdown, unified/remark** | Visual editing over portable Markdown, with syntax-tree validation to prevent lossy conversion |
+| **PostgreSQL 17, pgvector, GIN full-text index** | Notes, revisions, usage, keyword search, and 1536-dimensional vectors in one transactional database |
+| **Drizzle ORM and SQL migrations** | Typed data access and reproducible schema changes; version checks protect against conflicting writes |
+| **Zod** | Runtime validation of request bodies and structured model responses; TypeScript types alone cannot validate external data |
+| **Web Audio, MediaRecorder, WebSocket, Web Locks** | Live PCM audio, meeting recording, streaming transport, and shared microphone coordination across tabs |
+| **FFmpeg / ffprobe** | Local inspection of real audio formats and duration before a paid upload |
+| **docx** | Local Word export from supported Markdown without a document-conversion service |
+| **Vitest, Testing Library, Playwright** | Unit, component, database, and browser checks, with provider doubles for reproducible offline tests |
+| **Docker Compose, Node.js, pnpm** | Repeatable local database setup and pinned runtime/package tooling |
+
+### Model roles
+
+| Model | Access path | Role and architectural benefit |
+|---|---|---|
+| **ElevenLabs Scribe v2 Realtime** (`scribe_v2_realtime`) | Direct ElevenLabs, using server-issued single-use tokens | Streams interim and committed Czech transcripts so dictation can appear while you speak |
+| **ElevenLabs Scribe v2** (`scribe_v2`) | Direct ElevenLabs batch API | Transcribes complete meeting files with word timing and speaker segmentation when returned by the provider |
+| **DeepSeek** (`deepseek/deepseek-v4.1-flash-1017`) | OpenRouter | Interprets bounded commands and generates cleanup, summaries, tasks, tags, decisions, and grounded claims; schema-constrained output can be validated before use |
+| **ElevenLabs speech synthesis** (`elevenlabs/eleven-v4-turbo`) | OpenRouter, not the direct ElevenLabs TTS API | Produces MP3 for read-aloud and chained replies; read-aloud uses sectioning and local caching, while chained reply audio is transient |
+| **OpenAI text-embedding-3-small** (`openai/text-embedding-3-small`) | OpenRouter, with 1536 output dimensions | Maps passages and queries into comparable vectors, enabling meaning-based retrieval rather than generating answers |
+| **Google Gemini Live** (`gemini-3.8-live`) | Direct Google token API and browser WebSocket | Handles two-way live audio and tool requests in one conversational session, providing a contrast to the separate STT -> LLM -> TTS pipeline |
+
+Read-aloud's voice selector includes `sarah` (the default), `george`, and other
+presets; Gemini has its own voice selector (default `Aoede`). These are separate
+voice systems. No direct OpenAI API key is required, including for embeddings
+routed through OpenRouter.
+
+The app pins these model contracts. An incompatible model, unavailable account
+entitlement, invalid response, or wrong embedding dimension blocks the feature
+with an explanation instead of silently selecting another model. The benefits
+above describe how the models are used, not a comparative quality or latency
+benchmark.
+
+## Run locally
+
+### Prerequisites
+
+- Linux or WSL with Docker Engine and Docker Compose v2.
+- [nvm](https://github.com/nvm-sh/nvm) and the Node.js version in `.nvmrc`
+  (22.22.2; the package requires at least 22.19).
+- pnpm 10.33.0, pinned in `package.json`.
+- A Chromium-family browser with microphone permission and Web Locks for voice
+  features. Browser recording additionally requires WebM-Opus support.
+- Host FFmpeg for meeting inspection and transcription, including file uploads.
+
+### First start
+
+Run these commands from the repository root. The migration command creates the
+schema in your development database; back up existing data before running it.
 
 ```bash
 nvm install
 nvm use
 corepack enable
-```
-
-## Local setup
-
-```bash
 pnpm install
 cp .env.example .env.local
-docker compose up -d db
+docker compose up -d --wait db
+pnpm db:migrate
 pnpm dev
 ```
 
-Open <http://127.0.0.1:3000>. The health endpoint is
-<http://127.0.0.1:3000/api/health>:
+Open <http://127.0.0.1:3000>. Start with typed notes and full-text search; all
+provider keys may remain empty. To try AI features, add only the needed keys to
+`.env.local` and restart the server. The provider account must permit the exact
+model and API used; having a key alone does not guarantee access.
 
-- `200 {"status":"ok"}` when PostgreSQL is reachable
-- `503` with an actionable Czech message when it is not
+Provider accounts and key management are available through
+[ElevenLabs](https://elevenlabs.io/), [OpenRouter](https://openrouter.ai/), and
+[Google AI Studio](https://aistudio.google.com/). You only need accounts for the
+features you choose to use.
 
-`pnpm dev` and `pnpm start` bind Next.js to the loopback address from
-`APP_ORIGIN` (default `127.0.0.1:3000`). The app is not reachable from another
-host by default and has no authentication, so do not expose it to a network.
+Optional: run `pnpm db:seed` to load 20 Czech sample notes for exploration.
+It replaces only notes in the `demo-v1:*` namespace, including edited or
+trashed demo notes, and leaves ordinary user notes alone. It never runs
+automatically during installation, startup, build, or migration.
 
-## Meetings and FFmpeg
+For a production build running locally:
 
-The meeting flow is inspect → paid batch transcription → editable preview →
-explicit save → optional reviewed summary/decisions/tasks. A transcript is never
-saved as a note implicitly, and AI suggestions are unsaved artifacts until a
-visible P22-P24 diff is confirmed.
+```bash
+pnpm build
+pnpm start
+```
 
-Meeting capture (`/meetings`) requires host FFmpeg executables on `PATH` from
-P41B onward. The server uses `ffprobe` against its own private temp file to
-verify the real container, audio codec and duration; a client filename or MIME
-label is never trusted. Missing or broken FFmpeg returns a Czech error before a
-file is accepted.
+Both `dev` and `start` bind to the loopback host and port in `APP_ORIGIN`.
+`/status` shows database health; `/api/health` returns
+`200 {"status":"ok"}` when PostgreSQL is reachable, or a Czech error with 503
+when it is not. Health is not a provider-account compatibility check.
 
-Ubuntu / WSL installation and detection:
+### FFmpeg for meetings
+
+On Ubuntu / WSL:
 
 ```bash
 sudo apt-get update
@@ -112,352 +327,200 @@ ffprobe -version
 ffmpeg -version
 ```
 
-If the host has no package privileges, a static Linux build may be unpacked and
-its `ffmpeg`/`ffprobe` placed in a user `PATH` directory such as
-`~/.local/bin`; verify both commands the same way. Do not commit binaries.
+Both executables must be on the server process's `PATH`. A static Linux build
+in a user directory such as `~/.local/bin` is an alternative when package
+installation is unavailable. Do not commit binaries. Meeting validation rejects
+unsupported containers, including Matroska even if it contains Opus.
 
-The accepted meeting inputs are MP3, WAV (PCM) and WebM-Opus. The direct
-ElevenLabs batch Scribe v2 documentation (checked 2026-10-29) lists MP3, WAV,
-WebM and Opus among supported audio formats; this app applies stricter local
-limits of 15 minutes and 25 MiB and rejects Matroska/other containers even when
-they contain Opus. Browser duration and size guards are UX only; `ffprobe`
-metadata is authoritative. P41B makes no provider call.
+## Configuration
 
-## Environment
-
-Copy `.env.example` to `.env.local`. Both `.env.local` and `.env.test.local` are
-gitignored. Provider keys stay empty until a later phase requires them and a
-live check is separately authorized.
+Use [`.env.example`](.env.example) as the complete configuration reference.
+`.env.local` and `.env.test.local` are gitignored; never commit real keys.
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `APP_ORIGIN` | Loopback origin with explicit port | `http://127.0.0.1:3000` |
-| `APP_ALLOW_FORWARDED_LOOPBACK` | Accept a different loopback Host/Origin port from a local port forwarder | `0` |
-| `DATABASE_URL` | Development PostgreSQL URL | compose `db` service |
-| `TEST_DATABASE_URL` | Isolated test PostgreSQL URL | compose `db-test` service |
-| `AI_TEST_MODE` | Test-only switch; leave empty normally | empty |
-| `ELEVENLABS_API_KEY` | Server-side ElevenLabs key; empty until an authorized live check | empty |
-| `OPENROUTER_API_KEY` | Server-side OpenRouter key for structured AI, TTS and embeddings; empty disables those features | empty |
-| `OPENROUTER_LLM_MODEL` | P21 structured-output model; changing it requires a new preflight and approval | `deepseek/deepseek-v4.1-flash-1017` |
-| `OPENROUTER_EMBEDDING_MODEL` | P36 embedding model; pinned to the 1536-dimension column | `openai/text-embedding-3-small` |
-| `GEMINI_API_KEY` | Server-side Gemini key for the voice agent; empty disables `/voice-agent` while typed notes and search keep working | empty |
-| `GEMINI_LIVE_MODEL` | Pinned Gemini Live model; a different value blocks the mode with a Czech reason | `gemini-3.8-live` |
-| `ELEVENLABS_API_BASE_URL` | ElevenLabs API endpoint; test mode requires a loopback mock | `https://api.elevenlabs.io` |
-| `GEMINI_API_BASE_URL` | Gemini token endpoint; test mode requires a loopback mock. Leave unset for a real provider | `https://generativelanguage.googleapis.com` |
-| `NOTE_MAX_CHARACTERS` | Maximum visible note characters | `20000` |
-| `MEETING_MAX_MINUTES` | Maximum meeting length | `15` |
-| `AI_REQUEST_BUDGET_USD` | Local estimated AI admission budget | `2.00` |
+| `APP_ORIGIN` | Loopback URL with an explicit port | `http://127.0.0.1:3000` |
+| `APP_ALLOW_FORWARDED_LOOPBACK` | Allow a local port forwarder to rewrite the loopback Host/Origin port | `0` |
+| `DATABASE_URL` | Development PostgreSQL connection | Local `db` service on port 5432 |
+| `TEST_DATABASE_URL` | Separate test PostgreSQL connection | Local `db-test` service on port 5433 |
+| `ELEVENLABS_API_KEY` | Direct realtime dictation and batch meeting transcription | Empty |
+| `OPENROUTER_API_KEY` | Structured AI, speech synthesis, and embeddings | Empty |
+| `GEMINI_API_KEY` | Direct Gemini Live conversation | Empty |
+| `OPENROUTER_LLM_MODEL` | Pinned structured-output model | `deepseek/deepseek-v4.1-flash-1017` |
+| `OPENROUTER_EMBEDDING_MODEL` | Pinned 1536-dimensional embedding model | `openai/text-embedding-3-small` |
+| `GEMINI_LIVE_MODEL` | Pinned live-audio model | `gemini-3.8-live` |
+| `NOTE_MAX_CHARACTERS` | Note-content limit, at most 20,000 graphemes | `20000` |
+| `MEETING_MAX_MINUTES` | Meeting duration limit | `15` |
+| `AI_REQUEST_BUDGET_USD` | Local estimated admission budget, not a provider spending cap | `2.00` |
+| `AI_TEST_MODE` | Guarded test harness only; leave empty for normal use | Empty |
 
-When `AI_TEST_MODE=1`, startup requires `DATABASE_URL` (and, when set,
-`TEST_DATABASE_URL`) to name a database ending with `_test`, a loopback
-`ELEVENLABS_API_BASE_URL` and `GEMINI_API_BASE_URL` with an explicit port, and
-exact dummy provider keys for any configured credential
-(`test-only-elevenlabs`, `test-only-openrouter`, `test-only-gemini`). Real keys
-are rejected before a provider client is constructed.
+TTS is pinned in code; `OPENROUTER_TTS_MODEL` is reserved and does not override
+it. Provider API base URLs should keep their normal defaults; loopback
+overrides exist for the test harness, not for changing providers.
 
-`APP_ORIGIN` is validated at startup. Only `127.0.0.1`, `localhost`, or `::1`
-with an explicit port is accepted; paths, credentials, and other hosts are
-rejected with a Czech error. Set `APP_ALLOW_FORWARDED_LOOPBACK=1` only when a
-local IDE or remote port forwarder rewrites the port (for example VS Code
-forwarding `3000` to `53508`); forwarded Host and Origin must still be loopback
-and use the same port.
+The example also lists operational limits for AI input/output, timeouts,
+uploads, caches, search batches, and rate limiting. `NEXT_PUBLIC_*` values are
+non-secret browser limits embedded at build time; change them before `pnpm dev`
+or `pnpm build`, not after a production build. Raising a limit is not a fix for
+an incompatible provider response.
 
-## Privacy, first-use notices and offline behavior
+`APP_ORIGIN` accepts only `127.0.0.1`, `localhost`, or `::1`, with an explicit
+port and no path or credentials. Use `APP_ALLOW_FORWARDED_LOOPBACK=1` only for a
+local IDE/port forwarder; forwarded Host and Origin must still be loopback and
+use the same port. This is not a public-deployment option.
 
-Typed note editing, Markdown conversion, full-text search, version history and
-exports are local: no provider call is made and no key is required. Provider
-features show Czech first-use notices on their page or in **Nastavení →
-Soukromí a náklady**; the same disclosure is repeated at the point of a paid
-action.
+Compose reads `DB_HOST_PORT` and `TEST_DB_HOST_PORT` from **`.env`**, not
+`.env.local`. If ports 5432/5433 are occupied, set replacements in a gitignored
+`.env` and update the connection URLs in `.env.local` and `.env.test.local`.
 
-| Feature | What leaves the machine | What the app stores |
+## Privacy and costs
+
+The core note editor, Markdown conversion, manual metadata, full-text search,
+history, Trash, and exports make no AI-provider requests. Provider-dependent
+actions disclose their inputs and costs in the UI. **Nastavení** (`/settings`)
+contains voice, model, cache, privacy, and usage information; **Rozpočet**
+(`/budget`) shows the local budget and usage ledger.
+
+| Feature | Data sent outside your machine | Local persistence |
 |---|---|---|
-| Dictation | Microphone audio streamed to ElevenLabs Scribe v2 realtime | Transient partial/committed text in the note draft; no audio or provider transcript table |
-| Meeting transcription | The selected meeting file uploaded once to ElevenLabs batch Scribe v2 | Temporary `0600` file under `.data/uploads`, unlinked after the request; only the reviewed note text is saved |
-| Read aloud | The selected note text to OpenRouter TTS | Validated MP3 and technical metadata in the local `.data/tts` cache |
-| AI edits/summary/tasks/Ask | The selected note text or bounded excerpt to OpenRouter | Note revisions after explicit confirmation; P12 usage metadata without prompts or note bodies |
-| Semantic search | Note chunks or the query to OpenRouter embeddings | Vectors and technical index state in PostgreSQL |
-| Voice agent (P46-P53) | The browser sends live 16 kHz microphone PCM directly to Google Gemini Live over a short-lived constrained WebSocket token; 24 kHz PCM audio and Czech transcriptions come back. The token is minted server-side; no long-lived key is in the browser. The agent may run a bounded full-text search, read one selected note/section, prepare a summary only after a cost click, and create preview-only proposals. An explicit `Potvrdit` click in the same live session delegates once to the P24 transaction and writes at most one undoable `ai` revision; the model never applies or confirms, and no unselected note is read. | The ephemeral token and tool `sessionId` exist only in browser/server memory; transient search results, selection, transcript and proposal preview live in React state; the process-local session holds the raw proposal nonce and selected-note gate; no long-lived key, audio recording, conversation, tool-session note body or model-applied note change persisted. The only note change is the clicked P24 apply and its `ai` revision. |
+| Dictation | Microphone audio to direct ElevenLabs Scribe | Committed text through the note draft/save flow; no raw recording |
+| Meeting transcription | Selected recording to direct ElevenLabs batch Scribe | Temporary upload file; reviewed text becomes notes only after Save |
+| Read-aloud | Selected text to OpenRouter speech synthesis | Validated MP3 and technical metadata cached under `.data/tts` |
+| Chained assistant | Microphone audio to ElevenLabs; commands, bounded note excerpts, and reply text to OpenRouter | Turn text and reply audio stay in memory; reply audio is not cached. Usage records and edit proposals can be stored locally; note changes require confirmation |
+| AI cleanup, edits, summaries, tasks, tags, decisions | Relevant bounded text or command to OpenRouter | Unconfirmed edit proposals may be stored for review; accepted changes and revisions are saved; derived suggestions are not automatically inserted |
+| Grounded answers | Question and retrieved bounded passages to OpenRouter | Technical usage metadata; no automatically created answer note |
+| Semantic indexing/search | Note chunks or query text to OpenRouter embeddings | Note vectors and index state in PostgreSQL; query text/vectors are not saved as notes |
+| Gemini Live | Microphone audio, requested search previews, explicitly selected note excerpts, tool results, and approved summaries to Google; summary generation also sends bounded source text to OpenRouter | Session audio, captions, search results, selections, and metrics stay in memory. Edit proposals may be stored locally; note changes require confirmation |
 
-ElevenLabs and OpenRouter process requests under their own retention policies;
-zero retention depends on the account/plan. The app does not claim provider-side
-zero retention and does not set provider logging flags it cannot verify. Keys
-stay server-side, are never written to logs, browser bundles, URLs or the usage
-ledger, and the local app has no authentication, so keep it on loopback.
+Long-lived keys stay server-side. Scribe and Gemini browser connections use
+short-lived credentials, not those keys. Meeting uploads use private temporary
+files under `.data/uploads` and are deleted after each request; audio is not
+part of a saved note. Recordings and unsaved transcript previews live in browser
+memory and are lost on navigation or reload. Save reviewed text or download the
+transcript before leaving; the app is not an audio archive.
 
-Raw HTML, unsafe links, tables, images and other unsupported Markdown make a
-note source-only: the source is preserved verbatim and visual/DOCX conversion is
-refused. The experimental spoken Stop is off by default and is not a guarantee.
-A simulated provider outage never deletes or rewrites a note.
+Google, ElevenLabs, and OpenRouter have their own processing and retention
+policies, including any upstream providers used by OpenRouter. This app does
+not promise provider-side zero retention. Obtain appropriate permission before
+recording other people or sending sensitive information.
 
-**No silent model switch:** the structured LLM, TTS and embedding models are
-pinned. A changed model, missing entitlement, wrong embedding dimension or
-provider error disables the feature with a Czech reason; it never falls back to
-an unapproved model or unstructured mutation. `AI_REQUEST_BUDGET_USD` is an
-app-side estimated admission budget, not a provider spending cap. Check
-`docs/QUALITY_REPORT.md` for measured vs `live unverified` capabilities and
-`docs/PROVIDER_SMOKE_TESTS.md` for the exact compatibility gates.
+For operations covered by the usage ledger, the server reserves an estimate
+before calling the provider. If an actual cost is not returned or cannot be
+confirmed, the entry stays **Neznámá cena** (unknown cost), not zero. The local
+budget survives restarts; resetting it requires confirmation and no active
+reservation. **Gemini Live audio is not covered by this ledger or local budget.**
+Chained mode records its component requests, but has no guaranteed total-session
+price. A session timeout, displayed estimate, or local budget is not a hard
+provider billing cap; manage provider-side limits separately.
 
-## Databases
+Microphone use is coordinated across tabs and modes. Stop the current voice
+activity before starting another. Read-aloud also coordinates with dictation;
+the optional spoken-Stop monitor is the deliberate shared-lock exception.
+Stopping or leaving a voice session releases its microphone and audio output;
+reconnection requires another explicit start.
 
-The development database uses PostgreSQL 17 with pgvector and a persistent named
-volume:
+## Data, limits, and backups
 
-```bash
-docker compose up -d db
-```
+### Markdown and recovery
 
-Data survives container restarts because `/var/lib/postgresql/data` is mounted
-on the `db-data` named volume. The host ports default to 5432 (development) and
-5433 (test). Compose reads `DB_HOST_PORT` and `TEST_DB_HOST_PORT` from a local
-`.env` file, so if those ports are already occupied, create a gitignored `.env`
-with different host ports and update the URLs in `.env.local` accordingly.
+Notes support H1-H3 headings, paragraphs, line breaks, bold/italic, bullet,
+ordered and task lists, safe links, blockquotes, and inline/fenced code. Safe
+links use `http:`, `https:`, `mailto:`, relative paths, or fragments.
 
-The isolated test database runs on port 5433 with its own `db-test-data` volume
-and the `test` Compose profile:
+Unsupported syntax, such as raw HTML, tables, images, H4-H6, reference links,
+footnotes, strikethrough, or unsafe link destinations, puts the entire note in
+**source-only** mode. The original source remains editable and exportable as
+Markdown; visual and DOCX conversion are refused rather than silently losing
+content or exposing unsafe links.
 
-```bash
-docker compose --profile test up -d db-test
-```
+Default limits are 160 graphemes for a title and 20,000 for a note. A grapheme
+is a user-perceived character, not a byte. Supported Markdown is counted as
+visible text; source-only notes are counted from their raw source.
+AI actions have smaller source bounds: summary and tag suggestions use up to
+8,000 graphemes, task extraction 4,000, and cleanup one plain paragraph up to
+2,000. Select a smaller passage when needed; input is not silently truncated to
+fit. The complete adjustable limits are in `.env.example`.
 
-### Migrations and test database
+Markdown export preserves the saved source; DOCX maps the supported structure
+to a Word document. Save before exporting because exports use the persisted
+version. Deleting a note moves it to **Koš** (`/notes/trash`); normal app routes
+do not hard-delete it. Undo and restoration create new history entries rather
+than erasing the audit trail. Draft autosaves are not individual named revisions.
 
-Committed SQL migrations live in `drizzle/`; `drizzle/0000_initial.sql` creates
-the `vector`, `unaccent`, and `pg_trgm` extensions before the vector column and
-then creates `notes`, `note_revisions`, `note_tags`, `note_chunks`, and
-`ai_usage` with their checks, cascades, and indexes.
+### Database and backup
 
-Create the gitignored `.env.test.local` with both targets for manual test CLI
-use:
+Development data persists in Docker's `db-data` volume across container
+restarts. The test service uses its own `db-test-data` volume. Removing volumes
+(for example with `docker compose down -v`) removes their data.
 
-```bash
-DATABASE_URL=postgresql://ai_voice_notes:ai_voice_notes@127.0.0.1:5432/ai_voice_notes
-TEST_DATABASE_URL=postgresql://ai_voice_notes:ai_voice_notes@127.0.0.1:5433/ai_voice_notes_test
-```
-
-Adjust the ports when using the local host-port override. The test-database
-guard requires both URLs, distinct targets, a database name ending in `_test`,
-and a loopback test host before any destructive SQL.
-
-```bash
-pnpm db:migrate:test   # apply committed migrations to TEST_DATABASE_URL
-pnpm test:db           # migrate the isolated test DB, then run tests/db
-```
-
-`pnpm test` runs unit and API tests; when both database URLs are present, the
-isolated database suite also runs. Test files run serially so the two DB suites
-cannot truncate each other. `pnpm db:migrate` applies committed migrations
-to the development database; run it only after explicit authorization and, if
-the development database contains data, after taking a backup. Migrations do not
-seed data, and test commands never migrate the development database.
-
-### Search-index migration and backups
-
-Migration `drizzle/0004_search.sql` adds `notes.search_vector`, backfills it
-from the current title, visible body and tags, and creates the GIN index. It
-does not rewrite Markdown. Before applying it to a database with valuable notes,
-take and verify a backup:
+Committed migrations are in `drizzle/`. Apply them explicitly with
+`pnpm db:migrate`, before starting an updated app or seeding. For a database
+containing valuable notes, take and verify a backup first. Use a new filename
+for each backup so you do not overwrite your last verified copy:
 
 ```bash
 mkdir -p backups
-docker compose exec -T db pg_dump -U ai_voice_notes -d ai_voice_notes -Fc > backups/ai-voice-notes-before-search.dump
-pg_restore --list backups/ai-voice-notes-before-search.dump >/dev/null
+docker compose exec -T db pg_dump -U ai_voice_notes -d ai_voice_notes -Fc > backups/ai-voice-notes.dump
+docker compose exec -T db pg_restore --list < backups/ai-voice-notes.dump >/dev/null
 ```
 
-Restore is deliberately manual into a disposable/empty target; there is no
-automatic rollback:
+The dump contains database state, including revisions and proposal/usage
+records, but not browser drafts, recordings, or cached MP3 files. Keep it
+private. Listing checks that the archive is readable; a restore into a
+disposable database is the stronger recovery test. Restore only into a
+disposable or empty target after checking the destination. For the local
+development database, the following command
+**replaces database objects and data**; it is not an automatic rollback:
 
 ```bash
-docker compose exec -T db pg_restore -U ai_voice_notes -d ai_voice_notes --clean --if-exists < backups/ai-voice-notes-before-search.dump
+docker compose exec -T db pg_restore -U ai_voice_notes -d ai_voice_notes --clean --if-exists < backups/ai-voice-notes.dump
 ```
 
-Run `pnpm db:migrate` after the backup and before starting the updated app or
-`pnpm db:seed`. `db:seed` checks the applied migration version and refuses with
-a Czech migrate-first message before deleting any `demo-v1:*` rows. The same
-backup covers meeting save mappings and usage rows. The test DB is separate and
-is never restored into production automatically.
+Stop the app before restoring. Clear audio through **Nastavení -> Vymazat
+cache**, or remove the disposable `.data/tts` cache manually. Database backups
+do not need this cache. Do not treat `.data/uploads` as an audio archive.
 
-To clear the local TTS cache, use **Nastavení → Vymazat cache** (it also purges
-targeted note entries through the existing cache contract). The cache is
-gitignored `.data/tts`; deleting it manually is safe. Meeting uploads live in
-`.data/uploads` and are removed after each request; no audio is part of a note
-backup.
+## Development and testing
 
-## Scripts
-
-| Command | Description |
+| Command | Purpose |
 |---|---|
-| `pnpm dev` | Start Next.js in development on the validated loopback origin |
-| `pnpm build` | Production build |
-| `pnpm start` | Start the production build on the validated loopback origin |
-| `pnpm lint` | ESLint with Next.js core-web-vitals and TypeScript rules |
-| `pnpm typecheck` | Strict TypeScript check without emitting files |
-| `pnpm test` | Vitest unit/API tests, including the `tests/security/privacy.test.ts` audit; the DB suite also runs when both URLs are present |
-| `pnpm test:db` | Migrate the isolated `_test` database and run `tests/db` |
-| `pnpm test:e2e` | Build and run the offline Playwright Stage 1-5, meeting, search and recovery flows against the isolated test DB, including the mocked Gemini Live voice-agent approval flow |
-| `pnpm eval:search` | Optional 20-query search evaluation; paid modes require a fresh cost approval and ready fixture vectors |
-| `pnpm db:seed` | Explicitly replace the `demo-v1:*` demo notes in the dev database |
-| `pnpm db:migrate:test` | Apply committed migrations to the guarded test database |
-| `pnpm db:migrate` | Apply committed migrations to the development database (explicit authorization required) |
+| `pnpm dev` | Development server on the configured loopback origin |
+| `pnpm build` / `pnpm start` | Build / run locally in production mode |
+| `pnpm lint` / `pnpm typecheck` | ESLint / strict TypeScript checks |
+| `pnpm test` | Vitest unit, component, API, and security tests; database suites also run when both database URLs are available |
+| `pnpm test:db` | Migrate and test only the isolated test database |
+| `pnpm test:e2e` | Build, then run Playwright against an isolated test server and mocked providers |
+| `pnpm db:migrate` | Explicitly migrate the development database |
+| `pnpm db:migrate:test` | Migrate the guarded test database |
+| `pnpm db:seed` | Explicitly replace the 20 development demo notes |
+| `pnpm eval:search` | Optional fixture-based retrieval evaluation; paid modes need prepared vectors and explicit cost approval |
 
-## Full-text search
+### Isolated test setup
 
-`/search` provides read-only Czech search over active notes. Full-text mode is
-offline; semantic/hybrid modes require an explicit paid approval and ready
-embeddings. `GET /api/search?q=&mode=fulltext|semantic|hybrid&page=` trims
-queries to 200 graphemes, and an empty query returns an explanatory empty state
-rather than all notes. Stale, deleted or old-version results are filtered. Unquoted terms use `plainto_tsquery('simple', unaccent(...))`; a query
-wrapped in `"..."`, `„...“`, or `“...”` uses
-`phraseto_tsquery('simple', unaccent(...))` for exact word order. Results are
-ranked by `ts_rank` with `id ASC` as a stable tie-break, ten per page, and
-exclude soft-deleted notes. The API accepts `mode=fulltext` or an absent/empty
-`mode`. Snippets are built in JavaScript: both the document and query are
-case/diacritic folded (including the compatibility transliterations used by the
-database `unaccent`), the original matched Czech substring is marked with
-`[[[`/`]]]`, and `SearchResults` renders it as escaped React text plus a
-`<mark>` element, never raw HTML.
+Start the separate test service:
 
-## Markdown subset
+```bash
+docker compose --profile test up -d --wait db-test
+```
 
-Canonical note content is Markdown. The codec supports H1-H3, paragraphs, soft
-and hard breaks, bold/italic, bullet/ordered/task lists, safe links,
-blockquotes, and inline/fenced code. Safe link protocols are `http:`, `https:`,
-and `mailto:`; relative paths and fragments are also allowed. Unsupported
-constructs (raw HTML, tables, images, H4-H6, definitions, link references,
-footnotes, strikethrough, thematic breaks) and unsafe destinations
-(`javascript:`, `data:`, `file:`, protocol-relative URLs) make the whole note
-source-only: the raw source is preserved verbatim, no clickable link is exposed,
-and visual/DOCX conversion is refused. Limits are 160 graphemes for the title
-and 20,000 visible graphemes for the content, counted with
-`Intl.Segmenter("cs", { granularity: "grapheme" })`.
-`content_plain` is a flat, block-separated projection for search and limits:
-Markdown markers, list bullets/numbers, task checkbox state, and nesting
-indentation are omitted; the parsed AST retains them for the editor and exports.
-`NOTE_MAX_CHARACTERS` may lower the configured content limit but cannot exceed
-20,000.
+Create `.env.test.local` with these two connection settings, adjusting ports
+if necessary. Do not copy real provider credentials into it.
 
-## Notes API
+```dotenv
+DATABASE_URL=postgresql://ai_voice_notes:ai_voice_notes@127.0.0.1:5432/ai_voice_notes
+TEST_DATABASE_URL=postgresql://ai_voice_notes:ai_voice_notes@127.0.0.1:5433/ai_voice_notes_test
+```
 
-The versioned CRUD API uses the P04 Host/Origin and bounded-body guard:
+Test commands require distinct targets and database names, a loopback test
+host, an explicit test port, and a test database name ending in `_test` before
+destructive SQL. The browser harness migrates and clears **only the test
+database**, uses ports 3100 and 4010, and supplies its own dummy keys and local
+provider doubles. Do not store valuable data in the test database.
 
-| Route | Behavior |
-|---|---|
-| `GET /api/notes?page=N` | Ten active notes per page, ordered by creation time then ID; deleted notes excluded |
-| `POST /api/notes` | Create from `{title, contentMd}`; returns 201 |
-| `GET /api/notes/:id` | Read one active note; deleted or missing notes return 404 |
-| `PATCH /api/notes/:id` | Update `{title, contentMd, expectedVersion}`; optional `draft: true` skips the named revision; stale versions return 409 with `latestVersion` |
-| `PATCH /api/notes/:id/title` | Voice-title update `{title, expectedVersion}`; changes only the title and creates a server-derived `voice` revision |
-| `DELETE /api/notes/:id` | Soft-delete `{expectedVersion}`; no hard-delete route exists |
-| `POST /api/notes/:id/restore` | Restore from Trash with `{expectedVersion}` |
-
-Server code derives `content_plain` and grapheme counts, creates initial,
-manual, voice, and restore revision snapshots, and never accepts
-client-supplied derived fields, seed keys, timestamps, or revision reasons.
-Mutation bodies use the 1 MiB note ceiling.
-
-## Editor and autosave
-
-The note detail page edits canonical Markdown in a source textarea and in a
-Markdown-first visual editor. Both modes share one content state, so the
-grapheme counter, the limit check, and the save flow behave identically.
-
-Typing is autosaved after ~800 ms of inactivity as a versioned draft PATCH
-(`draft: true`). Draft saves update `notes.version` but create no named
-revision, so the history does not grow per keystroke; the explicit **Uložit**
-button creates one named `manual` revision (a checkpoint). Writes for one note
-are serialized: at most one request is in flight, and the explicit save takes
-over a pending debounced draft instead of racing it. Content that exceeds the
-limit or cannot be serialized is never sent.
-
-An unsaved draft is kept per browser tab in `sessionStorage` under
-`note-draft:{noteId}:{baseVersion}` and offered for recovery after a reload.
-The stored draft is deleted only after the server acknowledges a save. Leaving
-the page with unsaved changes warns first.
-
-A stale write (HTTP 409) pauses autosaving and shows the local text next to the
-current server text with copy and reload actions. Nothing is merged or
-overwritten automatically: the user compares, copies, or reloads and decides.
-
-## Seeding demo notes
-
-`pnpm db:seed` is an optional, explicit CLI for the development database. It
-never runs during `dev`, startup, build, install, or migrations. The command
-warns before it hard-deletes only notes whose `seed_key` starts with `demo-v1:`,
-inserts the 20 current Czech fixtures and their initial revisions in one
-transaction under a PostgreSQL advisory lock, and leaves user notes and other
-seed namespaces untouched. Dates are randomized per invocation; D01 is always
-dated within the current UTC day and the others fall within the last 30 days.
-An edited or soft-deleted demo note is replaced on the next run.
-
-Test mode uses only the guarded `_test` database; it never falls back to the
-development target. `pnpm test:db` runs the seed tests, including repeatability,
-revision timestamps, rollback on injected failure, and a check that missing or
-invalid `TEST_DATABASE_URL` does not mutate the development database. No seed of
-the development database, no audio, and no AI call is part of the test suite.
-
-## End-to-end tests
-
-Install the Playwright Chromium browser once:
+Install Playwright's browser once, then run the checks:
 
 ```bash
 pnpm exec playwright install chromium
-```
-
-Then run:
-
-```bash
-pnpm test:e2e
-```
-
-The command builds Next.js, starts `scripts/test-server.ts` on
-`127.0.0.1:3100`, asserts the guarded `_test` targets, migrates and truncates
-only the isolated test database, and runs the offline Stage 1-5 flows:
-typed notes/editor/autosave/Trash, mocked dictation and supporting AI, summary/
-meeting proposals, full-text search, exports, a simulated provider outage and
-the mocked Gemini Live voice-agent flow in `e2e/voice-agent-mock.spec.ts`
-(connect -> select note -> preview edit -> reject -> approve -> Undo -> Stop).
-That flow uses the loopback Gemini token mock and a Playwright WebSocket double
-for the constrained Gemini Live endpoint; it proves the note stays unchanged
-until the explicit `Potvrdit` click, exactly one `ai` revision is written, and
-Undo restores the previous content. The privacy and Stage 5 boundary audit is
-`tests/security/privacy.test.ts` plus
-`tests/security/voice-agent-boundary.test.ts`, which run under `pnpm test`, not
-under Playwright. Browser SDK/WebSocket doubles and loopback mocks replace real
-providers; no seed, real key or public egress is used.
-
-## Five-stage release gate (P54)
-
-A reproducible release check does not need a provider account. Typed notes,
-Markdown/DOCX export, version history, full-text search, mocked dictation and
-all mocked AI/meeting/voice-agent flows work with **no keys**. The voice agent
-itself is an explicit `/voice-agent` mode and is never part of note editing or
-startup; it is disabled with a Czech message when `GEMINI_API_KEY` is empty.
-There is no OpenAI key or OpenAI transport in the current application.
-
-Fresh clone:
-
-```bash
-git clone <repository-url> ai-voice-notes
-cd ai-voice-notes
-nvm install
-nvm use
-corepack enable
-pnpm install
-cp .env.example .env.local
-docker compose up -d db
-pnpm db:migrate
-pnpm dev
-```
-
-For the full offline release gate, use the isolated test database and no real
-credentials:
-
-```bash
-docker compose --profile test up -d db-test
-cat > .env.test.local <<'EOF'
-DATABASE_URL=postgresql://ai_voice_notes:ai_voice_notes@127.0.0.1:5432/ai_voice_notes
-TEST_DATABASE_URL=postgresql://ai_voice_notes:ai_voice_notes@127.0.0.1:5433/ai_voice_notes_test
-EOF
 pnpm lint
 pnpm typecheck
 pnpm test
@@ -466,37 +529,54 @@ pnpm test:e2e
 pnpm build
 ```
 
-Adjust the host ports in `.env.test.local` when a local `.env` overrides the
-compose ports; both targets must be distinct and the test name must end in
-`_test`. The file is gitignored and is read only by test-scoped commands.
+Meeting browser tests need host FFmpeg too. `AI_TEST_MODE=1` is a harness safety
+switch, not a way to enable free AI in the normal app: it requires `_test`
+database targets, explicit-port loopback ElevenLabs/Gemini mocks, and exact
+dummy keys (`test-only-elevenlabs`, `test-only-openrouter`,
+`test-only-gemini`) for configured credentials. Real keys are rejected.
 
-`pnpm db:seed` is an optional CLI for demo notes and is not part of the gate.
-Meetings additionally need host FFmpeg (`ffprobe` and `ffmpeg` on `PATH`); the
-voice-agent browser path needs a Chromium-family browser with Web Locks and
-microphone permission. Playwright installs its own Chromium once with
-`pnpm exec playwright install chromium`.
+Tests exercise dictation, reviewed AI changes, meeting save, search, exports,
+conflict recovery, and the voice-agent selection/preview/reject/confirm/Undo
+flow without public provider calls. They validate local behavior, not real
+microphone accuracy, provider availability, audible quality, or live latency.
 
-Mock evidence is not live evidence. `pnpm test:e2e` exercises the exact
-Gemini Live message shapes, the real local tool/API routes and the real
-P23/P24/P25 database transactions, but it never contacts Google, ElevenLabs or
-OpenRouter. Real Czech speech, Gemini tool-call continuation, barge-in and
-audible quality remain `live unverified` until separately authorized and
-observed; see `docs/PROVIDER_SMOKE_TESTS.md` and `docs/QUALITY_REPORT.md`.
+### Source map and further reading
 
-## HTTP boundary
+| Path | Contents |
+|---|---|
+| `src/app/` | Pages and guarded API routes |
+| `src/components/` | Note editor, AI review panels, search, meeting, playback, and voice UI |
+| `src/lib/` | Note operations, provider adapters, search, storage, and safety boundaries |
+| `scripts/` | Startup, migrations, seed, test harness, and search evaluation |
+| `drizzle/` | SQL migrations |
+| `tests/` / `e2e/` | Vitest and Playwright checks |
 
-API mutations are guarded by the configured loopback `Host` and an exact
-`Origin`, require `application/json`, and are read with per-route streaming byte
-ceilings: 1 MiB for note edits, 16 KiB for token/tool routes, and 3 MiB for
-reviewed meeting saves. Raw meeting audio uses a separate 25 MiB stream cap.
-A body over its ceiling receives an explicit Czech 413 without truncation.
-Costly routes can attach a Zod schema and an in-memory rate limiter; rejected
-requests never call the route handler. GET/HEAD routes never mutate or bill.
+The read-only keyword API is `GET /api/search?q=...&mode=fulltext&page=1`;
+semantic and hybrid searches use explicitly approved `POST /api/search`
+requests, not paid GET requests. Note writes use an expected version and return
+409 on conflict. Mutating routes validate loopback Host/Origin, content type,
+and bounded request bodies; JSON is used except for raw meeting-audio uploads.
+
+- [Implementation plan](AI_VOICE_NOTES_IMPLEMENTATION_PLAN.md): the detailed
+  planning and manual-approval approach behind the project.
+- [Provider checks](docs/PROVIDER_SMOKE_TESTS.md): account/model compatibility
+  procedures for deliberate live checks, which can incur charges.
 
 ## Troubleshooting
 
-- **Health returns 503:** run `docker compose ps` and `docker compose up -d db`,
-  then check that `DATABASE_URL` in `.env.local` matches the compose service.
-- **Node version error:** run `nvm use` in the repository root.
-- **Port already in use:** change `APP_ORIGIN` to another loopback port; the
-  `dev` and `start` scripts use its host and port.
+| Symptom | What to check |
+|---|---|
+| Database error or health 503 | Run `docker compose ps` and `docker compose up -d db`; check `DATABASE_URL`, port mappings, and whether the database is ready |
+| Missing tables or migration warning | Back up existing data, then explicitly run `pnpm db:migrate`; startup does not create the schema |
+| Node version error | Run `nvm use` in the repository root |
+| App port already in use | Change `APP_ORIGIN` to another loopback port; `dev` and `start` use that address |
+| Database ports already in use | Set host ports in Compose's `.env` and update both application/test connection files |
+| Another server is using the database | Stop the other instance; the app deliberately permits only one running server per database |
+| AI feature disabled | Check the required server-side key, exact pinned model, account access, budget, and the UI's explanation; restart after changing `.env.local` |
+| Unknown cost or budget exhausted | Review **Rozpočet** and provider billing; restarting does not clear reservations or make uncertain charges free |
+| Microphone unavailable | Use a supported browser, allow microphone access, and stop competing activity or another tab before retrying |
+| Meeting inspection fails | Check `ffprobe -version`, `ffmpeg -version`, the server's `PATH`, real file format, duration, and size |
+| Semantic search has no usable index | Prepare and approve an index batch; repeat for edited notes, then approve the query |
+| Proposal expired or became stale | Save/reload the current note, then prepare a fresh preview; do not retry an old confirmation |
+| Visual editor or DOCX unavailable | The Markdown contains unsupported syntax; keep source mode/Markdown export or simplify it explicitly |
+| Browser tests cannot start | Check the `_test` database settings, FFmpeg, installed Chromium, and whether ports 3100/4010 are free |
